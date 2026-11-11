@@ -7,7 +7,6 @@ const { setupEnv, cleanup, initDb } = helper;
 
 const env = setupEnv('admin-ui');
 initDb();
-const app = require('../src/app');
 let server: http.Server;
 let baseUrl = '';
 let cookie = '';
@@ -48,24 +47,27 @@ async function login() {
 }
 
 test.before(async () => {
+  const app = (await import('../src/app.js')).default;
   server = http.createServer(app);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   baseUrl = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
   await login();
-  const workerRepo = require('../src/repositories/workerRepository');
-  const workerBroker = require('../src/services/workerConnectionBroker');
-  adminWorker = await workerRepo.createWorker({
+  const workerRepo = (await import('../src/repositories/workerRepository.js')).default;
+  const workerBroker = (await import('../src/services/workerConnectionBroker.js')).default;
+  const enrolledWorker = await workerRepo.createWorker({
     name: 'UI-Admin-Worker',
     publicKey: 'test-public-key',
     capabilities: ['tmux.inspect', 'tmux.send', 'tmux.read', 'tmux.interrupt'],
   });
+  assert.ok(enrolledWorker);
+  adminWorker = enrolledWorker;
   originalWorkerIsOnline = workerBroker.isOnline.bind(workerBroker);
   workerBroker.isOnline = (workerId: string) =>
     workerId === adminWorker.id || (originalWorkerIsOnline?.(workerId) ?? false);
 });
 
 test.after(async () => {
-  const workerBroker = require('../src/services/workerConnectionBroker');
+  const workerBroker = (await import('../src/services/workerConnectionBroker.js')).default;
   if (originalWorkerIsOnline) workerBroker.isOnline = originalWorkerIsOnline;
   if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
   cleanup(env.dir);
@@ -111,19 +113,18 @@ void test('OAuth client can be created from admin UI and secret is shown once', 
   assert.match(html, /br_sec_/);
   const secondGet = await fetch(`${baseUrl}/admin/clients`, { headers: { cookie } });
   assert.doesNotMatch(await secondGet.text(), /Client secret created/);
-  const clients = await require('../src/repositories/mcpOAuthRepository').listClients();
-  const matching = clients.filter(
-    (client: { display_name: string }) => client.display_name === 'UI Client',
-  );
+  const clients = await (
+    await import('../src/repositories/mcpOAuthRepository.js')
+  ).default.listClients();
+  const matching = clients.filter((client) => client?.display_name === 'UI Client');
   assert.equal(matching.length, 1);
+  assert.ok(matching[0]);
   assert.equal(matching[0].status, 'active');
 });
 
 void test('Audit Log traces MCP activity by client, tool, result, and request id', async () => {
-  const repo = require('../src/repositories/mcpOAuthRepository');
-  const client = (await repo.listClients()).find(
-    (item: { display_name: string }) => item.display_name === 'UI Client',
-  );
+  const repo = (await import('../src/repositories/mcpOAuthRepository.js')).default;
+  const client = (await repo.listClients()).find((item) => item?.display_name === 'UI Client');
   assert.ok(client);
 
   await repo.recordAudit({
@@ -185,10 +186,8 @@ void test('Audit Log traces MCP activity by client, tool, result, and request id
 });
 
 void test('Audit Log uses compact numbered pagination with configurable page size', async () => {
-  const repo = require('../src/repositories/mcpOAuthRepository');
-  const client = (await repo.listClients()).find(
-    (item: { display_name: string }) => item.display_name === 'UI Client',
-  );
+  const repo = (await import('../src/repositories/mcpOAuthRepository.js')).default;
+  const client = (await repo.listClients()).find((item) => item?.display_name === 'UI Client');
   assert.ok(client);
   for (let index = 0; index < 25; index += 1) {
     await repo.recordAudit({
@@ -238,13 +237,13 @@ void test('Admin SSH Profile is created through an active global Worker without 
   });
   assert.equal(response.status, 302);
   assert.equal(response.headers.get('location'), '/admin/terminals');
-  const workerRepo = require('../src/repositories/workerRepository');
+  const workerRepo = (await import('../src/repositories/workerRepository.js')).default;
   const profile = (await workerRepo.listAdminProfiles()).find(
-    (item: { name: string }) => item.name === 'UI-Terminal',
+    (item) => item?.name === 'UI-Terminal',
   );
   assert.ok(profile);
   assert.equal(profile.worker_id, adminWorker.id);
-  assert.equal(profile.tmux_session, '');
+  assert.equal('tmux_session' in profile ? profile.tmux_session : undefined, '');
 
   const page = await fetch(`${baseUrl}/admin/terminals`, { headers: { cookie } });
   const html = await page.text();
@@ -254,9 +253,9 @@ void test('Admin SSH Profile is created through an active global Worker without 
 });
 
 void test('Admin SSH Profile edit keeps Worker-backed metadata only', async () => {
-  const workerRepo = require('../src/repositories/workerRepository');
+  const workerRepo = (await import('../src/repositories/workerRepository.js')).default;
   const profile = (await workerRepo.listAdminProfiles()).find(
-    (item: { name: string }) => item.name === 'UI-Terminal',
+    (item) => item?.name === 'UI-Terminal',
   );
   assert.ok(profile);
   const response = await fetch(`${baseUrl}/admin/terminals/${profile.id}/update`, {
@@ -273,9 +272,10 @@ void test('Admin SSH Profile edit keeps Worker-backed metadata only', async () =
   });
   assert.equal(response.status, 302);
   const updated = await workerRepo.findAdminProfileById(profile.id);
+  assert.ok(updated);
   assert.equal(updated.name, 'UI-Terminal-Edited');
   assert.equal(updated.worker_id, adminWorker.id);
-  assert.equal(updated.tmux_session, '');
+  assert.equal('tmux_session' in updated ? updated.tmux_session : undefined, '');
   assert.equal(updated.enabled, true);
   assert.equal('host' in updated, false);
   assert.equal('username' in updated, false);
@@ -283,18 +283,23 @@ void test('Admin SSH Profile edit keeps Worker-backed metadata only', async () =
 });
 
 void test('Admin SSH Profile tests direct Worker shell and exposes Attach Shell', async () => {
-  const workerRepo = require('../src/repositories/workerRepository');
+  const workerRepo = (await import('../src/repositories/workerRepository.js')).default;
   const profile = (await workerRepo.listAdminProfiles()).find(
-    (item: { name: string }) => item.name === 'UI-Terminal-Edited',
+    (item) => item?.name === 'UI-Terminal-Edited',
   );
   assert.ok(profile);
 
-  const workerExecution = require('../src/services/workerExecutionService');
-  const originalTest = workerExecution.testConnection;
+  const workerExecution = (await import('../src/services/workerExecutionService.js')).default;
+  const originalTest = workerExecution.testConnection.bind(workerExecution);
   workerExecution.testConnection = async (workerProfile: { id: string; worker_id: string }) => {
     assert.equal(workerProfile.id, profile.id);
     assert.equal(workerProfile.worker_id, adminWorker.id);
-    return { pane_count: 1, target_pane: 'ui-terminal-edit:0.0', pane_current_command: 'bash' };
+    return {
+      code: 'TEST_OK',
+      pane_count: 1,
+      target_pane: 'ui-terminal-edit:0.0',
+      pane_current_command: 'bash',
+    };
   };
 
   try {
@@ -388,14 +393,15 @@ void test('Telegram config UI stores operational settings in DB and encrypts tok
   });
   assert.equal(response.status, 302);
   assert.equal(response.headers.get('location'), '/admin/settings/telegram');
-  const settings = require('../src/repositories/settingsRepository');
+  const settings = (await import('../src/repositories/settingsRepository.js')).default;
   const encrypted = await settings.get('telegram.bot_token');
+  assert.ok(encrypted);
   assert.ok(encrypted.startsWith('enc:v3:'));
   assert.notEqual(encrypted, '123456:ABCdef_TestToken');
   assert.equal(await settings.get('telegram.enabled'), 'true');
   assert.equal(await settings.get('telegram.chat_id'), '987654321');
   assert.equal(
-    require('../src/services/telegramSecretService').decrypt(encrypted),
+    (await import('../src/services/telegramSecretService.js')).default.decrypt(encrypted),
     '123456:ABCdef_TestToken',
   );
 
@@ -426,7 +432,7 @@ void test('legacy Telegram v2 token is migrated to DB-backed v3 envelope without
     ciphertext.toString('base64url'),
   ].join(':');
 
-  const settings = require('../src/repositories/settingsRepository');
+  const settings = (await import('../src/repositories/settingsRepository.js')).default;
   await settings.delete('telegram.bot_token');
   await settings.set('telegram_mcp_bot_token', legacyEnvelope);
   await settings.set('telegram_mcp_chat_id', '1122334455');
@@ -445,9 +451,10 @@ void test('legacy Telegram v2 token is migrated to DB-backed v3 envelope without
   assert.equal(response.status, 302);
 
   const migrated = await settings.get('telegram.bot_token');
+  assert.ok(migrated);
   assert.ok(migrated.startsWith('enc:v3:'));
   assert.equal(
-    require('../src/services/telegramSecretService').decrypt(migrated),
+    (await import('../src/services/telegramSecretService.js')).default.decrypt(migrated),
     '654321:LegacyTelegramToken',
   );
 });

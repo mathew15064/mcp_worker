@@ -190,11 +190,9 @@
     },
     "tests/admin-config-ui.test.ts": {
       "@typescript-eslint/consistent-type-imports": 1,
-      "@typescript-eslint/no-require-imports": 15,
-      "@typescript-eslint/no-unsafe-argument": 6,
-      "@typescript-eslint/no-unsafe-assignment": 35,
-      "@typescript-eslint/no-unsafe-call": 29,
-      "@typescript-eslint/no-unsafe-member-access": 65,
+      "@typescript-eslint/no-unsafe-argument": 4,
+      "@typescript-eslint/no-unsafe-assignment": 3,
+      "@typescript-eslint/no-unsafe-member-access": 8,
       "@typescript-eslint/require-await": 1
     },
     "tests/audit-payload.test.ts": {
