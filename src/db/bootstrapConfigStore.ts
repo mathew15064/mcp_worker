@@ -1,6 +1,9 @@
-const fs = require('fs');
-const path = require('path');
-const { encryptString, decryptString } = require('../services/applicationKeyService');
+import fs from 'node:fs';
+import path from 'node:path';
+import { encryptString, decryptString } from '../services/applicationKeyService';
+interface DatabaseInput { host?: unknown; port?: unknown; database?: unknown; username?: unknown; password?: unknown; ssl?: unknown }
+interface BootstrapDocument {version: number; database: DatabaseInput & {password_envelope: string}; saved_at?: string}
+function errorCode(error: unknown) { return typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined; }
 
 const AAD = 'bot_report:mysql-bootstrap:v1';
 
@@ -8,13 +11,9 @@ function configPath() {
   return path.resolve(process.cwd(), process.env.BOOTSTRAP_CONFIG_PATH || 'data/bootstrap-config.json');
 }
 
-function validationError(message) {
-  const error = new Error(message);
-  error.code = 'INVALID_DATABASE_CONFIG';
-  return error;
-}
+function validationError(message: string) { return Object.assign(new Error(message), {code: 'INVALID_DATABASE_CONFIG'}); }
 
-function normalizeDatabaseConfig(input, { requirePassword = true } = {}) {
+function normalizeDatabaseConfig(input: DatabaseInput, { requirePassword = true } = {}) {
   if (!input || typeof input !== 'object') throw validationError('Database configuration is required.');
   const host = String(input.host || '').trim();
   const port = Number(input.port || 3306);
@@ -43,14 +42,13 @@ class BootstrapConfigStore {
   load() {
     if (!this.exists()) return null;
     try {
-      const parsed = JSON.parse(fs.readFileSync(this.path, 'utf8'));
+      const parsed: BootstrapDocument = JSON.parse(fs.readFileSync(this.path, 'utf8'));
       if (parsed?.version !== 1 || !parsed.database) throw validationError('Bootstrap database configuration is invalid.');
       const password = decryptString(parsed.database.password_envelope, AAD, 'enc:v1');
       return normalizeDatabaseConfig({ ...parsed.database, password }, { requirePassword: true });
     } catch (error) {
-      if (error?.code === 'INVALID_DATABASE_CONFIG' || error?.code === 'APPLICATION_KEY_INVALID') throw error;
-      const wrapped = new Error('Bootstrap database configuration could not be loaded.');
-      wrapped.code = 'BOOTSTRAP_CONFIG_INVALID';
+      if (errorCode(error) === 'INVALID_DATABASE_CONFIG' || errorCode(error) === 'APPLICATION_KEY_INVALID') throw error;
+      const wrapped = Object.assign(new Error('Bootstrap database configuration could not be loaded.'), {code: 'BOOTSTRAP_CONFIG_INVALID'});
       throw wrapped;
     }
   }
@@ -58,7 +56,7 @@ class BootstrapConfigStore {
   readPublic() {
     if (!this.exists()) return null;
     try {
-      const parsed = JSON.parse(fs.readFileSync(this.path, 'utf8'));
+      const parsed: BootstrapDocument = JSON.parse(fs.readFileSync(this.path, 'utf8'));
       if (parsed?.version !== 1 || !parsed.database) return null;
       return {
         host: String(parsed.database.host || ''),
@@ -72,7 +70,7 @@ class BootstrapConfigStore {
     } catch (_) { return null; }
   }
 
-  save(input) {
+  save(input: DatabaseInput) {
     const value = normalizeDatabaseConfig(input, { requirePassword: true });
     const target = this.path;
     const directory = path.dirname(target);
@@ -98,10 +96,9 @@ class BootstrapConfigStore {
   }
 
   remove() {
-    try { fs.unlinkSync(this.path); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
+    try { fs.unlinkSync(this.path); } catch (error) { if (errorCode(error) !== 'ENOENT') throw error; }
   }
 }
 
-module.exports = new BootstrapConfigStore();
-module.exports.BootstrapConfigStore = BootstrapConfigStore;
-module.exports.normalizeDatabaseConfig = normalizeDatabaseConfig;
+const instance = Object.assign(new BootstrapConfigStore(), {BootstrapConfigStore, normalizeDatabaseConfig});
+export = instance;

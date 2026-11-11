@@ -1,6 +1,6 @@
 import type { DatabaseAdapter } from '../db/contracts';
 import type Database from 'better-sqlite3';
-const databaseManager: { requireAdapter(): DatabaseAdapter } = require('../db/databaseManager');
+import databaseManager = require('../db/databaseManager');
 
 import { SqliteAdapter } from '../db/adapters/sqliteAdapter';
 

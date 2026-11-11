@@ -1,9 +1,10 @@
-const bcrypt = require('bcryptjs');
-const crypto = require('crypto');
-const { getDb } = require('./connection');
-const config = require('../config/env');
+import bcrypt from 'bcryptjs';
+import crypto from 'node:crypto';
+import { getDb } from './connection';
+import type Database from 'better-sqlite3';
+import config = require('../config/env');
 
-function seedInitialAdmin(db = null) {
+export function seedInitialAdmin(db: Database.Database | null = null) {
   const database = db || getDb();
   if (database.prepare('SELECT id FROM users LIMIT 1').get()) return;
   const password = config.ADMIN_PASSWORD;
@@ -15,5 +16,3 @@ function seedInitialAdmin(db = null) {
     .run(crypto.randomUUID(), config.ADMIN_USERNAME, bcrypt.hashSync(password, 10), now, now);
   console.log(`[BOOTSTRAP] MCP authorization administrator '${config.ADMIN_USERNAME}' initialized.`);
 }
-
-module.exports = { seedInitialAdmin };

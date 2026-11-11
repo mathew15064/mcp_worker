@@ -1,10 +1,17 @@
-const fs = require('fs');
-const config = require('../config/env');
-const bootstrapConfigStore = require('./bootstrapConfigStore');
-const { getDb } = require('./connection');
-const { SqliteAdapter } = require('./adapters/sqliteAdapter');
-const { MysqlAdapter } = require('./adapters/mysqlAdapter');
-const { MigrationRunner } = require('./migrationRunner');
+import fs from 'node:fs';
+import config = require('../config/env');
+import bootstrapConfigStore = require('./bootstrapConfigStore');
+import { getDb } from './connection';
+import { SqliteAdapter } from './adapters/sqliteAdapter';
+import { MysqlAdapter } from './adapters/mysqlAdapter';
+import type { DatabaseAdapter, SqlRow } from './contracts';
+import type Database from 'better-sqlite3';
+import { MigrationRunner } from './migrationRunner';
+type MysqlInput = Parameters<typeof MysqlAdapter.create>[0];
+type SourceInfo = Awaited<ReturnType<MigrationRunner['inspectSource']>>;
+interface Candidate {adapter: MysqlAdapter; info: SqlRow; source: SourceInfo; duration_ms: number}
+interface Prepared extends Candidate {beforeSource: SourceInfo; migration: Awaited<ReturnType<MigrationRunner['migrate']>>}
+function errorCode(error: unknown) {return typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' ? error.code : null;}
 
 const STATES = Object.freeze({
   UNCONFIGURED: 'UNCONFIGURED',
@@ -13,9 +20,17 @@ const STATES = Object.freeze({
   LEGACY_SQLITE: 'LEGACY_SQLITE', // test-only compatibility adapter
   READY: 'READY',
   DEGRADED: 'DEGRADED'
-});
+} as const);
+type State = typeof STATES[keyof typeof STATES];
 
 class DatabaseManager {
+  state: State;
+  adapter: DatabaseAdapter | null;
+  mysqlInfo: SqlRow | null;
+  sourceInfo: SourceInfo | null;
+  lastError: {code: string; message: string} | null;
+  lastTestAt: string | null;
+  initialized: boolean;
   constructor() {
     this.state = STATES.UNCONFIGURED;
     this.adapter = null;
@@ -33,7 +48,7 @@ class DatabaseManager {
     } catch (_) { return false; }
   }
 
-  async inspectMysql(input) {
+  async inspectMysql(input: MysqlInput) {
     const adapter = MysqlAdapter.create(input);
     try {
       const started = Date.now();
@@ -47,7 +62,7 @@ class DatabaseManager {
     }
   }
 
-  async adoptInspected(candidate) {
+  async adoptInspected(candidate: Candidate) {
     const previous = this.adapter;
     this.mysqlInfo = candidate.info || null;
     this.sourceInfo = candidate.source || null;
@@ -91,7 +106,7 @@ class DatabaseManager {
     return this.status();
   }
 
-  useLegacyForTests(db = null) {
+  useLegacyForTests(db: Database.Database | null = null) {
     this.initialized = true;
     this.adapter = new SqliteAdapter(db || getDb());
     this.state = STATES.LEGACY_SQLITE;
@@ -104,30 +119,28 @@ class DatabaseManager {
   getAdapter() { return this.adapter; }
 
   requireAdapter() {
-    if (!this.adapter || ![STATES.READY, STATES.LEGACY_SQLITE].includes(this.state)) {
-      const messages = {
+    if (!this.adapter || !([STATES.READY, STATES.LEGACY_SQLITE] as State[]).includes(this.state)) {
+      const messages: Partial<Record<State, string>> = {
         [STATES.DEGRADED]: 'MySQL is configured but unavailable.',
         [STATES.CONFIGURED]: 'MySQL connection is saved but the mcp_worker source has not been initialized.',
         [STATES.MIGRATION_REQUIRED]: 'MySQL is not configured.',
         [STATES.UNCONFIGURED]: 'MySQL is not configured.'
       };
-      const error = new Error(messages[this.state] || 'Application database is unavailable.');
-      error.code = this.state === STATES.DEGRADED
+      const code = this.state === STATES.DEGRADED
         ? 'DATABASE_DEGRADED'
         : this.state === STATES.CONFIGURED
           ? 'DATABASE_SOURCE_UNINITIALIZED'
           : 'DATABASE_UNCONFIGURED';
-      error.status = 503;
-      throw error;
+      throw Object.assign(new Error(messages[this.state] || 'Application database is unavailable.'), {code, status: 503});
     }
     return this.adapter;
   }
 
-  isOperational() { return Boolean(this.adapter) && [STATES.READY, STATES.LEGACY_SQLITE].includes(this.state); }
+  isOperational() { return Boolean(this.adapter) && ([STATES.READY, STATES.LEGACY_SQLITE] as State[]).includes(this.state); }
   isMysqlReady() { return this.state === STATES.READY && this.adapter?.kind === 'mysql'; }
-  isSetupOnly() { return [STATES.UNCONFIGURED, STATES.MIGRATION_REQUIRED, STATES.CONFIGURED, STATES.DEGRADED].includes(this.state); }
+  isSetupOnly() { return ([STATES.UNCONFIGURED, STATES.MIGRATION_REQUIRED, STATES.CONFIGURED, STATES.DEGRADED] as State[]).includes(this.state); }
 
-  async testMysql(input) {
+  async testMysql(input: MysqlInput) {
     const adapter = MysqlAdapter.create(input);
     const started = Date.now();
     try {
@@ -145,19 +158,19 @@ class DatabaseManager {
     }
   }
 
-  async saveMysqlConfig(input) {
+  async saveMysqlConfig(input: MysqlInput) {
     bootstrapConfigStore.save(input);
     return this.reconnect();
   }
 
   async prepareSourceInitialization() {
     if (!bootstrapConfigStore.exists()) {
-      const error = new Error('Save the MySQL connection before initializing the source.');
-      error.code = 'DATABASE_UNCONFIGURED';
+      const error = Object.assign(new Error('Save the MySQL connection before initializing the source.'), {code: 'DATABASE_UNCONFIGURED'});
       throw error;
     }
 
     const input = bootstrapConfigStore.load();
+    if (!input) throw Object.assign(new Error('Bootstrap database configuration is missing.'), {code: 'DATABASE_UNCONFIGURED'});
     const adapter = MysqlAdapter.create(input);
     try {
       const started = Date.now();
@@ -168,8 +181,7 @@ class DatabaseManager {
       const migration = await runner.migrate();
       const source = await runner.inspectSource();
       if (!source.initialized) {
-        const error = new Error('mcp_worker source initialization did not complete.');
-        error.code = 'DATABASE_SOURCE_UNINITIALIZED';
+        const error = Object.assign(new Error('mcp_worker source initialization did not complete.'), {code: 'DATABASE_SOURCE_UNINITIALIZED'});
         throw error;
       }
       return { adapter, info, beforeSource, source, migration, duration_ms: Date.now() - started };
@@ -179,7 +191,7 @@ class DatabaseManager {
     }
   }
 
-  async activatePrepared(prepared) {
+  async activatePrepared(prepared: Prepared) {
     if (!prepared?.adapter || !prepared?.source?.initialized) {
       throw new Error('A fully initialized MySQL source is required before activation.');
     }
@@ -208,6 +220,7 @@ class DatabaseManager {
     }
 
     const input = bootstrapConfigStore.load();
+    if (!input) throw Object.assign(new Error('Bootstrap database configuration is missing.'), {code: 'DATABASE_UNCONFIGURED'});
     try {
       const candidate = await this.inspectMysql(input);
       this.initialized = true;
@@ -218,7 +231,7 @@ class DatabaseManager {
       this.mysqlInfo = null;
       this.sourceInfo = null;
       this.state = STATES.DEGRADED;
-      this.lastError = { code: error.code || 'MYSQL_CONNECT_FAILED', message: error.message || 'MySQL connection failed.' };
+      this.lastError = { code: errorCode(error) || 'MYSQL_CONNECT_FAILED', message: error instanceof Error ? error.message || 'MySQL connection failed.' : 'MySQL connection failed.' };
       this.lastTestAt = new Date().toISOString();
       this.initialized = true;
       return this.status();
@@ -262,6 +275,5 @@ class DatabaseManager {
   }
 }
 
-module.exports = new DatabaseManager();
-module.exports.DatabaseManager = DatabaseManager;
-module.exports.STATES = STATES;
+const instance = Object.assign(new DatabaseManager(), {DatabaseManager, STATES});
+export = instance;

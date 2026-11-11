@@ -2,7 +2,7 @@ interface UserInput { id: string; username: string; email?: string | null; displ
 interface UserRow extends UserInput { role: string; status: string; session_version: number; last_login_at: string | null }
 import type { DatabaseAdapter } from '../db/contracts';
 import type Database from 'better-sqlite3';
-const databaseManager: { requireAdapter(): DatabaseAdapter } = require('../db/databaseManager');
+import databaseManager = require('../db/databaseManager');
 
 
 class UserRepository {

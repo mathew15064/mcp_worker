@@ -1,18 +1,19 @@
-const fs = require('fs');
-const path = require('path');
-const { getDb } = require('./connection');
+import fs from 'node:fs';
+import path from 'node:path';
+import { getDb } from './connection';
+import type Database from 'better-sqlite3';
 
-function columns(db, table) {
-  try { return new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name)); }
+function columns(db: Database.Database, table: string) {
+  try { return new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(row => (row as {name: string}).name)); }
   catch (_) { return new Set(); }
 }
 
-function addColumnIfMissing(db, table, name, definition) {
+function addColumnIfMissing(db: Database.Database, table: string, name: string, definition: string) {
   const names = columns(db, table);
   if (names.size && !names.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
 }
 
-function runMigrations(db = null) {
+export function runMigrations(db: Database.Database | null = null) {
   const database = db || getDb();
   database.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   addColumnIfMissing(database, 'users', 'email', 'TEXT');
@@ -44,5 +45,3 @@ function runMigrations(db = null) {
   database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_terminal_profiles_name_nocase ON terminal_profiles(name COLLATE NOCASE)');
   return database;
 }
-
-module.exports = { runMigrations };

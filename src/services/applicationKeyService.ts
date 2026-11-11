@@ -1,12 +1,8 @@
-const crypto = require('crypto');
+import crypto from 'node:crypto';
 
-function keyError(message) {
-  const error = new Error(message);
-  error.code = 'APPLICATION_KEY_INVALID';
-  return error;
-}
+export function keyError(message: string) { return Object.assign(new Error(message), {code: 'APPLICATION_KEY_INVALID'}); }
 
-function readKey() {
+export function readKey() {
   const encoded = process.env.APP_ENCRYPTION_KEY || process.env.TERMINAL_CREDENTIAL_KEY;
   if (!encoded) throw keyError('Application encryption key is not configured.');
   const trimmed = encoded.trim();
@@ -17,7 +13,7 @@ function readKey() {
   return key;
 }
 
-function encryptString(value, aad, version = 'enc:v1') {
+export function encryptString(value: string, aad: string, version = 'enc:v1') {
   if (typeof value !== 'string' || !value.length) throw keyError('Secret value is required.');
   const key = readKey();
   const iv = crypto.randomBytes(12);
@@ -28,7 +24,7 @@ function encryptString(value, aad, version = 'enc:v1') {
   return [version, iv.toString('base64url'), tag.toString('base64url'), ciphertext.toString('base64url')].join(':');
 }
 
-function decryptString(envelope, aad, version = 'enc:v1') {
+export function decryptString(envelope: string, aad: string, version = 'enc:v1') {
   try {
     const key = readKey();
     const prefix = `${version}:`;
@@ -45,9 +41,7 @@ function decryptString(envelope, aad, version = 'enc:v1') {
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
   } catch (error) {
-    if (error?.code === 'APPLICATION_KEY_INVALID') throw error;
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'APPLICATION_KEY_INVALID') throw error;
     throw keyError('Encrypted value could not be decrypted.');
   }
 }
-
-module.exports = { readKey, encryptString, decryptString, keyError };

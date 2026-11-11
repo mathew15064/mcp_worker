@@ -4,7 +4,7 @@ interface ProfileRow { id: string; name: string; worker_id: string; enabled: num
 interface OwnerOptions { ownerUserId?: string | null }
 import crypto from 'node:crypto';
 import type { DatabaseAdapter } from '../db/contracts';
-const databaseManager: { requireAdapter(): DatabaseAdapter } = require('../db/databaseManager');
+import databaseManager = require('../db/databaseManager');
 
 function workerError(code: string, message: string, status = 400) { return Object.assign(new Error(message), {code, status}); }
 
