@@ -1,17 +1,19 @@
-const REQUEST_LIMIT_BYTES = 32 * 1024;
-const RESPONSE_LIMIT_BYTES = 64 * 1024;
+import type { Response } from 'express';
+
+export const REQUEST_LIMIT_BYTES = 32 * 1024;
+export const RESPONSE_LIMIT_BYTES = 64 * 1024;
 
 const SENSITIVE_KEY = /(^|[_-])(authorization|cookie|set[_-]?cookie|password|passwd|secret|token|api[_-]?key|private[_-]?key|client[_-]?secret)([_-]|$)/i;
 const INLINE_SECRET = /\b(password|passwd|token|secret|api[_-]?key|client[_-]?secret)\s*([:=])\s*([^\s,;&]+)/gi;
 const BEARER_SECRET = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi;
 
-function redactString(value) {
+export function redactString(value: unknown) {
   return String(value)
     .replace(BEARER_SECRET, 'Bearer [REDACTED]')
     .replace(INLINE_SECRET, (_, key, separator) => `${key}${separator}[REDACTED]`);
 }
 
-function sanitize(value, depth = 0, seen = new WeakSet()) {
+export function sanitize(value: unknown, depth = 0, seen = new WeakSet<object>()): unknown {
   if (value === null || value === undefined) return value ?? null;
   if (depth > 14) return '[MAX_DEPTH]';
   if (typeof value === 'string') return redactString(value);
@@ -23,7 +25,7 @@ function sanitize(value, depth = 0, seen = new WeakSet()) {
   if (seen.has(value)) return '[CIRCULAR]';
 
   seen.add(value);
-  const output = {};
+  const output: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
     output[key] = SENSITIVE_KEY.test(key) ? '[REDACTED]' : sanitize(item, depth + 1, seen);
   }
@@ -31,16 +33,16 @@ function sanitize(value, depth = 0, seen = new WeakSet()) {
   return output;
 }
 
-function truncateUtf8(value, limitBytes) {
+function truncateUtf8(value: string, limitBytes: number) {
   const buffer = Buffer.from(String(value), 'utf8');
   if (buffer.length <= limitBytes) return { value: buffer.toString('utf8'), truncated: false };
   return { value: buffer.subarray(0, limitBytes).toString('utf8'), truncated: true };
 }
 
-function serializePayload(value, limitBytes) {
+export function serializePayload(value: unknown, limitBytes: number) {
   const sanitized = sanitize(value);
   const serialized = JSON.stringify(sanitized);
-  const bounded = truncateUtf8(serialized, limitBytes);
+  const bounded = truncateUtf8(serialized ?? 'null', limitBytes);
   if (!bounded.truncated) return { payload: bounded.value, truncated: false };
   return {
     payload: JSON.stringify({
@@ -51,7 +53,7 @@ function serializePayload(value, limitBytes) {
   };
 }
 
-function parseSseBody(body) {
+function parseSseBody(body: string): unknown {
   const dataLines = String(body).split(/\r?\n/)
     .filter(line => line.startsWith('data:'))
     .map(line => line.slice(5).trim())
@@ -63,7 +65,7 @@ function parseSseBody(body) {
   return decoded.length === 1 ? decoded[0] : decoded;
 }
 
-function normalizeResponseBody(body, contentType = '', wasTruncated = false) {
+export function normalizeResponseBody(body: string, contentType = '', wasTruncated = false): unknown {
   const raw = String(body || '');
   if (!raw) return null;
   if (!wasTruncated) {
@@ -76,21 +78,21 @@ function normalizeResponseBody(body, contentType = '', wasTruncated = false) {
   return { content_type: String(contentType || ''), body: redactString(raw) };
 }
 
-function createResponseCapture(res, limitBytes = RESPONSE_LIMIT_BYTES) {
-  const chunks = [];
+export function createResponseCapture(res: Response, limitBytes = RESPONSE_LIMIT_BYTES) {
+  const chunks: Buffer[] = [];
   let capturedBytes = 0;
   let truncated = false;
   const originalWrite = res.write;
   const originalEnd = res.end;
 
-  const capture = (chunk, encoding) => {
+  const capture = (chunk: unknown, encoding?: unknown): void => {
     if (chunk === undefined || chunk === null) return;
-    let buffer;
+    let buffer: Buffer;
     try {
       if (Buffer.isBuffer(chunk)) buffer = chunk;
       else if (ArrayBuffer.isView(chunk)) buffer = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
       else if (chunk instanceof ArrayBuffer) buffer = Buffer.from(chunk);
-      else buffer = Buffer.from(String(chunk), typeof encoding === 'string' ? encoding : 'utf8');
+      else buffer = Buffer.from(String(chunk), typeof encoding === 'string' ? encoding as BufferEncoding : 'utf8');
     } catch (_) { return; }
     const remaining = Math.max(0, limitBytes - capturedBytes);
     if (remaining > 0) {
@@ -101,14 +103,14 @@ function createResponseCapture(res, limitBytes = RESPONSE_LIMIT_BYTES) {
     if (buffer.length > remaining) truncated = true;
   };
 
-  res.write = function patchedWrite(chunk, encoding, callback) {
+  res.write = function patchedWrite(this: Response, chunk: unknown, encoding?: unknown, callback?: unknown) {
     capture(chunk, encoding);
-    return originalWrite.call(this, chunk, encoding, callback);
-  };
-  res.end = function patchedEnd(chunk, encoding, callback) {
+    return Reflect.apply(originalWrite, this, [chunk, encoding, callback]) as boolean;
+  } as typeof res.write;
+  res.end = function patchedEnd(this: Response, chunk?: unknown, encoding?: unknown, callback?: unknown) {
     capture(chunk, encoding);
-    return originalEnd.call(this, chunk, encoding, callback);
-  };
+    return Reflect.apply(originalEnd, this, [chunk, encoding, callback]) as Response;
+  } as typeof res.end;
 
   return {
     snapshot() {
@@ -117,28 +119,16 @@ function createResponseCapture(res, limitBytes = RESPONSE_LIMIT_BYTES) {
   };
 }
 
-function captureRequestPayload(body) {
+export function captureRequestPayload(body: unknown) {
   return serializePayload(body ?? null, REQUEST_LIMIT_BYTES);
 }
 
-function captureResponsePayload(capture, res) {
+export function captureResponsePayload(capture: ReturnType<typeof createResponseCapture>, res: Response) {
   const snapshot = capture.snapshot();
-  const normalized = normalizeResponseBody(snapshot.body, res.getHeader?.('content-type') || '', snapshot.truncated);
+  const normalized = normalizeResponseBody(snapshot.body, String(res.getHeader?.('content-type') || ''), snapshot.truncated);
   const serialized = serializePayload(normalized, RESPONSE_LIMIT_BYTES);
   return {
     payload: serialized.payload,
     truncated: snapshot.truncated || serialized.truncated
   };
 }
-
-module.exports = {
-  REQUEST_LIMIT_BYTES,
-  RESPONSE_LIMIT_BYTES,
-  sanitize,
-  redactString,
-  serializePayload,
-  normalizeResponseBody,
-  createResponseCapture,
-  captureRequestPayload,
-  captureResponsePayload
-};

@@ -1,9 +1,20 @@
-const crypto = require('crypto');
-const mcpConfig = require('../config/mcpConfig');
-const mcpOAuthRepository = require('../repositories/mcpOAuthRepository');
+import crypto from 'node:crypto';
+import mcpConfig = require('../config/mcpConfig');
+import mcpOAuthRepository = require('../repositories/mcpOAuthRepository');
+
+interface RegisterInput {displayName: string; principalId?: string | null; profileId?: string | null; ownerUserId?: string | null; redirectUris?: string[] | string; allowedScopes?: string[] | string}
+interface AuthorizeInput {clientId?: string; redirectUri?: string; responseType?: string; scope?: string; state?: string; codeChallenge?: string; codeChallengeMethod?: string; resource?: string}
+interface CodeInput {clientId: string; userId: string; principalId: string; redirectUri: string; resource: string; scopes?: string[]; codeChallenge: string; codeChallengeMethod?: string}
+interface ExchangeInput {clientId: string; clientSecret: string; code: string; redirectUri: string; resource?: string | null; codeVerifier: string}
+interface RefreshInput {clientId: string; clientSecret: string; refreshToken: string; scope?: string | null; resource?: string | null}
+interface RevokeInput {clientId: string; clientSecret: string; token: string; tokenTypeHint?: string | null}
+
 
 class OAuthError extends Error {
-  constructor(error, errorDescription, status = 400) {
+  error: string;
+  error_description: string;
+  status: number;
+  constructor(error: string, errorDescription: string | undefined = undefined, status = 400) {
     super(errorDescription || error);
     this.name = 'OAuthError';
     this.error = error;
@@ -13,16 +24,18 @@ class OAuthError extends Error {
 }
 
 class McpOAuthService {
-  constructor(repo = mcpOAuthRepository, config = mcpConfig) {
+  repo: InstanceType<typeof mcpOAuthRepository.McpOAuthRepository>;
+  config: InstanceType<typeof mcpConfig.McpConfig>;
+  constructor(repo: InstanceType<typeof mcpOAuthRepository.McpOAuthRepository> = mcpOAuthRepository, config: InstanceType<typeof mcpConfig.McpConfig> = mcpConfig) {
     this.repo = repo;
     this.config = config;
   }
 
-  hash(data) {
+  hash(data: unknown) {
     return crypto.createHash('sha256').update(String(data)).digest('hex');
   }
 
-  timingSafeCompare(a, b) {
+  timingSafeCompare(a: unknown, b: unknown) {
     if (typeof a !== 'string' || typeof b !== 'string') return false;
     const bufA = Buffer.from(a);
     const bufB = Buffer.from(b);
@@ -34,7 +47,7 @@ class McpOAuthService {
   // Client Management
   // ==========================================================================
 
-  async registerClient({ displayName, principalId, profileId = null, ownerUserId = null, redirectUris = [], allowedScopes = [] }) {
+  async registerClient({ displayName, principalId, profileId = null, ownerUserId = null, redirectUris = [], allowedScopes = [] }: RegisterInput) {
     if (!displayName || typeof displayName !== 'string' || !displayName.trim()) {
       throw new OAuthError('invalid_client_metadata', 'Client display name is required.');
     }
@@ -72,7 +85,7 @@ class McpOAuthService {
           throw new Error('Redirect URI must use HTTPS (or localhost for local development)');
         }
       } catch (err) {
-        throw new OAuthError('invalid_client_metadata', `Invalid redirect URI '${uri}': ${err.message}`);
+        throw new OAuthError('invalid_client_metadata', `Invalid redirect URI '${uri}': ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
@@ -104,7 +117,7 @@ class McpOAuthService {
     };
   }
 
-  async rotateClientSecret(clientId) {
+  async rotateClientSecret(clientId: string) {
     const client = await this.repo.findClientByClientId(clientId);
     if (!client) {
       throw new OAuthError('invalid_client', `Client '${clientId}' not found.`, 404);
@@ -121,7 +134,7 @@ class McpOAuthService {
     };
   }
 
-  async authenticateClient(clientId, clientSecret) {
+  async authenticateClient(clientId: string, clientSecret: string) {
     if (!clientId || !clientSecret) {
       throw new OAuthError('invalid_client', 'Client ID and Client Secret are required.', 401);
     }
@@ -159,7 +172,7 @@ class McpOAuthService {
     codeChallenge,
     codeChallengeMethod,
     resource
-  }) {
+  }: AuthorizeInput) {
     if (!clientId) {
       throw new OAuthError('invalid_request', 'Missing required parameter: client_id');
     }
@@ -200,7 +213,7 @@ class McpOAuthService {
       throw new OAuthError('invalid_target', `Requested resource '${resource}' does not match canonical resource '${canonicalResource}'`);
     }
 
-    let requestedScopes = [];
+    let requestedScopes: string[] = [];
     if (typeof scope === 'string') {
       requestedScopes = scope.trim().split(/\s+/).filter(Boolean);
     }
@@ -233,7 +246,7 @@ class McpOAuthService {
     scopes = [],
     codeChallenge,
     codeChallengeMethod = 'S256'
-  }) {
+  }: CodeInput) {
     const rawCode = `br_code_${crypto.randomBytes(32).toString('base64url')}`;
     const codeHash = this.hash(rawCode);
     const ttlSeconds = this.config.authCodeTtlSeconds;
@@ -264,7 +277,7 @@ class McpOAuthService {
     redirectUri,
     resource,
     codeVerifier
-  }) {
+  }: ExchangeInput) {
     const client = await this.authenticateClient(clientId, clientSecret);
 
     if (!code) {
@@ -346,7 +359,7 @@ class McpOAuthService {
         refreshToken: refreshTokenData
       });
     } catch (err) {
-      if (err.message === 'CONCURRENT_CONSUMPTION') {
+      if (err instanceof Error && err.message === 'CONCURRENT_CONSUMPTION') {
         throw new OAuthError('invalid_grant', 'Authorization code has already been redeemed.');
       }
       throw err;
@@ -371,7 +384,7 @@ class McpOAuthService {
     refreshToken,
     scope = null,
     resource = null
-  }) {
+  }: RefreshInput) {
     const client = await this.authenticateClient(clientId, clientSecret);
 
     if (!refreshToken) {
@@ -444,7 +457,7 @@ class McpOAuthService {
         }
       });
     } catch (err) {
-      if (err.message === 'CONCURRENT_REFRESH_ROTATION') {
+      if (err instanceof Error && err.message === 'CONCURRENT_REFRESH_ROTATION') {
         throw new OAuthError('invalid_grant', 'Refresh token was already rotated by another request.');
       }
       throw err;
@@ -463,7 +476,7 @@ class McpOAuthService {
   // Token Revocation (RFC 7009)
   // ==========================================================================
 
-  async revokeToken({ clientId, clientSecret, token, tokenTypeHint = null }) {
+  async revokeToken({ clientId, clientSecret, token, tokenTypeHint = null }: RevokeInput) {
     await this.authenticateClient(clientId, clientSecret);
 
     if (!token) {
@@ -491,6 +504,5 @@ class McpOAuthService {
   }
 }
 
-module.exports = new McpOAuthService();
-module.exports.McpOAuthService = McpOAuthService;
-module.exports.OAuthError = OAuthError;
+const instance = Object.assign(new McpOAuthService(), {McpOAuthService, OAuthError});
+export = instance;

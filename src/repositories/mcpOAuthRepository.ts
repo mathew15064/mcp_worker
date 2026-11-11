@@ -1,6 +1,8 @@
 type Strings = string | string[];
-interface ClientRow { id: string; client_id: string; redirect_uris_json: string; allowed_scopes_json: string; principal_id: string; profile_id: string | null; owner_user_id: string | null; status: string }
+interface ClientRow { id: string; client_id: string; client_secret_hash: string; owner_user_status?: string | null; redirect_uris_json: string; allowed_scopes_json: string; principal_id: string; profile_id: string | null; owner_user_id: string | null; status: string }
 interface TokenRow { id: string; scopes_json: string; client_id: string; principal_id: string; resource: string; expires_at: string; revoked_at?: string | null; client_status?: string; owner_user_id?: string | null; owner_user_status?: string | null; profile_id?: string | null; client_name?: string | null }
+interface AuthCodeRow extends TokenRow { used_at: string | null; redirect_uri: string; code_challenge: string }
+interface RefreshRow extends TokenRow { token_family_id: string; replaced_by_hash: string | null }
 interface TokenInput { id?: string | null; tokenHash: string; clientId: string; principalId: string; resource: string; scopes?: Strings; expiresAt: string }
 interface RefreshInput extends TokenInput {tokenFamilyId: string}
 interface ClientInput {id?: string | null; clientId: string; clientSecretHash: string; displayName: string; principalId: string; profileId: string | null; ownerUserId?: string | null; redirectUris?: Strings; allowedScopes?: Strings; status?: string}
@@ -13,7 +15,7 @@ import type Database from 'better-sqlite3';
 import databaseManager = require('../db/databaseManager');
 import { SqliteAdapter } from '../db/adapters/sqliteAdapter';
 
-function hydrateScopes(row: TokenRow | null) {
+function hydrateScopes<T extends {scopes_json: string}>(row: T | null) {
   if (!row) return null;
   let scopes: string[] = [];
   try { scopes = JSON.parse(row.scopes_json || '[]'); } catch (_) {}
@@ -106,7 +108,7 @@ class McpOAuthRepository {
 
   async findAuthCodeByHash(codeHash: string) {
     if (!codeHash) return null;
-    return hydrateScopes(await this.db.queryOne<TokenRow>('SELECT * FROM mcp_oauth_authorization_codes WHERE code_hash = ?', [codeHash]));
+    return hydrateScopes(await this.db.queryOne<AuthCodeRow>('SELECT * FROM mcp_oauth_authorization_codes WHERE code_hash = ?', [codeHash]));
   }
 
   async markAuthCodeUsed(id: string) {
@@ -194,7 +196,7 @@ class McpOAuthRepository {
 
   async findRefreshTokenByHash(tokenHash: string) {
     if (!tokenHash) return null;
-    return hydrateScopes(await this.db.queryOne<TokenRow>(`SELECT r.*, c.status AS client_status, c.profile_id, c.owner_user_id,
+    return hydrateScopes(await this.db.queryOne<RefreshRow>(`SELECT r.*, c.status AS client_status, c.profile_id, c.owner_user_id,
       u.status AS owner_user_status
       FROM mcp_oauth_refresh_tokens r
       JOIN mcp_oauth_clients c ON r.client_id = c.client_id

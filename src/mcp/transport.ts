@@ -8,13 +8,9 @@ import databaseManager = require('../db/databaseManager');
 import mcpConfig = require('../config/mcpConfig');
 import { runWithPrincipal } from './context';
 import { createMcpServer } from './server';
-interface PayloadCapture {payload: string | null; truncated: boolean}
-interface ResponseCapture {snapshot(): {body: string; truncated: boolean}}
-const {createResponseCapture, captureRequestPayload, captureResponsePayload}: {
-  createResponseCapture(res: Response): ResponseCapture;
-  captureRequestPayload(body: unknown): PayloadCapture;
-  captureResponsePayload(capture: ResponseCapture, res: Response): PayloadCapture;
-} = require('../services/auditPayloadService');
+import { createResponseCapture, captureRequestPayload, captureResponsePayload } from '../services/auditPayloadService';
+type PayloadCapture = ReturnType<typeof captureRequestPayload>;
+type ResponseCapture = ReturnType<typeof createResponseCapture>;
 interface AuditArgs {
   requestId: string;
   principal: AuthenticatedPrincipal | null | undefined;
