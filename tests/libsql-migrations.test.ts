@@ -136,6 +136,11 @@ void test('two libSQL database clients can initialize a shared database without 
     ownsClient: true,
   });
   try {
+    // Disposable on-disk SQLite uses WAL, as recommended for multi-connection
+    // access; the remote libSQL deployment must be validated separately.
+    await first.exec('PRAGMA journal_mode=WAL');
+    await first.exec('PRAGMA busy_timeout=5000');
+    await second.exec('PRAGMA busy_timeout=5000');
     const migrations = await Promise.all([
       new MigrationRunner(first).migrate(),
       new MigrationRunner(second).migrate(),

@@ -34,6 +34,25 @@ wire protocol is modified.
   rotation, replay rejection, revocation, ownership foreign keys, setting
   upserts, user persistence after reopening a database, DDL rollback and
   two concurrent initializers.
+- The CI concurrency regression required a stronger lock boundary: **all 13
+  migrations now execute in one atomic libSQL write transaction**, retrying
+  after bounded `SQLITE_BUSY` failures and rechecking version records.
+  The disposable multi-client file test explicitly configures SQLite WAL
+  mode and busy timeout; this is not evidence about remote Turso behavior.
+- `LibsqlSessionStore` persists Admin sessions with AES-256-GCM; records
+  contain only keyed HMACs of session IDs and authenticated ciphertext,
+  including CSRF/OAuth one-time values. `touch` only extends an existing
+  unexpired record and cannot resurrect logout/revocation. Expired sessions
+  can be cleaned up with bounded `pruneExpired()`.
+- `createSessionMiddleware` exposes the existing cookie/security policy
+  with an injected store. The **default application still uses the memory
+  store** until a Vercel runtime is implemented. On Vercel, provision the
+  shared database and call `LibsqlSessionStore.initialize()` once during
+  boot/provisioning, before attaching HTTP handlers; do not create fresh
+  independent session keys in Function invocations.
+- Separate HTTP instances share the session cookie and logout state; OAuth
+  authorization, token exchange, refresh and revoke also work across two
+  client connections to the same disposable libSQL database.
 
 ## Limitations and next gates
 
@@ -70,3 +89,29 @@ node --test --test-concurrency=1 dist/tests/libsql-*.test.js
 Use the project's pinned **Node.js 26.13.0** for tests with native
 `better-sqlite3`. The `file:` paths in tests are disposable fixtures,
 **not a recommended Vercel database URL**.
+
+## Optional remote connectivity smoke check (non-destructive)
+
+When a separate **disposable** Turso database has been provisioned by its
+owner, put its URL and token in a secure local/CI environment (not in this
+repository, PR comments, chat messages or command-line arguments):
+
+```sh
+LIBSQL_TEST_DATABASE_URL=libsql://<test-db-host>
+LIBSQL_TEST_AUTH_TOKEN=<test-only-token>
+npm run libsql:verify:remote
+```
+
+The example placeholders above are **not credentials**. The probe only
+connects, selects SQLite version and reads the migration table status. It
+**does not run migrations**, create tables, update data or print the URL/token.
+A successful probe is not a substitute for remote transactional, concurrency,
+foreign-key and OAuth E2E testing on an isolated database.
+
+For future Vercel integration, use a separately provisioned stable
+`SESSION_SECRET` (32+ characters) for all instances and inject a single
+shared `LibsqlSessionStore` into `createSessionMiddleware`. The default
+Self-host deployment remains unchanged. The encrypted session schema is
+currently created by an **explicit store initialization step**; a production
+Vercel bootstrap must perform this safely during provisioning, not once per
+request.

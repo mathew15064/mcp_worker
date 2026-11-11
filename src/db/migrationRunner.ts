@@ -139,37 +139,37 @@ export class MigrationRunner {
     if (this.adapter.kind === 'libsql') await this.retryBusy(() => this.ensureTable());
     else await this.ensureTable();
 
-    // SQLite/libSQL DDL is transactional. A write transaction for each
-    // migration serializes concurrent initializers, and a second instance
-    // rechecks the committed migration name after acquiring the write lock.
-    // MySQL retains the original migration behavior and SQL below.
+    // All SQLite/libSQL DDL and migration records share ONE write transaction.
+    // No reads occur on a second connection before this write lock is obtained,
+    // avoiding SQLITE_BUSY at commit on a different instance's open read cursor.
+    // Each retry rechecks the migration records inside the transaction.
+    // MySQL preserves its separate DDL path below.
     if (this.adapter.kind === 'libsql') {
-      const initial = await this.adapter.queryOne<{ batch: number }>(
-        'SELECT COALESCE(MAX(batch), 0) AS batch FROM migrations',
-      );
-      const batch = Number(initial?.batch || 0) + 1;
-      const completed: string[] = [];
-      for (const file of migrationFiles()) {
-        const name = migrationName(file);
-        const applied = await this.retryBusy(() =>
-          this.adapter.transaction(async (tx) => {
+      return this.retryBusy(() =>
+        this.adapter.transaction(async (tx) => {
+          const files = migrationFiles();
+          const initial = await tx.queryOne<{ batch: number }>(
+            'SELECT COALESCE(MAX(batch), 0) AS batch FROM migrations',
+          );
+          const batch = Number(initial?.batch || 0) + 1;
+          const completed: string[] = [];
+          for (const file of files) {
+            const name = migrationName(file);
             const executed = await tx.queryOne(
               'SELECT migration FROM migrations WHERE migration = ?',
               [name],
             );
-            if (executed) return false;
+            if (executed) continue;
             await loadMigration(file).up(new SchemaBuilder(tx));
             await tx.execute(
               'INSERT INTO migrations (migration, batch, executed_at) VALUES (?, ?, ?)',
               [name, batch, new Date().toISOString()],
             );
-            return true;
-          }),
-        );
-        // Only record success after the transaction commit, not before.
-        if (applied) completed.push(name);
-      }
-      return { batch: completed.length ? batch : null, ran: completed };
+            completed.push(name);
+          }
+          return { batch: completed.length ? batch : null, ran: completed };
+        }),
+      );
     }
 
     const ran = new Set((await this.executed()).map((row) => row.migration));
