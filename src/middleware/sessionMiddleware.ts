@@ -1,4 +1,3 @@
-import session from 'express-session';
 declare module 'express-session' {
   interface SessionData {
     csrfToken?: string;
@@ -16,6 +15,7 @@ declare module 'express-session' {
 }
 import config from '../config/env';
 import BoundedMemorySessionStore from '../db/memorySessionStore';
+import { createSessionMiddleware } from './createSessionMiddleware';
 
 const secureCookie =
   config.NODE_ENV === 'production'
@@ -26,18 +26,10 @@ const store = new BoundedMemorySessionStore({
   maxSessions: Number.parseInt(process.env.ADMIN_SESSION_MAX || '500', 10),
 });
 
-const sessionMiddleware = session({
+const sessionMiddleware = createSessionMiddleware({
   store,
   secret: config.SESSION_SECRET,
-  resave: false,
-  saveUninitialized: false,
-  name: 'bot_report.sid',
-  cookie: {
-    httpOnly: true,
-    secure: secureCookie,
-    sameSite: 'lax',
-    maxAge: 24 * 60 * 60 * 1000,
-  },
+  secureCookie,
 });
 
 export = Object.assign(sessionMiddleware, { store });

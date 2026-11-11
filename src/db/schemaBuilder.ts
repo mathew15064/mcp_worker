@@ -123,12 +123,14 @@ export class TableBlueprint {
     this.foreignKeys.push({ column, targetTable, targetColumn, onDelete });
     return this;
   }
-  toCreateSql() {
+  toCreateSql(dialect: 'mysql' | 'libsql' = 'mysql') {
     const definitions = this.columns.map((column) => column.toSql());
-    for (const index of this.indexes) {
-      definitions.push(
-        `${index.unique ? 'UNIQUE ' : ''}KEY ${quoteId(index.name)} (${index.columns.map(quoteId).join(', ')})`,
-      );
+    if (dialect === 'mysql') {
+      for (const index of this.indexes) {
+        definitions.push(
+          `${index.unique ? 'UNIQUE ' : ''}KEY ${quoteId(index.name)} (${index.columns.map(quoteId).join(', ')})`,
+        );
+      }
     }
     for (const fk of this.foreignKeys) {
       const suffix = fk.onDelete ? ` ON DELETE ${String(fk.onDelete).toUpperCase()}` : '';
@@ -136,7 +138,10 @@ export class TableBlueprint {
         `FOREIGN KEY (${quoteId(fk.column)}) REFERENCES ${quoteId(fk.targetTable)} (${quoteId(fk.targetColumn)})${suffix}`,
       );
     }
-    return `CREATE TABLE IF NOT EXISTS ${quoteId(this.name)} (\n  ${definitions.join(',\n  ')}\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`;
+    const create = `CREATE TABLE IF NOT EXISTS ${quoteId(this.name)} (\n  ${definitions.join(',\n  ')}\n)`;
+    return dialect === 'mysql'
+      ? `${create} ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+      : create;
   }
 }
 
@@ -174,7 +179,15 @@ export class SchemaBuilder {
   async createTable(name: string, callback: (table: TableBlueprint) => void) {
     const blueprint = new TableBlueprint(name);
     callback(blueprint);
-    await this.adapter.exec(blueprint.toCreateSql());
+    const sqlite = this.adapter.kind === 'libsql';
+    await this.adapter.exec(blueprint.toCreateSql(sqlite ? 'libsql' : 'mysql'));
+    if (sqlite) {
+      for (const index of blueprint.indexes) {
+        await this.adapter.exec(
+          `CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX IF NOT EXISTS ${quoteId(index.name)} ON ${quoteId(name)} (${index.columns.map(quoteId).join(', ')})`,
+        );
+      }
+    }
   }
   async table(name: string, callback: (table: AlterTableBlueprint) => void) {
     const blueprint = new AlterTableBlueprint(name);
@@ -186,10 +199,11 @@ export class SchemaBuilder {
     await this.adapter.exec(`DROP TABLE IF EXISTS ${quoteId(name)}`);
   }
   async hasTable(name: string) {
-    const row = await this.adapter.queryOne(
-      'SELECT COUNT(*) AS count FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?',
-      [name],
-    );
+    const sql =
+      this.adapter.kind === 'libsql'
+        ? "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?"
+        : 'SELECT COUNT(*) AS count FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?';
+    const row = await this.adapter.queryOne(sql, [name]);
     return Number(row?.count || 0) > 0;
   }
 }

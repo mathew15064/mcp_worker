@@ -7,7 +7,7 @@ export interface ExecutionResult {
   warningStatus?: number;
 }
 export interface DatabaseAdapter {
-  readonly kind: 'mysql' | 'sqlite';
+  readonly kind: 'mysql' | 'sqlite' | 'libsql';
   queryOne<T extends object = SqlRow>(sql: string, params?: SqlValue[]): Promise<T | null>;
   queryAll<T extends object = SqlRow>(sql: string, params?: SqlValue[]): Promise<T[]>;
   execute(sql: string, params?: SqlValue[]): Promise<ExecutionResult>;

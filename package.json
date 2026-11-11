@@ -27,7 +27,8 @@
     "format:check": "prettier --check \"src/**/*.ts\" \"worker/**/*.ts\" \"scripts/**/*.ts\" \"tests/**/*.ts\" playwright.config.ts",
     "format:write": "prettier --write \"src/**/*.ts\" \"worker/**/*.ts\" \"scripts/**/*.ts\" \"tests/**/*.ts\" playwright.config.ts",
     "quality:check": "node scripts/quality-gate.mjs check",
-    "quality:baseline": "node scripts/quality-gate.mjs record"
+    "quality:baseline": "node scripts/quality-gate.mjs record",
+    "libsql:verify:remote": "npm run build && node dist/scripts/verify-libsql-remote.js"
   },
   "keywords": [
     "mcp",
@@ -38,6 +39,7 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "@libsql/client": "0.18.0",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@xterm/addon-fit": "0.10.0",
     "@xterm/xterm": "5.5.0",
