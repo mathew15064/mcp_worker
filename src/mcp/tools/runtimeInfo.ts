@@ -6,7 +6,20 @@ import path from 'node:path';
 import { assertPrincipal } from '../context';
 import type { ToolMetadata, ToolResponse } from '../toolTypes';
 import { SCOPES } from '../../auth/principal';
-const packageJson: { name: string; version: string } = require('../../../package.json');
+const packageJson: unknown = JSON.parse(
+  fs.readFileSync(path.resolve(__dirname, '../../../package.json'), 'utf8'),
+);
+if (
+  !packageJson ||
+  typeof packageJson !== 'object' ||
+  !('name' in packageJson) ||
+  typeof packageJson.name !== 'string' ||
+  !('version' in packageJson) ||
+  typeof packageJson.version !== 'string'
+) {
+  throw new Error('Invalid runtime package metadata');
+}
+const packageIdentity = { name: packageJson.name, version: packageJson.version };
 
 const PROCESS_STARTED_AT = new Date(Date.now() - Math.floor(process.uptime() * 1000)).toISOString();
 const PROJECT_ROOT = path.resolve(__dirname, '../../..');
@@ -29,7 +42,10 @@ function collectSourceFiles(root: string) {
 }
 
 function sourceFingerprint() {
-  const files = [path.join(PROJECT_ROOT, 'package.json'), ...collectSourceFiles(path.join(PROJECT_ROOT, 'src'))];
+  const files = [
+    path.join(PROJECT_ROOT, 'package.json'),
+    ...collectSourceFiles(path.join(PROJECT_ROOT, 'src')),
+  ];
   const hash = crypto.createHash('sha256');
   for (const file of files) {
     hash.update(path.relative(PROJECT_ROOT, file));
@@ -40,9 +56,15 @@ function sourceFingerprint() {
   return hash.digest('hex');
 }
 
-function schemaFingerprint(tools: ReadonlyArray<ToolMetadata & { schema: Record<string, { constructor?: { name?: string }; description?: string }> }>) {
+function schemaFingerprint(
+  tools: ReadonlyArray<
+    ToolMetadata & {
+      schema: Record<string, { constructor?: { name?: string }; description?: string }>;
+    }
+  >,
+) {
   const normalized = tools
-    .map(tool => ({
+    .map((tool) => ({
       name: tool.name,
       description: tool.description || null,
       domain: tool.domain || null,
@@ -52,9 +74,9 @@ function schemaFingerprint(tools: ReadonlyArray<ToolMetadata & { schema: Record<
         .map(([name, schema]) => ({
           name,
           type: schema?.constructor?.name || null,
-          description: schema?.description || null
+          description: schema?.description || null,
         }))
-        .sort((a, b) => a.name.localeCompare(b.name))
+        .sort((a, b) => a.name.localeCompare(b.name)),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
   return sha256(JSON.stringify(normalized));
@@ -63,12 +85,18 @@ function schemaFingerprint(tools: ReadonlyArray<ToolMetadata & { schema: Record<
 async function handleRuntimeInfo(): Promise<ToolResponse> {
   const principal = assertPrincipal();
   principal.assertScope(SCOPES.READ);
-  const { TOOLS } = require('../toolRegistry');
+  const { TOOLS } = await import('../toolRegistry.js');
   const value = {
-    app_name: packageJson.name,
-    app_version: packageJson.version,
-    git_sha: process.env.BOT_REPORT_GIT_SHA && process.env.BOT_REPORT_GIT_SHA !== 'unknown' ? process.env.BOT_REPORT_GIT_SHA : null,
-    build_time: process.env.BOT_REPORT_BUILD_TIME && process.env.BOT_REPORT_BUILD_TIME !== 'unknown' ? process.env.BOT_REPORT_BUILD_TIME : null,
+    app_name: packageIdentity.name,
+    app_version: packageIdentity.version,
+    git_sha:
+      process.env.BOT_REPORT_GIT_SHA && process.env.BOT_REPORT_GIT_SHA !== 'unknown'
+        ? process.env.BOT_REPORT_GIT_SHA
+        : null,
+    build_time:
+      process.env.BOT_REPORT_BUILD_TIME && process.env.BOT_REPORT_BUILD_TIME !== 'unknown'
+        ? process.env.BOT_REPORT_BUILD_TIME
+        : null,
     source_fingerprint: sourceFingerprint(),
     tool_schema_hash: schemaFingerprint(TOOLS),
     tool_count: TOOLS.length,
@@ -76,20 +104,21 @@ async function handleRuntimeInfo(): Promise<ToolResponse> {
     runtime_id: os.hostname(),
     pid: process.pid,
     node_version: process.version,
-    node_env: process.env.NODE_ENV || null
+    node_env: process.env.NODE_ENV || null,
   };
   return {
     structuredContent: value,
-    content: [{ type: 'text', text: JSON.stringify(value, null, 2) }]
+    content: [{ type: 'text', text: JSON.stringify(value, null, 2) }],
   };
 }
 
 const runtimeInfo = {
   name: 'runtime_info',
-  description: 'Return sanitized mcp_worker runtime/build identity, tool schema hash, and a fingerprint over package.json plus the complete MCP-only src tree. Use first after deploy, rebuild, or MCP refresh when you need to verify which version is actually running.',
+  description:
+    'Return sanitized mcp_worker runtime/build identity, tool schema hash, and a fingerprint over package.json plus the complete MCP-only src tree. Use first after deploy, rebuild, or MCP refresh when you need to verify which version is actually running.',
   schema: {},
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
   handler: handleRuntimeInfo,
-  _test: { sourceFingerprint, schemaFingerprint, collectSourceFiles }
+  _test: { sourceFingerprint, schemaFingerprint, collectSourceFiles },
 };
 export = runtimeInfo;

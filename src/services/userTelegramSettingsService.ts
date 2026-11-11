@@ -1,5 +1,5 @@
-import settingsRepo = require('../repositories/settingsRepository');
-import telegramSecrets = require('./telegramSecretService');
+import settingsRepo from '../repositories/settingsRepository';
+import telegramSecrets from './telegramSecretService';
 
 function assertUserId(userId: unknown) {
   const value = String(userId || '').trim();
@@ -13,22 +13,31 @@ function keys(userId: string) {
   return {
     enabled: `${prefix}.enabled`,
     chatId: `${prefix}.chat_id`,
-    botToken: `${prefix}.bot_token`
+    botToken: `${prefix}.bot_token`,
   };
 }
 
 function normalizeChatId(value: unknown) {
   const chatId = String(value || '').trim();
-  if (chatId.length > 128 || /[\x00-\x1f\x7f]/.test(chatId)) throw new Error('Telegram Chat ID is invalid.');
+  if (chatId.length > 128 || /[\x00-\x1f\x7f]/.test(chatId))
+    throw new Error('Telegram Chat ID is invalid.');
   return chatId;
 }
 
 type Settings = Pick<typeof settingsRepo, 'get' | 'set'>;
 type Secrets = Pick<typeof telegramSecrets, 'encrypt' | 'decrypt'>;
-interface ServiceOptions {settings?: Settings; secrets?: Secrets}
-interface TelegramInput {enabled?: boolean; chatId?: string; botToken?: string}
+interface ServiceOptions {
+  settings?: Settings;
+  secrets?: Secrets;
+}
+interface TelegramInput {
+  enabled?: boolean;
+  chatId?: string;
+  botToken?: string;
+}
 class UserTelegramSettingsService {
-  settings: Settings; secrets: Secrets;
+  settings: Settings;
+  secrets: Secrets;
   constructor({ settings = settingsRepo, secrets = telegramSecrets }: ServiceOptions = {}) {
     this.settings = settings;
     this.secrets = secrets;
@@ -39,12 +48,12 @@ class UserTelegramSettingsService {
     const [enabled, chatId, token] = await Promise.all([
       this.settings.get(k.enabled, 'false'),
       this.settings.get(k.chatId, ''),
-      this.settings.get(k.botToken, '')
+      this.settings.get(k.botToken, ''),
     ]);
     return {
       enabled: enabled === 'true' || enabled === '1',
       chatId: String(chatId || ''),
-      hasToken: Boolean(String(token || '').trim())
+      hasToken: Boolean(String(token || '').trim()),
     };
   }
 
@@ -62,11 +71,16 @@ class UserTelegramSettingsService {
     const k = keys(userId);
     const [encrypted, chatId] = await Promise.all([
       this.settings.get(k.botToken, ''),
-      this.settings.get(k.chatId, '')
+      this.settings.get(k.chatId, ''),
     ]);
-    if (!encrypted || !chatId) throw new Error('Telegram Bot Token and Chat ID must be configured first.');
+    if (!encrypted || !chatId)
+      throw new Error('Telegram Bot Token and Chat ID must be configured first.');
     return { token: this.secrets.decrypt(encrypted), chatId: String(chatId) };
   }
 }
 
-export = Object.assign(new UserTelegramSettingsService(), {UserTelegramSettingsService, keys, normalizeChatId});
+export = Object.assign(new UserTelegramSettingsService(), {
+  UserTelegramSettingsService,
+  keys,
+  normalizeChatId,
+});

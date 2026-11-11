@@ -1,15 +1,27 @@
-import databaseManager = require('../db/databaseManager');
-import settingsRepo = require('../repositories/settingsRepository');
-import telegramSecrets = require('./telegramSecretService');
-import telegramService = require('./telegramService');
+import databaseManager from '../db/databaseManager';
+import settingsRepo from '../repositories/settingsRepository';
+import telegramSecrets from './telegramSecretService';
+import telegramService from './telegramService';
 
 function number(value: unknown, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
-function mb(bytes: unknown) { return Math.max(0, Math.round(number(bytes) / (1024 * 1024))); }
+function mb(bytes: unknown) {
+  return Math.max(0, Math.round(number(bytes) / (1024 * 1024)));
+}
 
-interface ResourceAlert {code: string; phase?: string; workerName?: string; workerId?: string; memoryUsedPercent?: number; memoryAvailableBytes?: number; memoryTotalBytes?: number; thresholdPercent?: number; stopped?: {workspace_commands?: number; managed_processes?: number}}
+interface ResourceAlert {
+  code: string;
+  phase?: string;
+  workerName?: string;
+  workerId?: string;
+  memoryUsedPercent?: number;
+  memoryAvailableBytes?: number;
+  memoryTotalBytes?: number;
+  thresholdPercent?: number;
+  stopped?: { workspace_commands?: number; managed_processes?: number };
+}
 interface NotificationOptions {
   settings?: Pick<typeof settingsRepo, 'get'>;
   secrets?: Pick<typeof telegramSecrets, 'decrypt'>;
@@ -22,7 +34,12 @@ class OwnerNotificationService {
   telegram: NonNullable<NotificationOptions['telegram']>;
   database: NonNullable<NotificationOptions['database']>;
 
-  constructor({ settings = settingsRepo, secrets = telegramSecrets, telegram = telegramService, database = databaseManager }: NotificationOptions = {}) {
+  constructor({
+    settings = settingsRepo,
+    secrets = telegramSecrets,
+    telegram = telegramService,
+    database = databaseManager,
+  }: NotificationOptions = {}) {
     this.settings = settings;
     this.secrets = secrets;
     this.telegram = telegram;
@@ -31,16 +48,19 @@ class OwnerNotificationService {
 
   async adminTelegramCredentials() {
     if (!this.database.isOperational()) return null;
-    const enabled = await this.settings.get('telegram.enabled', null)
-      ?? await this.settings.get('telegram_mcp_enabled', null)
-      ?? await this.settings.get('telegram_enabled', 'false');
+    const enabled =
+      (await this.settings.get('telegram.enabled', null)) ??
+      (await this.settings.get('telegram_mcp_enabled', null)) ??
+      (await this.settings.get('telegram_enabled', 'false'));
     if (enabled !== 'true') return null;
-    const encrypted = await this.settings.get('telegram.bot_token', null)
-      ?? await this.settings.get('telegram_mcp_bot_token', null)
-      ?? await this.settings.get('telegram_bot_token', '');
-    const chatId = await this.settings.get('telegram.chat_id', null)
-      ?? await this.settings.get('telegram_mcp_chat_id', null)
-      ?? await this.settings.get('telegram_chat_id', '');
+    const encrypted =
+      (await this.settings.get('telegram.bot_token', null)) ??
+      (await this.settings.get('telegram_mcp_bot_token', null)) ??
+      (await this.settings.get('telegram_bot_token', ''));
+    const chatId =
+      (await this.settings.get('telegram.chat_id', null)) ??
+      (await this.settings.get('telegram_mcp_chat_id', null)) ??
+      (await this.settings.get('telegram_chat_id', ''));
     if (!encrypted || !chatId) return null;
     return { token: this.secrets.decrypt(encrypted), chatId: String(chatId) };
   }
@@ -64,9 +84,13 @@ class OwnerNotificationService {
   async sendWorkerResourceAlert(alert: ResourceAlert) {
     const credentials = await this.adminTelegramCredentials();
     if (!credentials) return { sent: false, reason: 'telegram_not_configured' };
-    const result = await this.telegram.sendMessage(credentials.token, credentials.chatId, this.formatWorkerResourceAlert(alert));
+    const result = await this.telegram.sendMessage(
+      credentials.token,
+      credentials.chatId,
+      this.formatWorkerResourceAlert(alert),
+    );
     return { sent: true, message_id: result.message_id || null };
   }
 }
 
-export = Object.assign(new OwnerNotificationService(), {OwnerNotificationService});
+export = Object.assign(new OwnerNotificationService(), { OwnerNotificationService });

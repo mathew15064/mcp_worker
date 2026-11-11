@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import type { IncomingHttpHeaders } from 'node:http';
 import type { WorkerConnectRequest } from './workerProtocol';
-import workerRepository = require('../repositories/workerRepository');
+import workerRepository from '../repositories/workerRepository';
 const { workerError } = workerRepository;
 
 const WORKER_CONNECT_PATH = '/worker/v1/connect';
@@ -25,7 +25,7 @@ const ALLOWED_CAPABILITIES = Object.freeze([
   'process.start',
   'process.status',
   'process.logs',
-  'process.stop'
+  'process.stop',
 ]);
 
 function canonicalConnectMessage({ workerId, timestamp, nonce }: WorkerConnectRequest) {
@@ -36,7 +36,13 @@ class WorkerAuthService {
   repository: InstanceType<typeof workerRepository.WorkerRepository>;
   now: () => number;
   seenNonces: Map<string, number>;
-  constructor({ repository = workerRepository, now = () => Date.now() }: {repository?: InstanceType<typeof workerRepository.WorkerRepository>; now?: () => number} = {}) {
+  constructor({
+    repository = workerRepository,
+    now = () => Date.now(),
+  }: {
+    repository?: InstanceType<typeof workerRepository.WorkerRepository>;
+    now?: () => number;
+  } = {}) {
     this.repository = repository;
     this.now = now;
     this.seenNonces = new Map<string, number>();
@@ -44,7 +50,13 @@ class WorkerAuthService {
 
   normalizeCapabilities(value: unknown): string[] {
     const requested = Array.isArray(value) ? value : [];
-    return [...new Set(requested.filter((item): item is string => typeof item === 'string' && ALLOWED_CAPABILITIES.includes(item)))].sort();
+    return [
+      ...new Set(
+        requested.filter(
+          (item): item is string => typeof item === 'string' && ALLOWED_CAPABILITIES.includes(item),
+        ),
+      ),
+    ].sort();
   }
 
   validatePublicKey(publicKey: unknown) {
@@ -56,7 +68,10 @@ class WorkerAuthService {
       if (key.asymmetricKeyType !== 'ed25519') throw new Error('not ed25519');
       return key.export({ type: 'spki', format: 'pem' }).toString();
     } catch (_) {
-      throw workerError('WORKER_PUBLIC_KEY_INVALID', 'Worker public key must be a valid Ed25519 public key.');
+      throw workerError(
+        'WORKER_PUBLIC_KEY_INVALID',
+        'Worker public key must be a valid Ed25519 public key.',
+      );
     }
   }
 
@@ -68,7 +83,17 @@ class WorkerAuthService {
     return normalized;
   }
 
-  async enroll({ token, name, publicKey, capabilities = [] }: {token: string; name: string; publicKey: string; capabilities?: string[]}) {
+  async enroll({
+    token,
+    name,
+    publicKey,
+    capabilities = [],
+  }: {
+    token: string;
+    name: string;
+    publicKey: string;
+    capabilities?: string[];
+  }) {
     const normalizedName = this.validateName(name);
     const normalizedKey = this.validatePublicKey(publicKey);
     const normalizedCapabilities = this.normalizeCapabilities(capabilities);
@@ -77,7 +102,7 @@ class WorkerAuthService {
       name: normalizedName,
       publicKey: normalizedKey,
       capabilities: normalizedCapabilities,
-      ownerUserId: enrollment?.owner_user_id || null
+      ownerUserId: enrollment?.owner_user_id || null,
     });
   }
 
@@ -99,31 +124,49 @@ class WorkerAuthService {
     }
     const timestampMs = Number(timestamp);
     if (!Number.isFinite(timestampMs) || Math.abs(this.now() - timestampMs) > MAX_CLOCK_SKEW_MS) {
-      throw workerError('WORKER_AUTH_EXPIRED', 'Worker authentication timestamp is outside the allowed clock skew.', 401);
+      throw workerError(
+        'WORKER_AUTH_EXPIRED',
+        'Worker authentication timestamp is outside the allowed clock skew.',
+        401,
+      );
     }
 
     this.cleanupNonces();
     const replayKey = `${workerId}:${nonce}`;
-    if (this.seenNonces.has(replayKey)) throw workerError('WORKER_AUTH_REPLAY', 'Worker authentication nonce was already used.', 401);
+    if (this.seenNonces.has(replayKey))
+      throw workerError('WORKER_AUTH_REPLAY', 'Worker authentication nonce was already used.', 401);
 
     const worker = await this.repository.findWorkerById(workerId);
     if (!worker) throw workerError('WORKER_AUTH_INVALID', 'Unknown worker.', 401);
     if (!worker.enabled) throw workerError('WORKER_DISABLED', 'Worker identity is disabled.', 403);
 
     let signature;
-    try { signature = Buffer.from(signatureText, 'base64'); } catch (_) { signature = null; }
-    if (!signature?.length) throw workerError('WORKER_AUTH_INVALID', 'Worker signature is invalid.', 401);
+    try {
+      signature = Buffer.from(signatureText, 'base64');
+    } catch (_) {
+      signature = null;
+    }
+    if (!signature?.length)
+      throw workerError('WORKER_AUTH_INVALID', 'Worker signature is invalid.', 401);
 
-    const valid = crypto.verify(null,
+    const valid = crypto.verify(
+      null,
       Buffer.from(canonicalConnectMessage({ workerId, timestamp, nonce }), 'utf8'),
       worker.public_key,
-      signature);
-    if (!valid) throw workerError('WORKER_AUTH_INVALID', 'Worker signature verification failed.', 401);
+      signature,
+    );
+    if (!valid)
+      throw workerError('WORKER_AUTH_INVALID', 'Worker signature verification failed.', 401);
 
     this.seenNonces.set(replayKey, this.now() + MAX_CLOCK_SKEW_MS * 2);
     return worker;
   }
 }
 
-const instance = Object.assign(new WorkerAuthService(), {WorkerAuthService, ALLOWED_CAPABILITIES, WORKER_CONNECT_PATH, canonicalConnectMessage});
+const instance = Object.assign(new WorkerAuthService(), {
+  WorkerAuthService,
+  ALLOWED_CAPABILITIES,
+  WORKER_CONNECT_PATH,
+  canonicalConnectMessage,
+});
 export = instance;

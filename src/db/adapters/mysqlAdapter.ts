@@ -1,9 +1,27 @@
-import mysql = require('mysql2/promise');
-import type { Pool, Connection, PoolConnection, ResultSetHeader, PoolOptions } from 'mysql2/promise';
+import mysql from 'mysql2/promise';
+import type {
+  Pool,
+  Connection,
+  PoolConnection,
+  ResultSetHeader,
+  PoolOptions,
+} from 'mysql2/promise';
 import type { DatabaseAdapter, SqlRow, SqlValue } from '../contracts';
-interface MysqlConfig { host: string; port?: number | string; username: string; password: string; database: string; queueLimit?: number; connectionLimit?: number; connectTimeoutMs?: number; ssl?: boolean | Exclude<PoolOptions['ssl'], string | undefined> }
+interface MysqlConfig {
+  host: string;
+  port?: number | string;
+  username: string;
+  password: string;
+  database: string;
+  queueLimit?: number;
+  connectionLimit?: number;
+  connectTimeoutMs?: number;
+  ssl?: boolean | Exclude<PoolOptions['ssl'], string | undefined>;
+}
 type MysqlDriver = Pool | Connection;
-function isPool(db: MysqlDriver): db is Pool { return 'getConnection' in db; }
+function isPool(db: MysqlDriver): db is Pool {
+  return 'getConnection' in db;
+}
 
 export function normalizeMysqlError(error: unknown) {
   if (!error || typeof error !== 'object') return error;
@@ -27,8 +45,12 @@ export class MysqlAdapter implements DatabaseAdapter {
 
   static create(config: MysqlConfig) {
     const requestedQueueLimit = Number(config.queueLimit ?? process.env.MYSQL_POOL_QUEUE_LIMIT);
-    const queueLimit = Number.isSafeInteger(requestedQueueLimit) && requestedQueueLimit >= 1 && requestedQueueLimit <= 10_000
-      ? requestedQueueLimit : 128;
+    const queueLimit =
+      Number.isSafeInteger(requestedQueueLimit) &&
+      requestedQueueLimit >= 1 &&
+      requestedQueueLimit <= 10_000
+        ? requestedQueueLimit
+        : 128;
     const pool = mysql.createPool({
       host: config.host,
       port: Number(config.port || 3306),
@@ -43,15 +65,23 @@ export class MysqlAdapter implements DatabaseAdapter {
       timezone: 'Z',
       dateStrings: true,
       decimalNumbers: true,
-      ssl: config.ssl === true ? {} : (config.ssl && typeof config.ssl === 'object' ? config.ssl : undefined)
+      ssl:
+        config.ssl === true
+          ? {}
+          : config.ssl && typeof config.ssl === 'object'
+            ? config.ssl
+            : undefined,
     });
     return new MysqlAdapter(pool, { ownsPool: true });
   }
 
-  async queryOne<T extends object = SqlRow>(sql: string, params: SqlValue[] = []): Promise<T | null> {
+  async queryOne<T extends object = SqlRow>(
+    sql: string,
+    params: SqlValue[] = [],
+  ): Promise<T | null> {
     try {
       const [rows] = await this._db.execute(sql, params);
-      return Array.isArray(rows) ? (rows[0] as T || null) : null;
+      return Array.isArray(rows) ? (rows[0] as T) || null : null;
     } catch (error) {
       throw normalizeMysqlError(error);
     }
@@ -60,7 +90,7 @@ export class MysqlAdapter implements DatabaseAdapter {
   async queryAll<T extends object = SqlRow>(sql: string, params: SqlValue[] = []): Promise<T[]> {
     try {
       const [rows] = await this._db.execute(sql, params);
-      return Array.isArray(rows) ? rows as T[] : [];
+      return Array.isArray(rows) ? (rows as T[]) : [];
     } catch (error) {
       throw normalizeMysqlError(error);
     }
@@ -72,7 +102,7 @@ export class MysqlAdapter implements DatabaseAdapter {
       return {
         changes: Number(result?.affectedRows || 0),
         insertId: result?.insertId || null,
-        warningStatus: result?.warningStatus || 0
+        warningStatus: result?.warningStatus || 0,
       };
     } catch (error) {
       throw normalizeMysqlError(error);
@@ -90,8 +120,11 @@ export class MysqlAdapter implements DatabaseAdapter {
   async ping() {
     let connection: PoolConnection | null = null;
     if (isPool(this._db)) {
-      try { connection = await this._db.getConnection(); }
-      catch (error) { throw normalizeMysqlError(error); }
+      try {
+        connection = await this._db.getConnection();
+      } catch (error) {
+        throw normalizeMysqlError(error);
+      }
     }
     if (connection) {
       try {
@@ -124,15 +157,20 @@ export class MysqlAdapter implements DatabaseAdapter {
     }
 
     let connection: PoolConnection;
-    try { connection = await this._db.getConnection(); }
-    catch (error) { throw normalizeMysqlError(error); }
+    try {
+      connection = await this._db.getConnection();
+    } catch (error) {
+      throw normalizeMysqlError(error);
+    }
     try {
       await connection.beginTransaction();
       const result = await callback(new MysqlAdapter(connection));
       await connection.commit();
       return result;
     } catch (error) {
-      try { await connection.rollback(); } catch (_) {}
+      try {
+        await connection.rollback();
+      } catch (_) {}
       throw normalizeMysqlError(error);
     } finally {
       connection.release();

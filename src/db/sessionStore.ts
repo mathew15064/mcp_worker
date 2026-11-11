@@ -1,4 +1,4 @@
-import session = require('express-session');
+import session from 'express-session';
 import type { SessionData } from 'express-session';
 type Callback = (err?: unknown) => void;
 type GetCallback = (err: unknown, data?: SessionData | null) => void;
@@ -8,14 +8,17 @@ import type Database from 'better-sqlite3';
 class SqliteSessionStore extends session.Store {
   private _customDb: Database.Database | null;
   cleanupInterval: NodeJS.Timeout;
-  constructor(options: {db?: Database.Database} = {}) {
+  constructor(options: { db?: Database.Database } = {}) {
     super();
     this._customDb = options.db || null;
 
     // Periodically clean up expired sessions every 15 minutes
-    this.cleanupInterval = setInterval(() => {
-      this.clearExpired();
-    }, 15 * 60 * 1000);
+    this.cleanupInterval = setInterval(
+      () => {
+        this.clearExpired();
+      },
+      15 * 60 * 1000,
+    );
     this.cleanupInterval.unref();
   }
 
@@ -35,7 +38,11 @@ class SqliteSessionStore extends session.Store {
   get(sid: string, cb: GetCallback) {
     try {
       const now = Date.now();
-      const row = this.db.prepare<[string], {sess: string; expired: number}>('SELECT sess, expired FROM sessions WHERE sid = ?').get(sid);
+      const row = this.db
+        .prepare<[string], { sess: string; expired: number }>(
+          'SELECT sess, expired FROM sessions WHERE sid = ?',
+        )
+        .get(sid);
       if (!row) {
         return cb(null, null);
       }
@@ -59,11 +66,15 @@ class SqliteSessionStore extends session.Store {
       const expired = Date.now() + maxAge;
       const sessStr = JSON.stringify(sess);
 
-      this.db.prepare(`
+      this.db
+        .prepare(
+          `
         INSERT INTO sessions (sid, sess, expired)
         VALUES (?, ?, ?)
         ON CONFLICT(sid) DO UPDATE SET sess = excluded.sess, expired = excluded.expired
-      `).run(sid, sessStr, expired);
+      `,
+        )
+        .run(sid, sessStr, expired);
 
       if (cb) cb(null);
     } catch (err) {

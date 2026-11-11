@@ -1,22 +1,30 @@
 import test from 'node:test';
+import type OAuthServiceModule from '../src/services/mcpOAuthService';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {spawn, type SpawnOptionsWithoutStdio} from 'node:child_process';
-import helper = require('./helper');
-const {setupEnv, cleanup, initDb, issueToken, parseMcpResponse} = helper;
+import { spawn, type SpawnOptionsWithoutStdio } from 'node:child_process';
+import helper from './helper';
+const { setupEnv, cleanup, initDb, issueToken, parseMcpResponse } = helper;
 
 function runProcess(command: string, args: string[], options: SpawnOptionsWithoutStdio = {}) {
-  return new Promise<{code: number; stdout: string; stderr: string}>((resolve, reject) => {
+  return new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
     const child = spawn(command, args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
-    child.stdout.on('data', chunk => { stdout += chunk.toString('utf8'); });
-    child.stderr.on('data', chunk => { stderr += chunk.toString('utf8'); });
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString('utf8');
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString('utf8');
+    });
     child.once('error', reject);
-    child.once('close', code => resolve({ code: Number.isInteger(code) ? Number(code) : 1, stdout, stderr }));
+    child.once('close', (code) =>
+      resolve({ code: Number.isInteger(code) ? Number(code) : 1, stdout, stderr }),
+    );
   });
 }
 
@@ -28,19 +36,24 @@ let baseUrl = '';
 
 test.before(async () => {
   server = http.createServer(app);
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-  baseUrl = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 
 test.after(async () => {
-  if (server) await new Promise<void>(resolve => server.close(() => resolve()));
+  if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
   cleanup(env.dir);
 });
 
 test('HTTP surface is MCP-only', async () => {
   const health = await fetch(`${baseUrl}/healthz`);
   assert.equal(health.status, 200);
-  const healthBody = await health.json() as {ok:boolean; service:string; mode:string; database:string};
+  const healthBody = (await health.json()) as {
+    ok: boolean;
+    service: string;
+    mode: string;
+    database: string;
+  };
   assert.equal(healthBody.ok, true);
   assert.equal(healthBody.service, 'mcp_worker');
   assert.equal(healthBody.mode, 'mcp-admin');
@@ -107,9 +120,14 @@ test('worker curl installer uses verified standalone binaries without Node.js ru
   if (sums.status === 200) {
     const sumsText = await sums.text();
     for (const file of [
-      'bot-report-worker-linux-amd64', 'bot-report-worker-linux-arm64', 'bot-report-worker-linux-386', 'bot-report-worker-linux-armv7',
-      'bot-report-worker-darwin-amd64', 'bot-report-worker-darwin-arm64',
-      'bot-report-worker-windows-amd64.exe', 'bot-report-worker-windows-arm64.exe'
+      'bot-report-worker-linux-amd64',
+      'bot-report-worker-linux-arm64',
+      'bot-report-worker-linux-386',
+      'bot-report-worker-linux-armv7',
+      'bot-report-worker-darwin-amd64',
+      'bot-report-worker-darwin-arm64',
+      'bot-report-worker-windows-amd64.exe',
+      'bot-report-worker-windows-arm64.exe',
     ]) {
       assert.match(sumsText, new RegExp(`  ${file}($|\\n)`));
     }
@@ -133,23 +151,49 @@ test('worker curl installer uses verified standalone binaries without Node.js ru
   assert.equal((await fetch(`${baseUrl}/worker/dist/not-allowed`)).status, 404);
 });
 
-const standaloneBinaryBuilt = fs.existsSync(path.resolve(__dirname, '../worker/bin/bot-report-worker-linux-amd64'));
-test('standalone curl installer produces an executable Worker CLI without target Node.js setup', { skip: !standaloneBinaryBuilt }, async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-report-worker-install-'));
-  try {
-    const binDir = path.join(home, '.local', 'bin');
-    const env = { ...process.env, HOME: home, BOT_REPORT_WORKER_HOME: path.join(home, '.bot-report-worker'), BOT_REPORT_WORKER_INSTALL_ROOT: path.join(home, '.local', 'share', 'bot-report-worker'), BOT_REPORT_WORKER_BIN_DIR: binDir, PATH: `${binDir}:${process.env.PATH}`, BOT_REPORT_WORKER_SKIP_SERVICE: '1' };
-    const result = await runProcess('sh', ['-c', `curl -fsSL ${baseUrl}/worker/install.sh | sh && "$HOME/.local/bin/systemtd" version`], { env });
-    assert.equal(result.code, 0, `${result.stdout}${result.stderr}`);
-    assert.match(result.stdout, /installed standalone runtime/);
-    assert.match(result.stdout, /systemtd 2\./);
-    assert.match(result.stdout, /runtime=go/);
-    assert.equal(fs.existsSync(path.join(home, '.local', 'share', 'bot-report-worker', 'current', 'systemtd')), true);
-    assert.equal(fs.existsSync(path.join(binDir, 'bot-report-worker')), true);
-  } finally {
-    fs.rmSync(home, { recursive: true, force: true });
-  }
-});
+const standaloneBinaryBuilt = fs.existsSync(
+  path.resolve(__dirname, '../worker/bin/bot-report-worker-linux-amd64'),
+);
+test(
+  'standalone curl installer produces an executable Worker CLI without target Node.js setup',
+  { skip: !standaloneBinaryBuilt },
+  async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-report-worker-install-'));
+    try {
+      const binDir = path.join(home, '.local', 'bin');
+      const env = {
+        ...process.env,
+        HOME: home,
+        BOT_REPORT_WORKER_HOME: path.join(home, '.bot-report-worker'),
+        BOT_REPORT_WORKER_INSTALL_ROOT: path.join(home, '.local', 'share', 'bot-report-worker'),
+        BOT_REPORT_WORKER_BIN_DIR: binDir,
+        PATH: `${binDir}:${process.env.PATH}`,
+        BOT_REPORT_WORKER_SKIP_SERVICE: '1',
+      };
+      const result = await runProcess(
+        'sh',
+        [
+          '-c',
+          `curl -fsSL ${baseUrl}/worker/install.sh | sh && "$HOME/.local/bin/systemtd" version`,
+        ],
+        { env },
+      );
+      assert.equal(result.code, 0, `${result.stdout}${result.stderr}`);
+      assert.match(result.stdout, /installed standalone runtime/);
+      assert.match(result.stdout, /systemtd 2\./);
+      assert.match(result.stdout, /runtime=go/);
+      assert.equal(
+        fs.existsSync(
+          path.join(home, '.local', 'share', 'bot-report-worker', 'current', 'systemtd'),
+        ),
+        true,
+      );
+      assert.equal(fs.existsSync(path.join(binDir, 'bot-report-worker')), true);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  },
+);
 
 test('OAuth discovery and unauthenticated MCP challenge remain available', async () => {
   const metadata = await fetch(`${baseUrl}/.well-known/oauth-authorization-server`);
@@ -158,7 +202,11 @@ test('OAuth discovery and unauthenticated MCP challenge remain available', async
   assert.equal(body.authorization_endpoint.endsWith('/oauth/authorize'), true);
   assert.equal(body.token_endpoint.endsWith('/oauth/token'), true);
 
-  const denied = await fetch(`${baseUrl}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  const denied = await fetch(`${baseUrl}/mcp`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{}',
+  });
   assert.equal(denied.status, 401);
   assert.match(denied.headers.get('www-authenticate') || '', /oauth-protected-resource/);
 });
@@ -175,13 +223,13 @@ test('administrator login can authorize an OAuth client through the minimal cons
     _csrf: csrf,
     username: 'admin',
     password: 'TestAdminPassword2026!',
-    returnTo: '/'
+    returnTo: '/',
   });
   const signedIn = await fetch(`${baseUrl}/login`, {
     method: 'POST',
     redirect: 'manual',
     headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: firstCookie },
-    body: form.toString()
+    body: form.toString(),
   });
   assert.equal(signedIn.status, 302);
   const authenticatedCookie = (signedIn.headers.get('set-cookie') || '').split(';')[0];
@@ -193,7 +241,7 @@ test('administrator login can authorize an OAuth client through the minimal cons
     displayName: 'Consent Test Client',
     principalId: 'principal:consent_test',
     redirectUris: ['https://chatgpt.com/connector_platform_oauth_redirect'],
-    allowedScopes: ['bot_report.read', 'bot_report.terminal']
+    allowedScopes: ['bot_report.read', 'bot_report.terminal'],
   });
   const verifier = 'consent-test-verifier-abcdefghijklmnopqrstuvwxyz-0123456789';
   const challenge = require('crypto').createHash('sha256').update(verifier).digest('base64url');
@@ -205,11 +253,11 @@ test('administrator login can authorize an OAuth client through the minimal cons
     state: 'consent-state',
     code_challenge: challenge,
     code_challenge_method: 'S256',
-    resource: config.resourceUrl
+    resource: config.resourceUrl,
   });
   const consent = await fetch(`${baseUrl}/oauth/authorize?${query}`, {
     redirect: 'manual',
-    headers: { cookie: authenticatedCookie }
+    headers: { cookie: authenticatedCookie },
   });
   assert.equal(consent.status, 200);
   const consentHtml = await consent.text();
@@ -228,13 +276,13 @@ test('administrator login can authorize an OAuth client through the minimal cons
     code_challenge: challenge,
     code_challenge_method: 'S256',
     resource: config.resourceUrl,
-    action: 'allow'
+    action: 'allow',
   });
   const allowed = await fetch(`${baseUrl}/oauth/authorize`, {
     method: 'POST',
     redirect: 'manual',
     headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: authenticatedCookie },
-    body: allowForm.toString()
+    body: allowForm.toString(),
   });
   assert.equal(allowed.status, 302);
   const location = allowed.headers.get('location');
@@ -249,15 +297,15 @@ test('administrator login can authorize an OAuth client through the minimal cons
     code,
     redirect_uri: 'https://chatgpt.com/connector_platform_oauth_redirect',
     resource: config.resourceUrl,
-    code_verifier: verifier
+    code_verifier: verifier,
   });
   const token = await fetch(`${baseUrl}/oauth/token`, {
     method: 'POST',
     headers: {
       'content-type': 'application/x-www-form-urlencoded',
-      authorization: `Basic ${Buffer.from(`${registered.client.client_id}:${registered.rawSecret}`).toString('base64')}`
+      authorization: `Basic ${Buffer.from(`${registered.client.client_id}:${registered.rawSecret}`).toString('base64')}`,
     },
-    body: tokenForm.toString()
+    body: tokenForm.toString(),
   });
   assert.equal(token.status, 200);
   const tokenBody = await token.json();
@@ -265,47 +313,106 @@ test('administrator login can authorize an OAuth client through the minimal cons
   assert.equal(tokenBody.scope, 'bot_report.read bot_report.terminal');
 });
 
+void test('OAuth rejects malformed scope without consuming a valid refresh token', async () => {
+  const { default: config } = await import('../src/config/mcpConfig.js');
+  const fixture = (await issueToken({ scopes: ['bot_report.read', 'offline_access'] })) as Awaited<
+    ReturnType<typeof OAuthServiceModule.registerClient>
+  > & { token: Awaited<ReturnType<typeof OAuthServiceModule.exchangeAuthorizationCode>> };
+  assert.ok(fixture.client);
+  assert.ok(fixture.token.refresh_token);
+  // Verify malformed input at the HTTP boundary rather than weakening scope checks.
+  const headers = {
+    'content-type': 'application/json',
+    authorization:
+      'Basic ' + Buffer.from(fixture.client.client_id + ':' + fixture.rawSecret).toString('base64'),
+  };
+  const body = {
+    grant_type: 'refresh_token',
+    refresh_token: fixture.token.refresh_token,
+    resource: config.resourceUrl,
+  };
+  const malformed = await fetch(baseUrl + '/oauth/token', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ ...body, scope: ['bot_report.read'] }),
+  });
+  assert.equal(malformed.status, 400);
+  const error: unknown = await malformed.json();
+  assert.ok(error && typeof error === 'object' && 'error' in error);
+  assert.equal(error.error, 'invalid_request');
+  const valid = await fetch(baseUrl + '/oauth/token', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ ...body, scope: 'bot_report.read' }),
+  });
+  assert.equal(valid.status, 200);
+  const result: unknown = await valid.json();
+  assert.ok(result && typeof result === 'object' && 'scope' in result);
+  assert.equal(result.scope, 'bot_report.read');
+});
+
 test('authenticated MCP initialize returns instructions and exactly 19 tools', async () => {
   const issued = await issueToken();
   const headers = {
     'content-type': 'application/json',
-    'accept': 'application/json, text/event-stream',
-    'authorization': `Bearer ${issued.token.access_token}`
+    accept: 'application/json, text/event-stream',
+    authorization: `Bearer ${issued.token.access_token}`,
   };
   const init = await fetch(`${baseUrl}/mcp`, {
-    method: 'POST', headers,
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } } })
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: { name: 'test', version: '1' },
+      },
+    }),
   });
   assert.equal(init.status, 200);
   const initBody = await parseMcpResponse(init);
-  assert.match((initBody.result as {instructions?:string}|undefined)?.instructions || '', /MCP-only/);
+  assert.match(
+    (initBody.result as { instructions?: string } | undefined)?.instructions || '',
+    /MCP-only/,
+  );
 
   const list = await fetch(`${baseUrl}/mcp`, {
-    method: 'POST', headers,
-    body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
   });
   assert.equal(list.status, 200);
   const listBody = await parseMcpResponse(list);
-  const names = (listBody.result?.tools || []).map(tool => tool.name);
+  const names = (listBody.result?.tools || []).map((tool) => tool.name);
   assert.equal(names.length, 19);
   assert.ok(names.includes('runtime_info'));
   assert.ok(names.includes('file_patch'));
   assert.ok(names.includes('process_logs'));
-  assert.ok(!names.some(name => /notification|inbox|control|antigravity/i.test(name)));
+  assert.ok(!names.some((name) => /notification|inbox|control|antigravity/i.test(name)));
 
-  await new Promise(resolve => setImmediate(resolve));
-  type AuditRow = {id:string;client_id:string;mcp_method:string;result:string};
-  const auditRows: AuditRow[] = await require('../src/repositories/mcpOAuthRepository').listAuditLogs({
-    clientId: issued.client.client_id,
-    limit: 10
-  });
-  const initializeAudit = auditRows.find(row => row.mcp_method === 'initialize' && row.result === 'SUCCESS');
-  const toolsListAudit = auditRows.find(row => row.mcp_method === 'tools/list' && row.result === 'SUCCESS');
+  await new Promise((resolve) => setImmediate(resolve));
+  type AuditRow = { id: string; client_id: string; mcp_method: string; result: string };
+  const auditRows: AuditRow[] =
+    await require('../src/repositories/mcpOAuthRepository').listAuditLogs({
+      clientId: issued.client.client_id,
+      limit: 10,
+    });
+  const initializeAudit = auditRows.find(
+    (row) => row.mcp_method === 'initialize' && row.result === 'SUCCESS',
+  );
+  const toolsListAudit = auditRows.find(
+    (row) => row.mcp_method === 'tools/list' && row.result === 'SUCCESS',
+  );
   assert.ok(initializeAudit);
   assert.ok(toolsListAudit);
-  assert.ok(auditRows.every(row => row.client_id === issued.client.client_id));
+  assert.ok(auditRows.every((row) => row.client_id === issued.client.client_id));
 
-  const initializeDetail = await require('../src/repositories/mcpOAuthRepository').findAuditLogById(initializeAudit.id);
+  const initializeDetail = await require('../src/repositories/mcpOAuthRepository').findAuditLogById(
+    initializeAudit.id,
+  );
   assert.match(initializeDetail.request_payload, /"method":"initialize"/);
   assert.match(initializeDetail.response_payload, /"jsonrpc":"2\.0"/);
   assert.match(initializeDetail.response_payload, /MCP-only/);

@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import config = require('../config/env');
+import config from '../config/env';
 
 const LEGACY_V1_PREFIX = 'enc:v1';
 const LEGACY_V2_PREFIX = 'enc:v2';
@@ -8,13 +8,18 @@ const LEGACY_V1_AAD = Buffer.from('bot_report:telegram-token:v1', 'utf8');
 const LEGACY_V2_AAD = Buffer.from('bot_report:telegram-token:v2', 'utf8');
 const AAD = Buffer.from('bot_report:telegram-token:v3', 'utf8');
 
-function secretError(message: string) { return Object.assign(new Error(message), {code: 'TELEGRAM_SECRET_DECRYPT_FAILED'}); }
+function secretError(message: string) {
+  return Object.assign(new Error(message), { code: 'TELEGRAM_SECRET_DECRYPT_FAILED' });
+}
 
 function decodeKey(encoded: string | undefined, message: string) {
   if (!encoded) throw secretError(message);
   const normalized = encoded.trim();
   const key = Buffer.from(normalized, 'base64');
-  if (key.length !== 32 || key.toString('base64').replace(/=+$/, '') !== normalized.replace(/=+$/, '')) {
+  if (
+    key.length !== 32 ||
+    key.toString('base64').replace(/=+$/, '') !== normalized.replace(/=+$/, '')
+  ) {
     throw secretError('Application credential encryption key is invalid.');
   }
   return key;
@@ -23,14 +28,14 @@ function decodeKey(encoded: string | undefined, message: string) {
 function readApplicationCredentialKey() {
   return decodeKey(
     process.env.APP_ENCRYPTION_KEY || process.env.TERMINAL_CREDENTIAL_KEY,
-    'Application credential encryption requires APP_ENCRYPTION_KEY (or legacy TERMINAL_CREDENTIAL_KEY).'
+    'Application credential encryption requires APP_ENCRYPTION_KEY (or legacy TERMINAL_CREDENTIAL_KEY).',
   );
 }
 
 function readLegacyV2Key() {
   return decodeKey(
     process.env.TELEGRAM_CREDENTIAL_KEY || process.env.TERMINAL_CREDENTIAL_KEY,
-    'Legacy Telegram token encryption key is unavailable.'
+    'Legacy Telegram token encryption key is unavailable.',
   );
 }
 
@@ -39,7 +44,8 @@ function readLegacyV1Key() {
   if (!sessionSecret || typeof sessionSecret !== 'string') {
     throw secretError('Legacy Telegram token encryption key is unavailable.');
   }
-  return crypto.createHash('sha256')
+  return crypto
+    .createHash('sha256')
     .update('bot_report:telegram-key:v1\0', 'utf8')
     .update(sessionSecret, 'utf8')
     .digest();
@@ -50,7 +56,9 @@ function isEncrypted(value: unknown) {
 }
 
 function needsMigration(value: unknown) {
-  return typeof value === 'string' && Boolean(value.trim()) && !value.trim().startsWith(`${PREFIX}:`);
+  return (
+    typeof value === 'string' && Boolean(value.trim()) && !value.trim().startsWith(`${PREFIX}:`)
+  );
 }
 
 function encrypt(value: string) {
@@ -67,7 +75,12 @@ function encrypt(value: string) {
   cipher.setAAD(AAD);
   const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
-  return [PREFIX, iv.toString('base64url'), tag.toString('base64url'), ciphertext.toString('base64url')].join(':');
+  return [
+    PREFIX,
+    iv.toString('base64url'),
+    tag.toString('base64url'),
+    ciphertext.toString('base64url'),
+  ].join(':');
 }
 
 function decryptEnvelope(stored: string, prefix: string, key: Buffer, aad: Buffer) {
@@ -78,7 +91,12 @@ function decryptEnvelope(stored: string, prefix: string, key: Buffer, aad: Buffe
   const iv = Buffer.from(parts[2], 'base64url');
   const tag = Buffer.from(parts[3], 'base64url');
   const ciphertext = Buffer.from(parts[4], 'base64url');
-  if (iv.length !== 12 || tag.length !== 16 || ciphertext.length === 0 || ciphertext.length > 4096) {
+  if (
+    iv.length !== 12 ||
+    tag.length !== 16 ||
+    ciphertext.length === 0 ||
+    ciphertext.length > 4096
+  ) {
     throw secretError('Stored Telegram token envelope is invalid.');
   }
   const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
@@ -106,7 +124,13 @@ function decrypt(value: unknown) {
     }
     throw secretError('Stored Telegram token envelope version is unsupported.');
   } catch (error) {
-    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'TELEGRAM_SECRET_DECRYPT_FAILED') throw error;
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 'TELEGRAM_SECRET_DECRYPT_FAILED'
+    )
+      throw error;
     throw secretError('Stored Telegram token could not be decrypted.');
   }
 }

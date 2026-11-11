@@ -1,10 +1,11 @@
 import * as adminIdentity from './adminIdentityService';
-import databaseManager = require('../db/databaseManager');
-import userService = require('./userService');
+import databaseManager from '../db/databaseManager';
+import userService from './userService';
 
 class AuthService {
   async authenticate(username: string, password: string) {
-    if (!username || !password) return { success: false, message: 'Username and password are required' };
+    if (!username || !password)
+      return { success: false, message: 'Username and password are required' };
     const admin = adminIdentity.authenticate(username, password);
     if (admin) return { success: true, user: admin };
     if (databaseManager.isOperational()) {
@@ -14,7 +15,10 @@ class AuthService {
     return { success: false, message: 'Invalid username or password' };
   }
 
-  async currentIdentity(session: Parameters<typeof userService.currentFromSession>[0] & Parameters<typeof adminIdentity.currentFromSession>[0]) {
+  async currentIdentity(
+    session: Parameters<typeof userService.currentFromSession>[0] &
+      Parameters<typeof adminIdentity.currentFromSession>[0],
+  ) {
     const admin = adminIdentity.currentFromSession(session);
     if (admin) return admin;
     if (!databaseManager.isOperational()) return null;

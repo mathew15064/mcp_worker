@@ -1,16 +1,23 @@
-import databaseManager = require('../db/databaseManager');
+import databaseManager from '../db/databaseManager';
 import type { DatabaseAdapter } from '../db/contracts';
 
 const DEFAULTS = Object.freeze({
   'mcp.enabled': process.env.MCP_ENABLED !== 'false' ? 'true' : 'false',
-  'mcp.public_base_url': String(process.env.MCP_PUBLIC_BASE_URL || 'http://localhost:3333').replace(/\/+$/, ''),
-  'mcp.access_token_ttl_seconds': String(parseInt(process.env.MCP_ACCESS_TOKEN_TTL_SECONDS || '900', 10)),
-  'mcp.refresh_token_ttl_seconds': String(parseInt(process.env.MCP_REFRESH_TOKEN_TTL_SECONDS || '2592000', 10)),
+  'mcp.public_base_url': String(process.env.MCP_PUBLIC_BASE_URL || 'http://localhost:3333').replace(
+    /\/+$/,
+    '',
+  ),
+  'mcp.access_token_ttl_seconds': String(
+    parseInt(process.env.MCP_ACCESS_TOKEN_TTL_SECONDS || '900', 10),
+  ),
+  'mcp.refresh_token_ttl_seconds': String(
+    parseInt(process.env.MCP_REFRESH_TOKEN_TTL_SECONDS || '2592000', 10),
+  ),
   'mcp.auth_code_ttl_seconds': String(parseInt(process.env.MCP_AUTH_CODE_TTL_SECONDS || '300', 10)),
   'mcp.rate_limit_per_minute': String(parseInt(process.env.MCP_RATE_LIMIT_PER_MINUTE || '120', 10)),
   'telegram.enabled': 'false',
   'telegram.chat_id': '',
-  'telegram.bot_token': ''
+  'telegram.bot_token': '',
 });
 
 class RuntimeSettingsService {
@@ -56,13 +63,19 @@ class RuntimeSettingsService {
     const db = adapter || databaseManager.requireAdapter();
     const now = new Date().toISOString();
     if (db.kind === 'mysql') {
-      await db.execute(`INSERT INTO system_settings (\`key\`, \`value\`, updated_at)
+      await db.execute(
+        `INSERT INTO system_settings (\`key\`, \`value\`, updated_at)
         VALUES (?, ?, ?)
-        ON DUPLICATE KEY UPDATE \`value\` = VALUES(\`value\`), updated_at = VALUES(updated_at)`, [key, String(value ?? ''), now]);
+        ON DUPLICATE KEY UPDATE \`value\` = VALUES(\`value\`), updated_at = VALUES(updated_at)`,
+        [key, String(value ?? ''), now],
+      );
     } else {
-      await db.execute(`INSERT INTO system_settings (key, value, updated_at)
+      await db.execute(
+        `INSERT INTO system_settings (key, value, updated_at)
         VALUES (?, ?, ?)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`, [key, String(value ?? ''), now]);
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+        [key, String(value ?? ''), now],
+      );
     }
     this.values.set(key, String(value ?? ''));
   }
@@ -75,10 +88,14 @@ class RuntimeSettingsService {
 
   async seedDefaults(adapter: DatabaseAdapter | null = null) {
     const db = adapter || databaseManager.requireAdapter();
-    let rows: {key: string}[] = [];
-    try { rows = await db.queryAll<{key: string}>('SELECT `key` FROM system_settings'); } catch (_) {}
-    const existing = new Set(rows.map(row => String(row.key)));
-    const currentBase = String(process.env.MCP_PUBLIC_BASE_URL || DEFAULTS['mcp.public_base_url']).replace(/\/+$/, '');
+    let rows: { key: string }[] = [];
+    try {
+      rows = await db.queryAll<{ key: string }>('SELECT `key` FROM system_settings');
+    } catch (_) {}
+    const existing = new Set(rows.map((row) => String(row.key)));
+    const currentBase = String(
+      process.env.MCP_PUBLIC_BASE_URL || DEFAULTS['mcp.public_base_url'],
+    ).replace(/\/+$/, '');
     const seed = { ...DEFAULTS, 'mcp.public_base_url': currentBase };
     for (const [key, value] of Object.entries(seed)) {
       if (!existing.has(key)) await this.set(key, value, db);
@@ -86,7 +103,9 @@ class RuntimeSettingsService {
     await this.load(db);
   }
 
-  snapshot() { return Object.fromEntries(this.values.entries()); }
+  snapshot() {
+    return Object.fromEntries(this.values.entries());
+  }
 
   resetForTests() {
     this.values = new Map(Object.entries(DEFAULTS));
@@ -94,5 +113,5 @@ class RuntimeSettingsService {
   }
 }
 
-const instance = Object.assign(new RuntimeSettingsService(), {RuntimeSettingsService, DEFAULTS});
+const instance = Object.assign(new RuntimeSettingsService(), { RuntimeSettingsService, DEFAULTS });
 export = instance;

@@ -1,7 +1,7 @@
-import Database = require('better-sqlite3');
-import fs = require('node:fs');
-import path = require('node:path');
-import config = require('../config/env');
+import Database from 'better-sqlite3';
+import fs from 'node:fs';
+import path from 'node:path';
+import config from '../config/env';
 
 let dbInstance: Database.Database | null = null;
 let currentDbPath: string | null = null;
@@ -15,8 +15,14 @@ export function getDb(customPath: string | null = null) {
   const resolvedTarget = path.resolve(targetPath);
 
   // FAIL-CLOSED DATA SAFETY GUARD
-  if (process.env.NODE_ENV === 'test' && (resolvedTarget === PROD_DB_PATH || resolvedTarget === COMPILED_DB_PATH)) {
-    throw new Error('[DATA_SAFETY_VIOLATION] Refusing to open production SQLite database in test mode! Target: ' + resolvedTarget);
+  if (
+    process.env.NODE_ENV === 'test' &&
+    (resolvedTarget === PROD_DB_PATH || resolvedTarget === COMPILED_DB_PATH)
+  ) {
+    throw new Error(
+      '[DATA_SAFETY_VIOLATION] Refusing to open production SQLite database in test mode! Target: ' +
+        resolvedTarget,
+    );
   }
 
   if (dbInstance && currentDbPath === targetPath) {

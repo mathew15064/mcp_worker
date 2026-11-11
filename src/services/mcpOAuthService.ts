@@ -1,14 +1,56 @@
 import crypto from 'node:crypto';
-import mcpConfig = require('../config/mcpConfig');
-import mcpOAuthRepository = require('../repositories/mcpOAuthRepository');
+import mcpConfig from '../config/mcpConfig';
+import mcpOAuthRepository from '../repositories/mcpOAuthRepository';
 
-interface RegisterInput {displayName: string; principalId?: string | null; profileId?: string | null; ownerUserId?: string | null; redirectUris?: string[] | string; allowedScopes?: string[] | string}
-interface AuthorizeInput {clientId?: string; redirectUri?: string; responseType?: string; scope?: string; state?: string; codeChallenge?: string; codeChallengeMethod?: string; resource?: string}
-interface CodeInput {clientId: string; userId: string; principalId: string; redirectUri: string; resource: string; scopes?: string[]; codeChallenge: string; codeChallengeMethod?: string}
-interface ExchangeInput {clientId: string; clientSecret: string; code: string; redirectUri: string; resource?: string | null; codeVerifier: string}
-interface RefreshInput {clientId: string; clientSecret: string; refreshToken: string; scope?: string | null; resource?: string | null}
-interface RevokeInput {clientId: string; clientSecret: string; token: string; tokenTypeHint?: string | null}
-
+interface RegisterInput {
+  displayName: string;
+  principalId?: string | null;
+  profileId?: string | null;
+  ownerUserId?: string | null;
+  redirectUris?: string[] | string;
+  allowedScopes?: string[] | string;
+}
+interface AuthorizeInput {
+  clientId?: string;
+  redirectUri?: string;
+  responseType?: string;
+  scope?: string;
+  state?: string;
+  codeChallenge?: string;
+  codeChallengeMethod?: string;
+  resource?: string;
+}
+interface CodeInput {
+  clientId: string;
+  userId: string;
+  principalId: string;
+  redirectUri: string;
+  resource: string;
+  scopes?: string[];
+  codeChallenge: string;
+  codeChallengeMethod?: string;
+}
+interface ExchangeInput {
+  clientId: string;
+  clientSecret: string;
+  code: string;
+  redirectUri: string;
+  resource?: string | null;
+  codeVerifier: string;
+}
+interface RefreshInput {
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
+  scope?: string | null;
+  resource?: string | null;
+}
+interface RevokeInput {
+  clientId: string;
+  clientSecret: string;
+  token: string;
+  tokenTypeHint?: string | null;
+}
 
 class OAuthError extends Error {
   error: string;
@@ -26,7 +68,10 @@ class OAuthError extends Error {
 class McpOAuthService {
   repo: InstanceType<typeof mcpOAuthRepository.McpOAuthRepository>;
   config: InstanceType<typeof mcpConfig.McpConfig>;
-  constructor(repo: InstanceType<typeof mcpOAuthRepository.McpOAuthRepository> = mcpOAuthRepository, config: InstanceType<typeof mcpConfig.McpConfig> = mcpConfig) {
+  constructor(
+    repo: InstanceType<typeof mcpOAuthRepository.McpOAuthRepository> = mcpOAuthRepository,
+    config: InstanceType<typeof mcpConfig.McpConfig> = mcpConfig,
+  ) {
     this.repo = repo;
     this.config = config;
   }
@@ -47,56 +92,89 @@ class McpOAuthService {
   // Client Management
   // ==========================================================================
 
-  async registerClient({ displayName, principalId, profileId = null, ownerUserId = null, redirectUris = [], allowedScopes = [] }: RegisterInput) {
+  async registerClient({
+    displayName,
+    principalId,
+    profileId = null,
+    ownerUserId = null,
+    redirectUris = [],
+    allowedScopes = [],
+  }: RegisterInput) {
     if (!displayName || typeof displayName !== 'string' || !displayName.trim()) {
       throw new OAuthError('invalid_client_metadata', 'Client display name is required.');
     }
     const rawClientId = `br_client_${crypto.randomBytes(16).toString('hex')}`;
     if (ownerUserId && (!principalId || typeof principalId !== 'string' || !principalId.trim())) {
-      throw new OAuthError('invalid_client_metadata', 'User-owned clients require a user principal identity.');
+      throw new OAuthError(
+        'invalid_client_metadata',
+        'User-owned clients require a user principal identity.',
+      );
     }
 
-    const normalizedPid = principalId && typeof principalId === 'string' && principalId.trim()
-      ? principalId.trim()
-      : `principal:client:${rawClientId}`;
-    if (normalizedPid === 'principal:owner' || normalizedPid === 'OWNER' ||
-        normalizedPid === 'principal:system' || normalizedPid === 'SYSTEM') {
+    const normalizedPid =
+      principalId && typeof principalId === 'string' && principalId.trim()
+        ? principalId.trim()
+        : `principal:client:${rawClientId}`;
+    if (
+      normalizedPid === 'principal:owner' ||
+      normalizedPid === 'OWNER' ||
+      normalizedPid === 'principal:system' ||
+      normalizedPid === 'SYSTEM'
+    ) {
       throw new OAuthError(
         'unauthorized_client_identity',
-        `Remote OAuth clients cannot be mapped to '${normalizedPid}'. Owner and System identities require direct human web authorization.`
+        `Remote OAuth clients cannot be mapped to '${normalizedPid}'. Owner and System identities require direct human web authorization.`,
       );
     }
     if (!ownerUserId && normalizedPid.startsWith('principal:user:')) {
-      throw new OAuthError('unauthorized_client_identity', 'User principal identities can only be assigned through a user-owned client profile.');
+      throw new OAuthError(
+        'unauthorized_client_identity',
+        'User principal identities can only be assigned through a user-owned client profile.',
+      );
     }
     if (ownerUserId && !normalizedPid.startsWith('principal:user:')) {
-      throw new OAuthError('invalid_client_metadata', 'User-owned clients require a user principal identity.');
+      throw new OAuthError(
+        'invalid_client_metadata',
+        'User-owned clients require a user principal identity.',
+      );
     }
 
     const uris = Array.isArray(redirectUris) ? redirectUris : [redirectUris];
-    const cleanedUris = uris.map(u => String(u).trim()).filter(Boolean);
+    const cleanedUris = uris.map((u) => String(u).trim()).filter(Boolean);
     if (cleanedUris.length === 0) {
-      throw new OAuthError('invalid_client_metadata', 'At least one valid redirect URI is required.');
+      throw new OAuthError(
+        'invalid_client_metadata',
+        'At least one valid redirect URI is required.',
+      );
     }
     for (const uri of cleanedUris) {
       try {
         const parsed = new URL(uri);
-        if (parsed.protocol !== 'https:' && parsed.hostname !== 'localhost' && parsed.hostname !== '127.0.0.1') {
+        if (
+          parsed.protocol !== 'https:' &&
+          parsed.hostname !== 'localhost' &&
+          parsed.hostname !== '127.0.0.1'
+        ) {
           throw new Error('Redirect URI must use HTTPS (or localhost for local development)');
         }
       } catch (err) {
-        throw new OAuthError('invalid_client_metadata', `Invalid redirect URI '${uri}': ${err instanceof Error ? err.message : String(err)}`);
+        throw new OAuthError(
+          'invalid_client_metadata',
+          `Invalid redirect URI '${uri}': ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
 
     const scopes = Array.isArray(allowedScopes) ? allowedScopes : [allowedScopes];
-    const cleanedScopes = scopes.filter(s => this.config.supportedScopes.includes(s));
+    const cleanedScopes = scopes.filter((s) => this.config.supportedScopes.includes(s));
     if (cleanedScopes.length === 0) {
       cleanedScopes.push('bot_report.read', 'bot_report.terminal');
     }
 
     const rawClientSecret = `br_sec_${crypto.randomBytes(32).toString('base64url')}`;
-    const resolvedProfileId = String(profileId || `prof_${crypto.randomBytes(12).toString('hex')}`).trim();
+    const resolvedProfileId = String(
+      profileId || `prof_${crypto.randomBytes(12).toString('hex')}`,
+    ).trim();
     const secretHash = this.hash(rawClientSecret);
 
     const client = await this.repo.createClient({
@@ -108,12 +186,12 @@ class McpOAuthService {
       ownerUserId,
       redirectUris: cleanedUris,
       allowedScopes: cleanedScopes,
-      status: 'active'
+      status: 'active',
     });
 
     return {
       client,
-      rawSecret: rawClientSecret
+      rawSecret: rawClientSecret,
     };
   }
 
@@ -130,7 +208,7 @@ class McpOAuthService {
     const updatedClient = await this.repo.findClientById(client.id);
     return {
       client: updatedClient,
-      rawSecret: rawClientSecret
+      rawSecret: rawClientSecret,
     };
   }
 
@@ -148,7 +226,11 @@ class McpOAuthService {
       throw new OAuthError('invalid_client', `Client '${clientId}' is ${client.status}.`, 401);
     }
     if (client.owner_user_id && client.owner_user_status !== 'active') {
-      throw new OAuthError('invalid_client', 'The mcp_worker user that owns this client is disabled.', 401);
+      throw new OAuthError(
+        'invalid_client',
+        'The mcp_worker user that owns this client is disabled.',
+        401,
+      );
     }
 
     const candidateHash = this.hash(clientSecret);
@@ -171,7 +253,7 @@ class McpOAuthService {
     state,
     codeChallenge,
     codeChallengeMethod,
-    resource
+    resource,
   }: AuthorizeInput) {
     if (!clientId) {
       throw new OAuthError('invalid_request', 'Missing required parameter: client_id');
@@ -184,7 +266,10 @@ class McpOAuthService {
       throw new OAuthError('unauthorized_client', `Client '${clientId}' is disabled or revoked.`);
     }
     if (client.owner_user_id && client.owner_user_status !== 'active') {
-      throw new OAuthError('unauthorized_client', 'The mcp_worker user that owns this client is disabled.');
+      throw new OAuthError(
+        'unauthorized_client',
+        'The mcp_worker user that owns this client is disabled.',
+      );
     }
 
     if (!redirectUri) {
@@ -195,14 +280,20 @@ class McpOAuthService {
     }
 
     if (responseType !== 'code') {
-      throw new OAuthError('unsupported_response_type', `response_type must be 'code'. Got '${responseType}'`);
+      throw new OAuthError(
+        'unsupported_response_type',
+        `response_type must be 'code'. Got '${responseType}'`,
+      );
     }
 
     if (!codeChallenge) {
       throw new OAuthError('invalid_request', 'Missing required PKCE parameter: code_challenge');
     }
     if (codeChallengeMethod !== 'S256') {
-      throw new OAuthError('invalid_request', `code_challenge_method must be 'S256'. 'plain' is forbidden.`);
+      throw new OAuthError(
+        'invalid_request',
+        `code_challenge_method must be 'S256'. 'plain' is forbidden.`,
+      );
     }
 
     const canonicalResource = this.config.resourceUrl;
@@ -210,7 +301,10 @@ class McpOAuthService {
       throw new OAuthError('invalid_target', 'Missing required parameter: resource');
     }
     if (resource !== canonicalResource) {
-      throw new OAuthError('invalid_target', `Requested resource '${resource}' does not match canonical resource '${canonicalResource}'`);
+      throw new OAuthError(
+        'invalid_target',
+        `Requested resource '${resource}' does not match canonical resource '${canonicalResource}'`,
+      );
     }
 
     let requestedScopes: string[] = [];
@@ -221,9 +315,12 @@ class McpOAuthService {
       requestedScopes = ['bot_report.read', 'bot_report.terminal'];
     }
 
-    const allowedScopes = requestedScopes.filter(s => client.allowed_scopes.includes(s));
+    const allowedScopes = requestedScopes.filter((s) => client.allowed_scopes.includes(s));
     if (allowedScopes.length === 0) {
-      throw new OAuthError('invalid_scope', 'None of the requested scopes are permitted for this client.');
+      throw new OAuthError(
+        'invalid_scope',
+        'None of the requested scopes are permitted for this client.',
+      );
     }
 
     return {
@@ -233,7 +330,7 @@ class McpOAuthService {
       scopes: allowedScopes,
       codeChallenge,
       codeChallengeMethod,
-      state: state || null
+      state: state || null,
     };
   }
 
@@ -245,7 +342,7 @@ class McpOAuthService {
     resource,
     scopes = [],
     codeChallenge,
-    codeChallengeMethod = 'S256'
+    codeChallengeMethod = 'S256',
   }: CodeInput) {
     const rawCode = `br_code_${crypto.randomBytes(32).toString('base64url')}`;
     const codeHash = this.hash(rawCode);
@@ -262,7 +359,7 @@ class McpOAuthService {
       scopes,
       codeChallenge,
       codeChallengeMethod,
-      expiresAt
+      expiresAt,
     });
 
     await this.repo.recordClientAuthorization(clientId);
@@ -276,7 +373,7 @@ class McpOAuthService {
     code,
     redirectUri,
     resource,
-    codeVerifier
+    codeVerifier,
   }: ExchangeInput) {
     const client = await this.authenticateClient(clientId, clientSecret);
 
@@ -303,10 +400,16 @@ class McpOAuthService {
       throw new OAuthError('invalid_grant', 'Authorization code was not issued to this client.');
     }
     if (codeRecord.redirect_uri !== redirectUri) {
-      throw new OAuthError('invalid_grant', 'redirect_uri does not match original authorization request.');
+      throw new OAuthError(
+        'invalid_grant',
+        'redirect_uri does not match original authorization request.',
+      );
     }
     if (resource && codeRecord.resource !== resource) {
-      throw new OAuthError('invalid_target', 'resource does not match original authorization request.');
+      throw new OAuthError(
+        'invalid_target',
+        'resource does not match original authorization request.',
+      );
     }
 
     const calculatedChallenge = crypto
@@ -329,7 +432,7 @@ class McpOAuthService {
       principalId: client.principal_id,
       resource: codeRecord.resource,
       scopes: codeRecord.scopes,
-      expiresAt: accessExpiresAt
+      expiresAt: accessExpiresAt,
     };
 
     let rawRefreshToken = null;
@@ -348,7 +451,7 @@ class McpOAuthService {
         principalId: client.principal_id,
         resource: codeRecord.resource,
         scopes: codeRecord.scopes,
-        expiresAt: refreshExpiresAt
+        expiresAt: refreshExpiresAt,
       };
     }
 
@@ -356,7 +459,7 @@ class McpOAuthService {
       await this.repo.consumeAuthCodeAndIssueTokens({
         codeId: codeRecord.id,
         accessToken: accessTokenData,
-        refreshToken: refreshTokenData
+        refreshToken: refreshTokenData,
       });
     } catch (err) {
       if (err instanceof Error && err.message === 'CONCURRENT_CONSUMPTION') {
@@ -370,7 +473,7 @@ class McpOAuthService {
       token_type: 'Bearer',
       expires_in: accessTtl,
       refresh_token: rawRefreshToken || undefined,
-      scope: codeRecord.scopes.join(' ')
+      scope: codeRecord.scopes.join(' '),
     };
   }
 
@@ -383,7 +486,7 @@ class McpOAuthService {
     clientSecret,
     refreshToken,
     scope = null,
-    resource = null
+    resource = null,
   }: RefreshInput) {
     const client = await this.authenticateClient(clientId, clientSecret);
 
@@ -403,7 +506,10 @@ class McpOAuthService {
 
     if (refreshRecord.replaced_by_hash || refreshRecord.revoked_at) {
       await this.repo.revokeTokenFamily(refreshRecord.token_family_id);
-      throw new OAuthError('invalid_grant', 'Refresh token has already been used. Compromised token family revoked.');
+      throw new OAuthError(
+        'invalid_grant',
+        'Refresh token has already been used. Compromised token family revoked.',
+      );
     }
 
     if (new Date(refreshRecord.expires_at).getTime() <= Date.now()) {
@@ -445,7 +551,7 @@ class McpOAuthService {
           principalId: client.principal_id,
           resource: refreshRecord.resource,
           scopes: grantedScopes,
-          expiresAt: newRefreshExpiresAt
+          expiresAt: newRefreshExpiresAt,
         },
         accessToken: {
           tokenHash: newAccessTokenHash,
@@ -453,12 +559,15 @@ class McpOAuthService {
           principalId: client.principal_id,
           resource: refreshRecord.resource,
           scopes: grantedScopes,
-          expiresAt: newAccessExpiresAt
-        }
+          expiresAt: newAccessExpiresAt,
+        },
       });
     } catch (err) {
       if (err instanceof Error && err.message === 'CONCURRENT_REFRESH_ROTATION') {
-        throw new OAuthError('invalid_grant', 'Refresh token was already rotated by another request.');
+        throw new OAuthError(
+          'invalid_grant',
+          'Refresh token was already rotated by another request.',
+        );
       }
       throw err;
     }
@@ -468,7 +577,7 @@ class McpOAuthService {
       token_type: 'Bearer',
       expires_in: accessTtl,
       refresh_token: rawNewRefreshToken,
-      scope: grantedScopes.join(' ')
+      scope: grantedScopes.join(' '),
     };
   }
 
@@ -504,5 +613,5 @@ class McpOAuthService {
   }
 }
 
-const instance = Object.assign(new McpOAuthService(), {McpOAuthService, OAuthError});
+const instance = Object.assign(new McpOAuthService(), { McpOAuthService, OAuthError });
 export = instance;

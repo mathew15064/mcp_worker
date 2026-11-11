@@ -1,32 +1,35 @@
-import express, {type Request, type Response, type NextFunction} from 'express';
-function routeError(value: unknown): {code?: string; status?: number; message: string} {
-  const e = value && typeof value === 'object' ? value as {code?: string; status?: number; message?: string} : {};
-  return {code: e.code, status: e.status, message: e.message || 'Request failed'};
+import express, { type Request, type Response, type NextFunction } from 'express';
+function routeError(value: unknown): { code?: string; status?: number; message: string } {
+  const e =
+    value && typeof value === 'object'
+      ? (value as { code?: string; status?: number; message?: string })
+      : {};
+  return { code: e.code, status: e.status, message: e.message || 'Request failed' };
 }
 
 const packageJson = require('../../package.json');
-import authRoutes = require('./authRoutes');
-const {currentAdmin} = authRoutes;
-import oauthRepo = require('../repositories/mcpOAuthRepository');
-import oauthService = require('../services/mcpOAuthService');
-import userRepo = require('../repositories/userRepository');
-import userService = require('../services/userService');
-import workerRepo = require('../repositories/workerRepository');
-import workerBroker = require('../services/workerConnectionBroker');
-import workerLifecycleService = require('../services/workerLifecycleService');
-import workerExecutionService = require('../services/workerExecutionService');
+import authRoutes from './authRoutes';
+const { currentAdmin } = authRoutes;
+import oauthRepo from '../repositories/mcpOAuthRepository';
+import oauthService from '../services/mcpOAuthService';
+import userRepo from '../repositories/userRepository';
+import userService from '../services/userService';
+import workerRepo from '../repositories/workerRepository';
+import workerBroker from '../services/workerConnectionBroker';
+import workerLifecycleService from '../services/workerLifecycleService';
+import workerExecutionService from '../services/workerExecutionService';
 const terminalNonces = require('../services/terminalNonceService');
 const terminalOrigins = require('../services/terminalPublicOriginService');
-import settingsRepo = require('../repositories/settingsRepository');
-import telegramSecrets = require('../services/telegramSecretService');
-import telegramService = require('../services/telegramService');
-import runtimeSettings = require('../services/runtimeSettingsService');
+import settingsRepo from '../repositories/settingsRepository';
+import telegramSecrets from '../services/telegramSecretService';
+import telegramService from '../services/telegramService';
+import runtimeSettings from '../services/runtimeSettingsService';
 const legacyImporter = require('../services/legacySqliteImportService');
-import databaseManager = require('../db/databaseManager');
-import bootstrapConfigStore = require('../db/bootstrapConfigStore');
+import databaseManager from '../db/databaseManager';
+import bootstrapConfigStore from '../db/bootstrapConfigStore';
 const { normalizeDatabaseConfig } = bootstrapConfigStore;
-import mcpConfig = require('../config/mcpConfig');
-import {TOOLS} from '../mcp/toolRegistry';
+import mcpConfig from '../config/mcpConfig';
+import { TOOLS } from '../mcp/toolRegistry';
 const {
   adminOverviewPage,
   onboardingPage,
@@ -38,7 +41,7 @@ const {
   usersPage,
   settingsPage,
   setupRequiredPage,
-  errorPage
+  errorPage,
 } = require('../http/pages');
 
 const router = express.Router();
@@ -52,7 +55,10 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
 function requireDataStore(req: Request, res: Response, next: NextFunction) {
   if (databaseManager.isOperational()) return next();
   const status = databaseManager.status();
-  return res.status(503).type('html').send(setupRequiredPage({ status, csrfToken: csrf(req) }));
+  return res
+    .status(503)
+    .type('html')
+    .send(setupRequiredPage({ status, csrfToken: csrf(req) }));
 }
 
 function consumeFlash(req: Request) {
@@ -63,85 +69,136 @@ function consumeFlash(req: Request) {
   }
   return value;
 }
-function setFlash(req: Request, kind: 'error' | 'success', message: string) { if (req.session) req.session[kind === 'error' ? 'flashError' : 'flashSuccess'] = message; }
-function setOneTimeSecret(req: Request, secret: {clientId: string; clientSecret: string}) { if (req.session) req.session.oauthOneTimeSecret = secret; }
-function consumeOneTimeSecret(req: Request) { const secret = req.session?.oauthOneTimeSecret || null; if (req.session) delete req.session.oauthOneTimeSecret; return secret; }
-function setWorkerEnrollment(req: Request, enrollment: {token: string; expires_at?: string}) { if (req.session) req.session.workerEnrollment = enrollment; }
-function consumeWorkerEnrollment(req: Request) { const value = req.session?.workerEnrollment || null; if (req.session) delete req.session.workerEnrollment; return value; }
-function csrf(req: Request) { return req.session?.csrfToken || ''; }
+function setFlash(req: Request, kind: 'error' | 'success', message: string) {
+  if (req.session) req.session[kind === 'error' ? 'flashError' : 'flashSuccess'] = message;
+}
+function setOneTimeSecret(req: Request, secret: { clientId: string; clientSecret: string }) {
+  if (req.session) req.session.oauthOneTimeSecret = secret;
+}
+function consumeOneTimeSecret(req: Request) {
+  const secret = req.session?.oauthOneTimeSecret || null;
+  if (req.session) delete req.session.oauthOneTimeSecret;
+  return secret;
+}
+function setWorkerEnrollment(req: Request, enrollment: { token: string; expires_at?: string }) {
+  if (req.session) req.session.workerEnrollment = enrollment;
+}
+function consumeWorkerEnrollment(req: Request) {
+  const value = req.session?.workerEnrollment || null;
+  if (req.session) delete req.session.workerEnrollment;
+  return value;
+}
+function csrf(req: Request) {
+  return req.session?.csrfToken || '';
+}
 
-async function clientList() { return databaseManager.isOperational() ? (await oauthRepo.listClients()).filter((v): v is NonNullable<typeof v> => v !== null) : []; }
+async function clientList() {
+  return databaseManager.isOperational()
+    ? (await oauthRepo.listClients()).filter((v): v is NonNullable<typeof v> => v !== null)
+    : [];
+}
 
 async function requireActiveAdminWorker(workerId: string) {
   const worker = await workerRepo.findAdminWorkerById(workerId);
-  if (!worker) throw Object.assign(new Error('Admin SSH Profiles can only use global/admin-owned Workers.'), { code: 'WORKER_NOT_FOUND', status: 404 });
+  if (!worker)
+    throw Object.assign(new Error('Admin SSH Profiles can only use global/admin-owned Workers.'), {
+      code: 'WORKER_NOT_FOUND',
+      status: 404,
+    });
   if (!worker.enabled || !workerBroker.isOnline(worker.id)) {
-    throw Object.assign(new Error('SSH Profiles can only bind to an enabled Worker that is currently online.'), { code: 'WORKER_NOT_ONLINE', status: 409 });
+    throw Object.assign(
+      new Error('SSH Profiles can only bind to an enabled Worker that is currently online.'),
+      { code: 'WORKER_NOT_ONLINE', status: 409 },
+    );
   }
   return worker;
 }
 
 async function adminSshData() {
-  const workers = (await workerRepo.listAdminWorkers()).filter((v): v is NonNullable<typeof v> => v !== null).map(worker => ({
-    ...worker,
-    status: worker.enabled && workerBroker.isOnline(worker.id) ? 'online' : 'offline'
-  }));
-  const workerById = new Map(workers.map(worker => [worker.id, worker]));
-  const profiles = (await workerRepo.listAdminProfiles()).filter((v): v is NonNullable<typeof v> => v !== null).map(profile => {
-    const liveWorker = workerById.get(profile.worker_id);
-    return { ...profile, worker_status: liveWorker?.status || 'offline', worker_enabled: Boolean(liveWorker?.enabled) };
-  });
+  const workers = (await workerRepo.listAdminWorkers())
+    .filter((v): v is NonNullable<typeof v> => v !== null)
+    .map((worker) => ({
+      ...worker,
+      status: worker.enabled && workerBroker.isOnline(worker.id) ? 'online' : 'offline',
+    }));
+  const workerById = new Map(workers.map((worker) => [worker.id, worker]));
+  const profiles = (await workerRepo.listAdminProfiles())
+    .filter((v): v is NonNullable<typeof v> => v !== null)
+    .map((profile) => {
+      const liveWorker = workerById.get(profile.worker_id);
+      return {
+        ...profile,
+        worker_status: liveWorker?.status || 'offline',
+        worker_enabled: Boolean(liveWorker?.enabled),
+      };
+    });
   return { workers, profiles };
 }
 
 async function telegramConfig() {
   if (!databaseManager.isOperational()) return { enabled: false, hasToken: false, chatId: '' };
-  const enabledValue = await settingsRepo.get('telegram.enabled', null)
-    ?? await settingsRepo.get('telegram_mcp_enabled', null)
-    ?? await settingsRepo.get('telegram_enabled', 'false');
-  const token = await settingsRepo.get('telegram.bot_token', null)
-    ?? await settingsRepo.get('telegram_mcp_bot_token', null)
-    ?? await settingsRepo.get('telegram_bot_token', '');
-  const chatId = await settingsRepo.get('telegram.chat_id', null)
-    ?? await settingsRepo.get('telegram_mcp_chat_id', null)
-    ?? await settingsRepo.get('telegram_chat_id', '');
+  const enabledValue =
+    (await settingsRepo.get('telegram.enabled', null)) ??
+    (await settingsRepo.get('telegram_mcp_enabled', null)) ??
+    (await settingsRepo.get('telegram_enabled', 'false'));
+  const token =
+    (await settingsRepo.get('telegram.bot_token', null)) ??
+    (await settingsRepo.get('telegram_mcp_bot_token', null)) ??
+    (await settingsRepo.get('telegram_bot_token', ''));
+  const chatId =
+    (await settingsRepo.get('telegram.chat_id', null)) ??
+    (await settingsRepo.get('telegram_mcp_chat_id', null)) ??
+    (await settingsRepo.get('telegram_chat_id', ''));
   return { enabled: enabledValue === 'true', hasToken: Boolean(token), chatId: chatId || '' };
 }
 
 async function storedTelegramToken() {
-  return await settingsRepo.get('telegram.bot_token', null)
-    ?? await settingsRepo.get('telegram_mcp_bot_token', null)
-    ?? await settingsRepo.get('telegram_bot_token', '');
+  return (
+    (await settingsRepo.get('telegram.bot_token', null)) ??
+    (await settingsRepo.get('telegram_mcp_bot_token', null)) ??
+    (await settingsRepo.get('telegram_bot_token', ''))
+  );
 }
 
 async function migrateTelegramTokenIfNeeded() {
   const stored = await storedTelegramToken();
   if (!stored) return '';
-  const migrated = telegramSecrets.needsMigration(stored) ? telegramSecrets.encrypt(telegramSecrets.decrypt(stored)) : stored;
+  const migrated = telegramSecrets.needsMigration(stored)
+    ? telegramSecrets.encrypt(telegramSecrets.decrypt(stored))
+    : stored;
   if (migrated !== stored || !(await settingsRepo.get('telegram.bot_token', null))) {
     await runtimeSettings.set('telegram.bot_token', migrated);
   }
   return migrated;
 }
 
-function databaseFormInput(req: Request, { allowStoredPassword = true }: {allowStoredPassword?: boolean} = {}) {
+function databaseFormInput(
+  req: Request,
+  { allowStoredPassword = true }: { allowStoredPassword?: boolean } = {},
+) {
   const passwordInput = String(req.body.password || '');
   let password = passwordInput;
   if (!password && allowStoredPassword && bootstrapConfigStore.exists()) {
     const stored = bootstrapConfigStore.load();
     if (stored) password = stored.password;
   }
-  return normalizeDatabaseConfig({
-    host: req.body.host,
-    port: req.body.port,
-    database: req.body.database,
-    username: req.body.username,
-    password,
-    ssl: req.body.ssl === 'true'
-  }, { requirePassword: true });
+  return normalizeDatabaseConfig(
+    {
+      host: req.body.host,
+      port: req.body.port,
+      database: req.body.database,
+      username: req.body.username,
+      password,
+      ssl: req.body.ssl === 'true',
+    },
+    { requirePassword: true },
+  );
 }
 
-router.use('/admin', requireAdmin, (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+router.use('/admin', requireAdmin, (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
 
 router.get('/admin', async (req, res, next) => {
   try {
@@ -150,12 +207,28 @@ router.get('/admin', async (req, res, next) => {
     const terminals = operational ? await workerRepo.listAdminProfiles() : [];
     const telegram = await telegramConfig();
     const startedAt = new Date(Date.now() - Math.round(process.uptime() * 1000)).toISOString();
-    return res.type('html').send(adminOverviewPage({
-      runtime: { version: packageJson.version, gitSha: process.env.BOT_REPORT_GIT_SHA || null, buildTime: process.env.BOT_REPORT_BUILD_TIME || null,
-        startedAt, nodeEnv: process.env.NODE_ENV || 'development', toolCount: TOOLS.length },
-      clients, terminals, telegram, endpoint: mcpConfig.resourceUrl, storage: databaseManager.status(), csrfToken: csrf(req), ...consumeFlash(req)
-    }));
-  } catch (error) { next(error); }
+    return res.type('html').send(
+      adminOverviewPage({
+        runtime: {
+          version: packageJson.version,
+          gitSha: process.env.BOT_REPORT_GIT_SHA || null,
+          buildTime: process.env.BOT_REPORT_BUILD_TIME || null,
+          startedAt,
+          nodeEnv: process.env.NODE_ENV || 'development',
+          toolCount: TOOLS.length,
+        },
+        clients,
+        terminals,
+        telegram,
+        endpoint: mcpConfig.resourceUrl,
+        storage: databaseManager.status(),
+        csrfToken: csrf(req),
+        ...consumeFlash(req),
+      }),
+    );
+  } catch (error) {
+    next(error);
+  }
 });
 
 // Read-only progress: no new credentials, migrations or Worker jobs are issued here.
@@ -163,21 +236,39 @@ router.get('/admin/onboarding', async (req, res, next) => {
   try {
     const storage = databaseManager.status();
     const ready = databaseManager.isMysqlReady();
-    let workerReady = false, clientReady = false, firstCall = false;
+    let workerReady = false,
+      clientReady = false,
+      firstCall = false;
     if (ready) {
       const [ssh, clients, called] = await Promise.all([
-        adminSshData(), clientList(), oauthRepo.hasAdminRuntimeCall()
+        adminSshData(),
+        clientList(),
+        oauthRepo.hasAdminRuntimeCall(),
       ]);
-      workerReady = ssh.profiles.some(p => p.enabled && p.worker_enabled && p.worker_status === 'online');
-      clientReady = clients.some(c => !c.owner_user_id && c.status === 'active' && c.allowed_scopes.includes('bot_report.read'));
+      workerReady = ssh.profiles.some(
+        (p) => p.enabled && p.worker_enabled && p.worker_status === 'online',
+      );
+      clientReady = clients.some(
+        (c) =>
+          !c.owner_user_id && c.status === 'active' && c.allowed_scopes.includes('bot_report.read'),
+      );
       firstCall = called && clientReady;
     }
-    return res.type('html').send(onboardingPage({
-      storage, ready, workerReady, clientReady, firstCall,
-      enabled: mcpConfig.enabled, baseUrl: mcpConfig.publicBaseUrl,
-      csrfToken: csrf(req)
-    }));
-  } catch (error) { next(error); }
+    return res.type('html').send(
+      onboardingPage({
+        storage,
+        ready,
+        workerReady,
+        clientReady,
+        firstCall,
+        enabled: mcpConfig.enabled,
+        baseUrl: mcpConfig.publicBaseUrl,
+        csrfToken: csrf(req),
+      }),
+    );
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.get('/admin/settings', (req, res) => res.redirect('/admin/settings/database'));
@@ -189,24 +280,42 @@ router.get('/admin/settings/:section', async (req, res, next) => {
     }
     const storage = databaseManager.status();
     const flash = consumeFlash(req);
-    if (storage.state === 'MIGRATION_REQUIRED' && req.session?.authSource === 'legacy' && !flash.error) {
-      flash.error = 'You are signed in with the legacy SQLite administrator credential. Update ADMIN_USERNAME / ADMIN_PASSWORD, sign out, and sign in with ENV credentials before activating MySQL.';
+    if (
+      storage.state === 'MIGRATION_REQUIRED' &&
+      req.session?.authSource === 'legacy' &&
+      !flash.error
+    ) {
+      flash.error =
+        'You are signed in with the legacy SQLite administrator credential. Update ADMIN_USERNAME / ADMIN_PASSWORD, sign out, and sign in with ENV credentials before activating MySQL.';
     }
-    return res.type('html').send(settingsPage({
-      activeSection: req.params.section,
-      storage,
-      legacy: legacyImporter.inspect(),
-      mcp: {
-        enabled: runtimeSettings.bool('mcp.enabled', true), publicBaseUrl: mcpConfig.publicBaseUrl,
-        accessTokenTtlSeconds: mcpConfig.accessTokenTtlSeconds, refreshTokenTtlSeconds: mcpConfig.refreshTokenTtlSeconds,
-        authCodeTtlSeconds: mcpConfig.authCodeTtlSeconds, rateLimitPerMinute: mcpConfig.rateLimitPerMinute
-      },
-      telegram: await telegramConfig(),
-      runtime: { version: packageJson.version, gitSha: process.env.BOT_REPORT_GIT_SHA || null, buildTime: process.env.BOT_REPORT_BUILD_TIME || null,
-        nodeEnv: process.env.NODE_ENV || 'development', toolCount: TOOLS.length },
-      csrfToken: csrf(req), ...flash
-    }));
-  } catch (error) { next(error); }
+    return res.type('html').send(
+      settingsPage({
+        activeSection: req.params.section,
+        storage,
+        legacy: legacyImporter.inspect(),
+        mcp: {
+          enabled: runtimeSettings.bool('mcp.enabled', true),
+          publicBaseUrl: mcpConfig.publicBaseUrl,
+          accessTokenTtlSeconds: mcpConfig.accessTokenTtlSeconds,
+          refreshTokenTtlSeconds: mcpConfig.refreshTokenTtlSeconds,
+          authCodeTtlSeconds: mcpConfig.authCodeTtlSeconds,
+          rateLimitPerMinute: mcpConfig.rateLimitPerMinute,
+        },
+        telegram: await telegramConfig(),
+        runtime: {
+          version: packageJson.version,
+          gitSha: process.env.BOT_REPORT_GIT_SHA || null,
+          buildTime: process.env.BOT_REPORT_BUILD_TIME || null,
+          nodeEnv: process.env.NODE_ENV || 'development',
+          toolCount: TOOLS.length,
+        },
+        csrfToken: csrf(req),
+        ...flash,
+      }),
+    );
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post('/admin/settings/database/test', async (req, res) => {
@@ -214,9 +323,18 @@ router.post('/admin/settings/database/test', async (req, res) => {
     const input = databaseFormInput(req);
     const result = await databaseManager.testMysql(input);
     if (String(req.get('accept') || '').includes('application/json')) return res.json(result);
-    setFlash(req, 'success', `MySQL connection successful (${result.version || 'unknown version'}, ${result.duration_ms} ms).`);
+    setFlash(
+      req,
+      'success',
+      `MySQL connection successful (${result.version || 'unknown version'}, ${result.duration_ms} ms).`,
+    );
   } catch (error) {
-    if (String(req.get('accept') || '').includes('application/json')) return res.status(422).json({ ok: false, code: routeError(error).code || 'MYSQL_CONNECT_FAILED', message: routeError(error).message });
+    if (String(req.get('accept') || '').includes('application/json'))
+      return res.status(422).json({
+        ok: false,
+        code: routeError(error).code || 'MYSQL_CONNECT_FAILED',
+        message: routeError(error).message,
+      });
     setFlash(req, 'error', `MySQL connection failed: ${routeError(error).message}`);
   }
   return res.redirect('/admin/settings/database');
@@ -224,31 +342,48 @@ router.post('/admin/settings/database/test', async (req, res) => {
 
 router.post('/admin/settings/database/save', async (req, res) => {
   if (req.session?.authSource !== 'env') {
-    setFlash(req, 'error', 'Saving MySQL configuration requires an administrator session authenticated by ADMIN_USERNAME / ADMIN_PASSWORD from ENV.');
+    setFlash(
+      req,
+      'error',
+      'Saving MySQL configuration requires an administrator session authenticated by ADMIN_USERNAME / ADMIN_PASSWORD from ENV.',
+    );
     return res.redirect('/admin/settings/database');
   }
   try {
     const input = databaseFormInput(req);
     const status = await databaseManager.saveMysqlConfig(input);
     await runtimeSettings.load(status.operational ? databaseManager.getAdapter() : null);
-    setFlash(req, 'success', status.source?.initialized
-      ? 'MySQL connection saved. Existing mcp_worker source detected and activated without schema changes.'
-      : 'MySQL connection saved. No schema changes were applied. Initialize Source when you are ready.');
+    setFlash(
+      req,
+      'success',
+      status.source?.initialized
+        ? 'MySQL connection saved. Existing mcp_worker source detected and activated without schema changes.'
+        : 'MySQL connection saved. No schema changes were applied. Initialize Source when you are ready.',
+    );
   } catch (error) {
-    setFlash(req, 'error', `Database configuration could not be saved: ${routeError(error).message}`);
+    setFlash(
+      req,
+      'error',
+      `Database configuration could not be saved: ${routeError(error).message}`,
+    );
   }
   return res.redirect('/admin/settings/database');
 });
 
 router.post('/admin/settings/database/initialize', async (req, res) => {
   if (req.session?.authSource !== 'env') {
-    setFlash(req, 'error', 'Source initialization requires an administrator session authenticated by ADMIN_USERNAME / ADMIN_PASSWORD from ENV.');
+    setFlash(
+      req,
+      'error',
+      'Source initialization requires an administrator session authenticated by ADMIN_USERNAME / ADMIN_PASSWORD from ENV.',
+    );
     return res.redirect('/admin/settings/database');
   }
   let prepared = null;
   try {
     const current = databaseManager.status();
-    if (!current.mysql) throw new Error('Save the MySQL connection before initializing the source.');
+    if (!current.mysql)
+      throw new Error('Save the MySQL connection before initializing the source.');
     if (current.source?.initialized) {
       setFlash(req, 'success', 'mcp_worker source is already initialized.');
       return res.redirect('/admin/settings/database');
@@ -264,11 +399,18 @@ router.post('/admin/settings/database/initialize', async (req, res) => {
     await databaseManager.activatePrepared(prepared);
     prepared = null;
     await runtimeSettings.load(databaseManager.getAdapter());
-    setFlash(req, 'success', imported?.imported
-      ? `mcp_worker source initialized and legacy data imported successfully (${Object.values(imported.counts).reduce((a: number, b) => a + Number(b || 0), 0)} records).`
-      : 'mcp_worker source initialized successfully.');
+    setFlash(
+      req,
+      'success',
+      imported?.imported
+        ? `mcp_worker source initialized and legacy data imported successfully (${Object.values(imported.counts).reduce((a: number, b) => a + Number(b || 0), 0)} records).`
+        : 'mcp_worker source initialized successfully.',
+    );
   } catch (error) {
-    if (prepared?.adapter) try { await prepared.adapter.close(); } catch (_) {}
+    if (prepared?.adapter)
+      try {
+        await prepared.adapter.close();
+      } catch (_) {}
     setFlash(req, 'error', `Source initialization failed: ${routeError(error).message}`);
   }
   return res.redirect('/admin/settings/database');
@@ -276,35 +418,52 @@ router.post('/admin/settings/database/initialize', async (req, res) => {
 
 router.post('/admin/settings/mcp', requireDataStore, async (req, res) => {
   try {
-    const publicBaseUrl = String(req.body.public_base_url || '').trim().replace(/\/+$/, '');
+    const publicBaseUrl = String(req.body.public_base_url || '')
+      .trim()
+      .replace(/\/+$/, '');
     const url = new URL(publicBaseUrl);
-    if (!['http:', 'https:'].includes(url.protocol)) throw new Error('MCP Public Base URL must use HTTP or HTTPS.');
-    if (process.env.NODE_ENV === 'production' && url.protocol !== 'https:') throw new Error('MCP Public Base URL must use HTTPS in production.');
+    if (!['http:', 'https:'].includes(url.protocol))
+      throw new Error('MCP Public Base URL must use HTTP or HTTPS.');
+    if (process.env.NODE_ENV === 'production' && url.protocol !== 'https:')
+      throw new Error('MCP Public Base URL must use HTTPS in production.');
     const entries = {
       'mcp.enabled': req.body.enabled === 'true' ? 'true' : 'false',
       'mcp.public_base_url': publicBaseUrl,
-      'mcp.access_token_ttl_seconds': String(Math.max(60, Math.min(86400, Number(req.body.access_token_ttl_seconds) || 900))),
-      'mcp.refresh_token_ttl_seconds': String(Math.max(3600, Math.min(31536000, Number(req.body.refresh_token_ttl_seconds) || 2592000))),
-      'mcp.auth_code_ttl_seconds': String(Math.max(60, Math.min(3600, Number(req.body.auth_code_ttl_seconds) || 300))),
-      'mcp.rate_limit_per_minute': String(Math.max(1, Math.min(10000, Number(req.body.rate_limit_per_minute) || 120)))
+      'mcp.access_token_ttl_seconds': String(
+        Math.max(60, Math.min(86400, Number(req.body.access_token_ttl_seconds) || 900)),
+      ),
+      'mcp.refresh_token_ttl_seconds': String(
+        Math.max(3600, Math.min(31536000, Number(req.body.refresh_token_ttl_seconds) || 2592000)),
+      ),
+      'mcp.auth_code_ttl_seconds': String(
+        Math.max(60, Math.min(3600, Number(req.body.auth_code_ttl_seconds) || 300)),
+      ),
+      'mcp.rate_limit_per_minute': String(
+        Math.max(1, Math.min(10000, Number(req.body.rate_limit_per_minute) || 120)),
+      ),
     };
     await runtimeSettings.setMany(entries);
     setFlash(req, 'success', 'MCP settings saved to database.');
-  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+  } catch (error) {
+    setFlash(req, 'error', routeError(error).message);
+  }
   return res.redirect('/admin/settings/mcp');
 });
 
 router.post('/admin/settings/telegram', requireDataStore, async (req, res) => {
   try {
     const chatId = String(req.body.chat_id || '').trim();
-    if (chatId.length > 128 || /[\x00-\x1f\x7f]/.test(chatId)) throw new Error('Telegram Chat ID is invalid.');
+    if (chatId.length > 128 || /[\x00-\x1f\x7f]/.test(chatId))
+      throw new Error('Telegram Chat ID is invalid.');
     await runtimeSettings.set('telegram.enabled', req.body.enabled === 'true' ? 'true' : 'false');
     await runtimeSettings.set('telegram.chat_id', chatId);
     const token = String(req.body.bot_token || '').trim();
     if (token) await runtimeSettings.set('telegram.bot_token', telegramSecrets.encrypt(token));
     else await migrateTelegramTokenIfNeeded();
     setFlash(req, 'success', 'Telegram settings saved to database.');
-  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+  } catch (error) {
+    setFlash(req, 'error', routeError(error).message);
+  }
   return res.redirect('/admin/settings/telegram');
 });
 
@@ -312,56 +471,76 @@ router.post('/admin/settings/telegram/test', requireDataStore, async (req, res) 
   try {
     const encrypted = await migrateTelegramTokenIfNeeded();
     const chatId = await settingsRepo.get('telegram.chat_id', '');
-    if (!encrypted || !chatId) throw new Error('Telegram Bot Token and Chat ID must be configured first.');
+    if (!encrypted || !chatId)
+      throw new Error('Telegram Bot Token and Chat ID must be configured first.');
     await telegramService.sendTest(telegramSecrets.decrypt(encrypted), chatId);
     setFlash(req, 'success', 'Telegram test message delivered successfully.');
-  } catch (error) { setFlash(req, 'error', `Telegram test failed: ${routeError(error).message}`); }
+  } catch (error) {
+    setFlash(req, 'error', `Telegram test failed: ${routeError(error).message}`);
+  }
   return res.redirect('/admin/settings/telegram');
 });
 
 router.get('/admin/telegram', (req, res) => res.redirect('/admin/settings/telegram'));
 router.post('/admin/telegram', (req, res) => res.redirect(307, '/admin/settings/telegram'));
-router.post('/admin/telegram/test', (req, res) => res.redirect(307, '/admin/settings/telegram/test'));
+router.post('/admin/telegram/test', (req, res) =>
+  res.redirect(307, '/admin/settings/telegram/test'),
+);
 
 // Session-protected, read-only live state. A check request pings an already-connected
 // Worker; while it is offline, the browser waits for the outbound reconnect.
 router.get('/admin/workers/connection-status', requireDataStore, async (req, res, next) => {
   try {
-    const workers = (await workerRepo.listWorkers()).filter((v): v is NonNullable<typeof v> => v !== null);
+    const workers = (await workerRepo.listWorkers()).filter(
+      (v): v is NonNullable<typeof v> => v !== null,
+    );
     const checkId = String(req.query.check || '');
-    const target = workers.find(worker => worker.id === checkId);
-    const probe = target?.enabled && workerBroker.isOnline(checkId)
-      ? await workerBroker.probeConnection(checkId) : null;
+    const target = workers.find((worker) => worker.id === checkId);
+    const probe =
+      target?.enabled && workerBroker.isOnline(checkId)
+        ? await workerBroker.probeConnection(checkId)
+        : null;
     res.set('Cache-Control', 'no-store');
     return res.json({
-      workers: workers.map(worker => ({
+      workers: workers.map((worker) => ({
         id: worker.id,
         enabled: worker.enabled,
         connected: worker.enabled && workerBroker.isOnline(worker.id),
-        last_seen_at: worker.last_seen_at
+        last_seen_at: worker.last_seen_at,
       })),
-      probe: probe ? { id: checkId, ...probe } : null
+      probe: probe ? { id: checkId, ...probe } : null,
     });
-  } catch (error) { next(error); }
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.get('/admin/workers', requireDataStore, async (req, res, next) => {
   try {
-    const [storedWorkers, profiles] = await Promise.all([workerRepo.listWorkers(), workerRepo.listProfiles()]);
-    const workers = storedWorkers.filter((v): v is NonNullable<typeof v> => v !== null).map(worker => ({
-      ...worker,
-      status: worker.enabled && workerBroker.isOnline(worker.id) ? 'online' : 'offline'
-    }));
-    return res.type('html').send(workersPage({
-      workers,
-      profiles,
-      checkingWorkerId: String(req.query.check || ''),
-      enrollment: consumeWorkerEnrollment(req),
-      workerInstallUrl: `${mcpConfig.publicBaseUrl}/worker/install.sh`,
-      csrfToken: csrf(req),
-      ...consumeFlash(req)
-    }));
-  } catch (error) { next(error); }
+    const [storedWorkers, profiles] = await Promise.all([
+      workerRepo.listWorkers(),
+      workerRepo.listProfiles(),
+    ]);
+    const workers = storedWorkers
+      .filter((v): v is NonNullable<typeof v> => v !== null)
+      .map((worker) => ({
+        ...worker,
+        status: worker.enabled && workerBroker.isOnline(worker.id) ? 'online' : 'offline',
+      }));
+    return res.type('html').send(
+      workersPage({
+        workers,
+        profiles,
+        checkingWorkerId: String(req.query.check || ''),
+        enrollment: consumeWorkerEnrollment(req),
+        workerInstallUrl: `${mcpConfig.publicBaseUrl}/worker/install.sh`,
+        csrfToken: csrf(req),
+        ...consumeFlash(req),
+      }),
+    );
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post('/admin/workers/enrollment', requireDataStore, async (req, res) => {
@@ -370,7 +549,9 @@ router.post('/admin/workers/enrollment', requireDataStore, async (req, res) => {
     const enrollment = await workerRepo.createEnrollmentToken({ ttlSeconds });
     setWorkerEnrollment(req, enrollment);
     setFlash(req, 'success', 'One-time worker enrollment token created.');
-  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+  } catch (error) {
+    setFlash(req, 'error', routeError(error).message);
+  }
   return res.redirect('/admin/workers');
 });
 
@@ -381,19 +562,24 @@ router.post('/admin/workers/profiles', requireDataStore, async (req, res) => {
       name: req.body.name,
       description: req.body.description,
       worker_id: req.body.worker_id,
-      enabled: req.body.enabled
+      enabled: req.body.enabled,
     });
     setFlash(req, 'success', 'SSH Profile created through the active Worker.');
-  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+  } catch (error) {
+    setFlash(req, 'error', routeError(error).message);
+  }
   return res.redirect('/admin/terminals');
 });
 
 router.post('/admin/workers/profiles/:id/delete', requireDataStore, async (req, res) => {
   try {
     const existing = await workerRepo.findAdminProfileById(String(req.params.id));
-    if (!existing || !await workerRepo.deleteProfile(existing.id)) throw new Error('SSH Profile not found.');
+    if (!existing || !(await workerRepo.deleteProfile(existing.id)))
+      throw new Error('SSH Profile not found.');
     setFlash(req, 'success', 'SSH Profile deleted. The Worker remains enrolled.');
-  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+  } catch (error) {
+    setFlash(req, 'error', routeError(error).message);
+  }
   return res.redirect('/admin/terminals');
 });
 
@@ -402,13 +588,25 @@ router.post('/admin/workers/:id/:action', requireDataStore, async (req, res) => 
     const worker = await workerRepo.findWorkerById(String(req.params.id));
     if (!worker) throw new Error('Worker not found.');
     if (String(req.params.action) === 'remove') {
-      await workerLifecycleService.decommission(worker, { actorId: `admin:${req.session?.username || 'admin'}` });
-      setFlash(req, 'success', 'Worker removed remotely. mcp_worker Worker was uninstalled from the target machine and its server record was deleted.');
+      await workerLifecycleService.decommission(worker, {
+        actorId: `admin:${req.session?.username || 'admin'}`,
+      });
+      setFlash(
+        req,
+        'success',
+        'Worker removed remotely. mcp_worker Worker was uninstalled from the target machine and its server record was deleted.',
+      );
       return res.redirect('/admin/workers');
     }
     if (String(req.params.action) === 'force-remove') {
-      await workerLifecycleService.forceRemove(worker, { actorId: `admin:${req.session?.username || 'admin'}` });
-      setFlash(req, 'success', 'Worker force deleted from mcp_worker. Local Worker files may still remain on the target machine.');
+      await workerLifecycleService.forceRemove(worker, {
+        actorId: `admin:${req.session?.username || 'admin'}`,
+      });
+      setFlash(
+        req,
+        'success',
+        'Worker force deleted from mcp_worker. Local Worker files may still remain on the target machine.',
+      );
       return res.redirect('/admin/workers');
     }
     if (String(req.params.action) === 'edit') {
@@ -416,25 +614,40 @@ router.post('/admin/workers/:id/:action', requireDataStore, async (req, res) => 
       setFlash(req, 'success', 'Worker name updated.');
       return res.redirect('/admin/workers');
     }
-    if (!['enable', 'disable'].includes(String(req.params.action))) throw new Error('Unknown worker action.');
+    if (!['enable', 'disable'].includes(String(req.params.action)))
+      throw new Error('Unknown worker action.');
     const enabled = String(req.params.action) === 'enable';
     await workerRepo.setWorkerEnabled(worker.id, enabled);
     if (!enabled) workerBroker.disconnect(worker.id);
-    setFlash(req, 'success', enabled ? 'Worker enabled. Checking outbound connection…' : 'Worker disabled.');
+    setFlash(
+      req,
+      'success',
+      enabled ? 'Worker enabled. Checking outbound connection…' : 'Worker disabled.',
+    );
     if (enabled) return res.redirect(`/admin/workers?check=${encodeURIComponent(worker.id)}`);
-  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+  } catch (error) {
+    setFlash(req, 'error', routeError(error).message);
+  }
   return res.redirect('/admin/workers');
 });
 
 router.get('/admin/users', requireDataStore, async (req, res, next) => {
   try {
     const [users, clients] = await Promise.all([userRepo.list(), clientList()]);
-    const clientCounts = clients.reduce((counts: Record<string, number>, client) => {
-      if (client.owner_user_id) counts[client.owner_user_id] = (counts[client.owner_user_id] || 0) + 1;
-      return counts;
-    }, {} as Record<string, number>);
-    return res.type('html').send(usersPage({ users, clientCounts, csrfToken: csrf(req), ...consumeFlash(req) }));
-  } catch (error) { next(error); }
+    const clientCounts = clients.reduce(
+      (counts: Record<string, number>, client) => {
+        if (client.owner_user_id)
+          counts[client.owner_user_id] = (counts[client.owner_user_id] || 0) + 1;
+        return counts;
+      },
+      {} as Record<string, number>,
+    );
+    return res
+      .type('html')
+      .send(usersPage({ users, clientCounts, csrfToken: csrf(req), ...consumeFlash(req) }));
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post('/admin/users', requireDataStore, async (req, res) => {
@@ -443,10 +656,12 @@ router.post('/admin/users', requireDataStore, async (req, res) => {
       username: req.body.username,
       email: req.body.email,
       displayName: req.body.display_name,
-      password: req.body.password
+      password: req.body.password,
     });
     setFlash(req, 'success', 'User created.');
-  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+  } catch (error) {
+    setFlash(req, 'error', routeError(error).message);
+  }
   return res.redirect('/admin/users');
 });
 
@@ -454,47 +669,107 @@ router.post('/admin/users/:id/reset-password', requireDataStore, async (req, res
   try {
     await userService.resetPassword(String(req.params.id), req.body.password);
     setFlash(req, 'success', 'User password reset and existing sessions revoked.');
-  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+  } catch (error) {
+    setFlash(req, 'error', routeError(error).message);
+  }
   return res.redirect('/admin/users');
 });
 
 router.post('/admin/users/:id/:action', requireDataStore, async (req, res) => {
   try {
-    if (!['enable', 'disable'].includes(String(req.params.action))) return res.status(404).type('html').send(errorPage(404, 'Unknown user action.'));
-    await userService.setStatus(String(req.params.id), String(req.params.action) === 'enable' ? 'active' : 'disabled');
-    setFlash(req, 'success', `User ${String(req.params.action) === 'enable' ? 'enabled' : 'disabled'}.`);
-  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+    if (!['enable', 'disable'].includes(String(req.params.action)))
+      return res.status(404).type('html').send(errorPage(404, 'Unknown user action.'));
+    await userService.setStatus(
+      String(req.params.id),
+      String(req.params.action) === 'enable' ? 'active' : 'disabled',
+    );
+    setFlash(
+      req,
+      'success',
+      `User ${String(req.params.action) === 'enable' ? 'enabled' : 'disabled'}.`,
+    );
+  } catch (error) {
+    setFlash(req, 'error', routeError(error).message);
+  }
   return res.redirect('/admin/users');
 });
 
 router.get('/admin/clients', requireDataStore, async (req, res, next) => {
-  try { return res.type('html').send(clientsPage({ clients: await clientList(), mcpUrl: mcpConfig.resourceUrl, csrfToken: csrf(req), secret: consumeOneTimeSecret(req), firstCall: ['local', '1'].includes(String(req.query.first_call || '')) ? String(req.query.first_call || '') : '', ...consumeFlash(req) })); }
-  catch (error) { next(error); }
+  try {
+    return res.type('html').send(
+      clientsPage({
+        clients: await clientList(),
+        mcpUrl: mcpConfig.resourceUrl,
+        csrfToken: csrf(req),
+        secret: consumeOneTimeSecret(req),
+        firstCall: ['local', '1'].includes(String(req.query.first_call || ''))
+          ? String(req.query.first_call || '')
+          : '',
+        ...consumeFlash(req),
+      }),
+    );
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.get('/admin/audit', requireDataStore, async (req, res, next) => {
   try {
-    const filters = { query: String(req.query.q || '').trim().slice(0, 160), clientId: String(req.query.client_id || '').trim().slice(0, 200),
-      toolName: String(req.query.tool_name || '').trim().slice(0, 160), result: String(req.query.result || '').trim().toUpperCase() };
+    const filters = {
+      query: String(req.query.q || '')
+        .trim()
+        .slice(0, 160),
+      clientId: String(req.query.client_id || '')
+        .trim()
+        .slice(0, 200),
+      toolName: String(req.query.tool_name || '')
+        .trim()
+        .slice(0, 160),
+      result: String(req.query.result || '')
+        .trim()
+        .toUpperCase(),
+    };
     if (!['', 'SUCCESS', 'DENIED', 'ERROR'].includes(filters.result)) filters.result = '';
     const allowedPageSizes = [20, 50, 100];
     const requestedPageSize = Number.parseInt(String(req.query.per_page || ''), 10);
     const perPage = allowedPageSizes.includes(requestedPageSize) ? requestedPageSize : 20;
     const total = await oauthRepo.countAuditLogs(filters);
     const totalPages = Math.max(1, Math.ceil(total / perPage));
-    const page = Math.min(Math.max(1, Number.parseInt(String(req.query.page || ''), 10) || 1), totalPages);
+    const page = Math.min(
+      Math.max(1, Number.parseInt(String(req.query.page || ''), 10) || 1),
+      totalPages,
+    );
     const [logs, clients, toolNames] = await Promise.all([
-      oauthRepo.listAuditLogs({ ...filters, limit: perPage, offset: (page - 1) * perPage }), clientList(), oauthRepo.listAuditToolNames()
+      oauthRepo.listAuditLogs({ ...filters, limit: perPage, offset: (page - 1) * perPage }),
+      clientList(),
+      oauthRepo.listAuditToolNames(),
     ]);
-    return res.type('html').send(auditPage({ logs, clients, toolNames, filters, page, perPage, total, totalPages, csrfToken: csrf(req) }));
-  } catch (error) { next(error); }
+    return res.type('html').send(
+      auditPage({
+        logs,
+        clients,
+        toolNames,
+        filters,
+        page,
+        perPage,
+        total,
+        totalPages,
+        csrfToken: csrf(req),
+      }),
+    );
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.get('/admin/audit/:id', requireDataStore, async (req, res, next) => {
   try {
-    const id = String(String(req.params.id) || '').trim().slice(0, 128);
+    const id = String(String(req.params.id) || '')
+      .trim()
+      .slice(0, 128);
     const log = id ? await oauthRepo.findAuditLogById(id) : null;
-    if (!log) return res.status(404).json({ error: 'Audit event not found.', code: 'AUDIT_NOT_FOUND' });
+    if (!log)
+      return res.status(404).json({ error: 'Audit event not found.', code: 'AUDIT_NOT_FOUND' });
     return res.json({
       id: log.id,
       request_id: log.request_id,
@@ -511,29 +786,55 @@ router.get('/admin/audit/:id', requireDataStore, async (req, res, next) => {
       request_payload: log.request_payload,
       response_payload: log.response_payload,
       request_truncated: Boolean(log.request_truncated),
-      response_truncated: Boolean(log.response_truncated)
+      response_truncated: Boolean(log.response_truncated),
     });
-  } catch (error) { next(error); }
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post('/admin/clients', requireDataStore, async (req, res) => {
   try {
-    const redirectUris = String(req.body.redirect_uris || '').split(/\r?\n/).map(v => v.trim()).filter(Boolean);
-    const scopes = (Array.isArray(req.body.scopes) ? req.body.scopes : String(req.body.scopes || '').split(/[\s,]+/)).map((v: unknown) => String(v).trim()).filter(Boolean);
-    const result = await oauthService.registerClient({ displayName: req.body.display_name, redirectUris, allowedScopes: scopes });
+    const redirectUris = String(req.body.redirect_uris || '')
+      .split(/\r?\n/)
+      .map((v) => v.trim())
+      .filter(Boolean);
+    const scopes = (
+      Array.isArray(req.body.scopes)
+        ? req.body.scopes
+        : String(req.body.scopes || '').split(/[\s,]+/)
+    )
+      .map((v: unknown) => String(v).trim())
+      .filter(Boolean);
+    const result = await oauthService.registerClient({
+      displayName: req.body.display_name,
+      redirectUris,
+      allowedScopes: scopes,
+    });
     if (!result.client) throw new Error('OAuth client creation returned no client.');
     setOneTimeSecret(req, { clientId: result.client.client_id, clientSecret: result.rawSecret });
     setFlash(req, 'success', 'OAuth client created.');
     return res.redirect('/admin/clients');
   } catch (error) {
-    return res.status(400).type('html').send(clientsPage({ clients: await clientList(), mcpUrl: mcpConfig.resourceUrl, csrfToken: csrf(req), error: routeError(error).message }));
+    return res
+      .status(400)
+      .type('html')
+      .send(
+        clientsPage({
+          clients: await clientList(),
+          mcpUrl: mcpConfig.resourceUrl,
+          csrfToken: csrf(req),
+          error: routeError(error).message,
+        }),
+      );
   }
 });
 
 router.post('/admin/clients/:id/:action', requireDataStore, async (req, res) => {
   try {
     const client = await oauthRepo.findClientById(String(req.params.id));
-    if (!client) return res.status(404).type('html').send(errorPage(404, 'OAuth client not found.'));
+    if (!client)
+      return res.status(404).type('html').send(errorPage(404, 'OAuth client not found.'));
     const action = String(req.params.action);
     if (action === 'rotate') {
       const result = await oauthService.rotateClientSecret(client.client_id);
@@ -543,48 +844,88 @@ router.post('/admin/clients/:id/:action', requireDataStore, async (req, res) => 
     }
     if (action === 'enable') await oauthRepo.updateClientStatus(client.id, 'active');
     else if (action === 'disable') await oauthRepo.updateClientStatus(client.id, 'disabled');
-    else if (action === 'revoke') { await oauthRepo.revokeAllTokensByClientId(client.client_id); await oauthRepo.updateClientStatus(client.id, 'revoked'); }
-    else if (action === 'delete') await oauthRepo.deleteClient(client.id);
+    else if (action === 'revoke') {
+      await oauthRepo.revokeAllTokensByClientId(client.client_id);
+      await oauthRepo.updateClientStatus(client.id, 'revoked');
+    } else if (action === 'delete') await oauthRepo.deleteClient(client.id);
     else return res.status(404).type('html').send(errorPage(404, 'Unknown client action.'));
     setFlash(req, 'success', `OAuth client ${action} completed.`);
-  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+  } catch (error) {
+    setFlash(req, 'error', routeError(error).message);
+  }
   return res.redirect('/admin/clients');
 });
 
 router.get('/admin/terminals', requireDataStore, async (req, res, next) => {
   try {
     const { workers, profiles } = await adminSshData();
-    return res.type('html').send(terminalsPage({ profiles, workers, routeBase: '/admin/terminals', csrfToken: csrf(req), ...consumeFlash(req) }));
-  } catch (error) { next(error); }
+    return res.type('html').send(
+      terminalsPage({
+        profiles,
+        workers,
+        routeBase: '/admin/terminals',
+        csrfToken: csrf(req),
+        ...consumeFlash(req),
+      }),
+    );
+  } catch (error) {
+    next(error);
+  }
 });
 
-router.get('/admin/terminals/:id/ssh', requireDataStore, async (req, res) => res.redirect(`/admin/terminals/${encodeURIComponent(String(req.params.id))}/shell`));
+router.get('/admin/terminals/:id/ssh', requireDataStore, async (req, res) =>
+  res.redirect(`/admin/terminals/${encodeURIComponent(String(req.params.id))}/shell`),
+);
 
 router.get('/admin/terminals/:id/shell', requireDataStore, async (req, res) => {
   const profile = await workerRepo.findAdminProfileById(String(req.params.id));
   if (!profile) return res.status(404).type('html').send(errorPage(404, 'SSH Profile not found.'));
   if (!profile.enabled || !workerBroker.isOnline(profile.worker_id)) {
-    setFlash(req, 'error', 'The Worker must be online and this SSH Profile must be enabled before attaching a shell.');
+    setFlash(
+      req,
+      'error',
+      'The Worker must be online and this SSH Profile must be enabled before attaching a shell.',
+    );
     return res.redirect('/admin/terminals');
   }
-  return res.type('html').send(terminalConsolePage({ profile, routeBase: '/admin/terminals', csrfToken: csrf(req) }));
+  return res
+    .type('html')
+    .send(terminalConsolePage({ profile, routeBase: '/admin/terminals', csrfToken: csrf(req) }));
 });
 
 router.post('/admin/terminals/:id/test', requireDataStore, async (req, res) => {
   const json = String(req.get('accept') || '').includes('application/json');
   try {
     const profile = await workerRepo.findAdminProfileById(String(req.params.id));
-    if (!profile) throw Object.assign(new Error('SSH Profile not found.'), { code: 'PROFILE_NOT_FOUND', status: 404 });
-    if (!profile.enabled) throw Object.assign(new Error('This SSH Profile is disabled.'), { code: 'PROFILE_DISABLED', status: 409 });
+    if (!profile)
+      throw Object.assign(new Error('SSH Profile not found.'), {
+        code: 'PROFILE_NOT_FOUND',
+        status: 404,
+      });
+    if (!profile.enabled)
+      throw Object.assign(new Error('This SSH Profile is disabled.'), {
+        code: 'PROFILE_DISABLED',
+        status: 409,
+      });
     await requireActiveAdminWorker(profile.worker_id);
     const startedAt = Date.now();
     const result = await workerExecutionService.testConnection(profile);
-    const payload = { code: 'TEST_OK', message: 'Direct Worker shell is ready.', duration_ms: Date.now() - startedAt,
-      pane_count: result.pane_count, target_pane: result.target_pane, pane_current_command: result.pane_current_command };
+    const payload = {
+      code: 'TEST_OK',
+      message: 'Direct Worker shell is ready.',
+      duration_ms: Date.now() - startedAt,
+      pane_count: result.pane_count,
+      target_pane: result.target_pane,
+      pane_current_command: result.pane_current_command,
+    };
     if (json) return res.json(payload);
     setFlash(req, 'success', `${payload.message} (${payload.duration_ms} ms)`);
   } catch (error) {
-    if (json) return res.status(routeError(error).status || 422).json({ code: routeError(error).code || 'WORKER_TEST_FAILED', message: routeError(error).message || 'Worker shell test failed.' });
+    if (json)
+      return res.status(routeError(error).status || 422).json({
+        code: routeError(error).code || 'WORKER_TEST_FAILED',
+        message: routeError(error).message || 'Worker shell test failed.',
+      });
     setFlash(req, 'error', routeError(error).message || 'Worker shell test failed.');
   }
   return res.redirect('/admin/terminals');
@@ -593,14 +934,31 @@ router.post('/admin/terminals/:id/test', requireDataStore, async (req, res) => {
 router.post('/admin/terminals/:id/session', requireDataStore, async (req, res) => {
   try {
     const profile = await workerRepo.findAdminProfileById(String(req.params.id));
-    if (!profile) return res.status(404).json({ code: 'PROFILE_NOT_FOUND', message: 'SSH Profile not found.' });
-    if (!profile.enabled) return res.status(409).json({ code: 'PROFILE_DISABLED', message: 'This SSH Profile is disabled.' });
+    if (!profile)
+      return res.status(404).json({ code: 'PROFILE_NOT_FOUND', message: 'SSH Profile not found.' });
+    if (!profile.enabled)
+      return res
+        .status(409)
+        .json({ code: 'PROFILE_DISABLED', message: 'This SSH Profile is disabled.' });
     await requireActiveAdminWorker(profile.worker_id);
     const origin = terminalOrigins.resolve(req);
-    const issued = terminalNonces.issue({ sessionId: req.sessionID, userId: req.session.userId, sessionVersion: req.session.sessionVersion || 1, profileId: profile.id, origin });
-    return res.status(201).json({ attempt_id: issued.attempt_id, expires_at: issued.expires_at, ws_url: terminalOrigins.websocketUrl(origin, issued) });
+    const issued = terminalNonces.issue({
+      sessionId: req.sessionID,
+      userId: req.session.userId,
+      sessionVersion: req.session.sessionVersion || 1,
+      profileId: profile.id,
+      origin,
+    });
+    return res.status(201).json({
+      attempt_id: issued.attempt_id,
+      expires_at: issued.expires_at,
+      ws_url: terminalOrigins.websocketUrl(origin, issued),
+    });
   } catch (error) {
-    return res.status(routeError(error).status || 422).json({ code: routeError(error).code || 'SHELL_ATTACH_FAILED', message: routeError(error).message || 'Unable to attach shell.' });
+    return res.status(routeError(error).status || 422).json({
+      code: routeError(error).code || 'SHELL_ATTACH_FAILED',
+      message: routeError(error).message || 'Unable to attach shell.',
+    });
   }
 });
 
@@ -611,26 +969,34 @@ router.post('/admin/terminals', requireDataStore, async (req, res) => {
       name: req.body.name,
       description: req.body.description,
       worker_id: req.body.worker_id,
-      enabled: req.body.enabled
+      enabled: req.body.enabled,
     });
     setFlash(req, 'success', 'SSH Profile created through the active Worker.');
-  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+  } catch (error) {
+    setFlash(req, 'error', routeError(error).message);
+  }
   return res.redirect('/admin/terminals');
 });
 
 router.post('/admin/terminals/:id/update', requireDataStore, async (req, res) => {
   try {
     const existing = await workerRepo.findAdminProfileById(String(req.params.id));
-    if (!existing) throw Object.assign(new Error('SSH Profile not found.'), { code: 'PROFILE_NOT_FOUND', status: 404 });
+    if (!existing)
+      throw Object.assign(new Error('SSH Profile not found.'), {
+        code: 'PROFILE_NOT_FOUND',
+        status: 404,
+      });
     await requireActiveAdminWorker(req.body.worker_id);
     await workerRepo.updateProfile(existing.id, {
       name: req.body.name,
       description: req.body.description,
       worker_id: req.body.worker_id,
-      enabled: req.body.enabled
+      enabled: req.body.enabled,
     });
     setFlash(req, 'success', 'SSH Profile updated.');
-  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+  } catch (error) {
+    setFlash(req, 'error', routeError(error).message);
+  }
   return res.redirect('/admin/terminals');
 });
 
@@ -638,10 +1004,12 @@ router.post('/admin/terminals/:id/delete', requireDataStore, async (req, res) =>
   try {
     const existing = await workerRepo.findAdminProfileById(String(req.params.id));
     if (!existing) throw new Error('SSH Profile not found.');
-    if (!await workerRepo.deleteProfile(existing.id)) throw new Error('SSH Profile not found.');
+    if (!(await workerRepo.deleteProfile(existing.id))) throw new Error('SSH Profile not found.');
     setFlash(req, 'success', 'SSH Profile deleted. The Worker remains enrolled.');
-  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+  } catch (error) {
+    setFlash(req, 'error', routeError(error).message);
+  }
   return res.redirect('/admin/terminals');
 });
 
-export = Object.assign(router, {requireAdmin, requireDataStore, telegramConfig});
+export = Object.assign(router, { requireAdmin, requireDataStore, telegramConfig });

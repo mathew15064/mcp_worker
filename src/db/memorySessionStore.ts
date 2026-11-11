@@ -1,11 +1,11 @@
-import session = require('express-session');
+import session from 'express-session';
 import type { SessionData } from 'express-session';
 type Callback = (err?: unknown) => void;
 type GetCallback = (err: unknown, data?: SessionData | null) => void;
 
 class BoundedMemorySessionStore extends session.Store {
   maxSessions: number;
-  sessions: Map<string, {session: SessionData; expired: number}>;
+  sessions: Map<string, { session: SessionData; expired: number }>;
   cleanupInterval: NodeJS.Timeout;
   constructor({ maxSessions = 500, cleanupIntervalMs = 15 * 60 * 1000 } = {}) {
     super();
@@ -16,11 +16,16 @@ class BoundedMemorySessionStore extends session.Store {
   }
 
   _expiry(sess: SessionData) {
-    const maxAge = sess?.cookie && typeof sess.cookie.maxAge === 'number' ? sess.cookie.maxAge : 24 * 60 * 60 * 1000;
+    const maxAge =
+      sess?.cookie && typeof sess.cookie.maxAge === 'number'
+        ? sess.cookie.maxAge
+        : 24 * 60 * 60 * 1000;
     return Date.now() + maxAge;
   }
 
-  _clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)); }
+  _clone<T>(value: T): T {
+    return JSON.parse(JSON.stringify(value));
+  }
 
   clearExpired() {
     const now = Date.now();
@@ -48,7 +53,9 @@ class BoundedMemorySessionStore extends session.Store {
       this.sessions.delete(sid);
       this.sessions.set(sid, record);
       cb(null, this._clone(record.session));
-    } catch (error) { cb(error); }
+    } catch (error) {
+      cb(error);
+    }
   }
 
   set(sid: string, sess: SessionData, cb?: Callback) {
@@ -56,7 +63,9 @@ class BoundedMemorySessionStore extends session.Store {
       if (!this.sessions.has(sid)) this._evictIfNeeded();
       this.sessions.set(sid, { session: this._clone(sess), expired: this._expiry(sess) });
       cb?.(null);
-    } catch (error) { cb?.(error); }
+    } catch (error) {
+      cb?.(error);
+    }
   }
 
   destroy(sid: string, cb?: Callback) {
@@ -80,7 +89,10 @@ class BoundedMemorySessionStore extends session.Store {
     cb?.(null);
   }
 
-  close() { clearInterval(this.cleanupInterval); this.sessions.clear(); }
+  close() {
+    clearInterval(this.cleanupInterval);
+    this.sessions.clear();
+  }
 }
 
 export = BoundedMemorySessionStore;

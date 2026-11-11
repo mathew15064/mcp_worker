@@ -1,15 +1,21 @@
-import express, {type Request} from 'express';
+import express, { type Request } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
-import {rateLimit} from 'express-rate-limit';
-import databaseManager = require('../db/databaseManager');
-import workerAuthService = require('../services/workerAuthService');
-import workerRepository = require('../repositories/workerRepository');
+import { rateLimit } from 'express-rate-limit';
+import databaseManager from '../db/databaseManager';
+import workerAuthService from '../services/workerAuthService';
+import workerRepository from '../repositories/workerRepository';
 
 const router = express.Router();
 const WORKER_DIR = path.resolve(__dirname, '../../worker');
 const WORKER_BIN_DIR = path.join(WORKER_DIR, 'bin');
-const LEGACY_DIST_FILES = Object.freeze(['agent.js', 'cli.js', 'lifecycle.js', 'package.json', 'package-lock.json']);
+const LEGACY_DIST_FILES = Object.freeze([
+  'agent.js',
+  'cli.js',
+  'lifecycle.js',
+  'package.json',
+  'package-lock.json',
+]);
 const BINARY_DIST_FILES = Object.freeze([
   'bot-report-worker-linux-amd64',
   'bot-report-worker-linux-arm64',
@@ -18,7 +24,7 @@ const BINARY_DIST_FILES = Object.freeze([
   'bot-report-worker-darwin-amd64',
   'bot-report-worker-darwin-arm64',
   'bot-report-worker-windows-amd64.exe',
-  'bot-report-worker-windows-arm64.exe'
+  'bot-report-worker-windows-arm64.exe',
 ]);
 const DIST_FILES = Object.freeze([...LEGACY_DIST_FILES, ...BINARY_DIST_FILES]);
 
@@ -26,13 +32,14 @@ const enrollmentLimiter = rateLimit({
   windowMs: 60 * 1000,
   limit: 20,
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
 });
 
 function publicBaseUrl(req: Request) {
   const value = `${req.protocol}://${req.get('host')}`;
   const parsed = new URL(value);
-  if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Unsupported installer origin.');
+  if (!['http:', 'https:'].includes(parsed.protocol))
+    throw new Error('Unsupported installer origin.');
   return parsed.origin;
 }
 
@@ -304,9 +311,15 @@ fi
 `;
 }
 
-function installerScript(baseUrl: string) { return unixInstallerScript(baseUrl, 'linux'); }
-function macInstallerScript(baseUrl: string) { return unixInstallerScript(baseUrl, 'darwin'); }
-function powershellSingleQuote(value: string) { return `'${String(value).replace(/'/g, "''")}'`; }
+function installerScript(baseUrl: string) {
+  return unixInstallerScript(baseUrl, 'linux');
+}
+function macInstallerScript(baseUrl: string) {
+  return unixInstallerScript(baseUrl, 'darwin');
+}
+function powershellSingleQuote(value: string) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
 function windowsInstallerScript(baseUrl: string) {
   const payloadUrl = powershellSingleQuote(`${baseUrl}/worker/install-windows.ps1`);
   return `$ErrorActionPreference = 'Stop'
@@ -441,11 +454,17 @@ try {
 }
 
 function normalizeProfileBase(value: unknown) {
-  const clean = String(value || '').trim().replace(/[\x00-\x1f\x7f]/g, '').slice(0, 90);
+  const clean = String(value || '')
+    .trim()
+    .replace(/[\x00-\x1f\x7f]/g, '')
+    .slice(0, 90);
   return clean || 'Worker';
 }
 
-async function createEnrollmentProfile(worker: {id: string; name: string}, { requestedName }: {requestedName?: string} = {}) {
+async function createEnrollmentProfile(
+  worker: { id: string; name: string },
+  { requestedName }: { requestedName?: string } = {},
+) {
   const base = normalizeProfileBase(requestedName || worker.name);
   const suffix = worker.id.replace(/-/g, '').slice(0, 8);
   const candidates = [base, `${base}-${suffix}`];
@@ -455,63 +474,118 @@ async function createEnrollmentProfile(worker: {id: string; name: string}, { req
         name,
         description: `Auto-created during enrollment for ${worker.name}`,
         workerId: worker.id,
-        enabled: true
+        enabled: true,
       });
     } catch (error) {
-      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'WORKER_PROFILE_NAME_CONFLICT') continue;
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'WORKER_PROFILE_NAME_CONFLICT'
+      )
+        continue;
       throw error;
     }
   }
-  throw Object.assign(new Error('Unable to allocate a unique Worker Profile alias.'), { code: 'WORKER_PROFILE_NAME_CONFLICT', status: 409 });
+  throw Object.assign(new Error('Unable to allocate a unique Worker Profile alias.'), {
+    code: 'WORKER_PROFILE_NAME_CONFLICT',
+    status: 409,
+  });
 }
 
 router.get('/worker/install.sh', (req, res, next) => {
   try {
-    return res.type('text/x-shellscript').set('cache-control', 'no-store').send(installerScript(publicBaseUrl(req)));
-  } catch (error) { return next(error); }
+    return res
+      .type('text/x-shellscript')
+      .set('cache-control', 'no-store')
+      .send(installerScript(publicBaseUrl(req)));
+  } catch (error) {
+    return next(error);
+  }
 });
 
 router.get('/worker/install-linux.sh', (req, res, next) => {
-  try { return res.type('text/x-shellscript').set('cache-control', 'no-store').send(installerScript(publicBaseUrl(req))); }
-  catch (error) { return next(error); }
+  try {
+    return res
+      .type('text/x-shellscript')
+      .set('cache-control', 'no-store')
+      .send(installerScript(publicBaseUrl(req)));
+  } catch (error) {
+    return next(error);
+  }
 });
 router.get('/worker/install-macos.sh', (req, res, next) => {
-  try { return res.type('text/x-shellscript').set('cache-control', 'no-store').send(macInstallerScript(publicBaseUrl(req))); }
-  catch (error) { return next(error); }
+  try {
+    return res
+      .type('text/x-shellscript')
+      .set('cache-control', 'no-store')
+      .send(macInstallerScript(publicBaseUrl(req)));
+  } catch (error) {
+    return next(error);
+  }
 });
 router.get('/worker/install.ps1', (req, res, next) => {
-  try { return res.type('text/plain').set('cache-control', 'no-store').send(windowsInstallerScript(publicBaseUrl(req))); }
-  catch (error) { return next(error); }
+  try {
+    return res
+      .type('text/plain')
+      .set('cache-control', 'no-store')
+      .send(windowsInstallerScript(publicBaseUrl(req)));
+  } catch (error) {
+    return next(error);
+  }
 });
 router.get('/worker/install-windows.ps1', (req, res, next) => {
-  try { return res.type('text/plain').set('cache-control', 'no-store').send(windowsInstallerPayloadScript(publicBaseUrl(req))); }
-  catch (error) { return next(error); }
+  try {
+    return res
+      .type('text/plain')
+      .set('cache-control', 'no-store')
+      .send(windowsInstallerPayloadScript(publicBaseUrl(req)));
+  } catch (error) {
+    return next(error);
+  }
 });
 
 router.get('/worker/dist/WORKER_RELEASE', (req, res) => {
   const metadata = path.join(WORKER_BIN_DIR, 'WORKER_RELEASE');
-  if (!fs.existsSync(metadata)) return res.status(503).json({ error: 'Worker release metadata is not available.', code: 'WORKER_RELEASE_UNAVAILABLE' });
+  if (!fs.existsSync(metadata))
+    return res.status(503).json({
+      error: 'Worker release metadata is not available.',
+      code: 'WORKER_RELEASE_UNAVAILABLE',
+    });
   return res.type('text/plain').set('cache-control', 'no-store').sendFile(metadata);
 });
 
 router.get('/worker/dist/SHA256SUMS.sig', (req, res) => {
   const signature = path.join(WORKER_BIN_DIR, 'SHA256SUMS.sig');
-  if (!fs.existsSync(signature)) return res.status(503).json({ error: 'Signed Worker manifest is not available.', code: 'WORKER_SIGNATURE_UNAVAILABLE' });
+  if (!fs.existsSync(signature))
+    return res.status(503).json({
+      error: 'Signed Worker manifest is not available.',
+      code: 'WORKER_SIGNATURE_UNAVAILABLE',
+    });
   return res.type('application/octet-stream').set('cache-control', 'no-store').sendFile(signature);
 });
 
 router.get('/worker/dist/SHA256SUMS', (req, res) => {
   const manifest = path.join(WORKER_BIN_DIR, 'SHA256SUMS');
-  if (!fs.existsSync(manifest)) return res.status(503).json({ error: 'Worker binary distribution is not built.', code: 'WORKER_BINARY_DIST_UNAVAILABLE' });
+  if (!fs.existsSync(manifest))
+    return res.status(503).json({
+      error: 'Worker binary distribution is not built.',
+      code: 'WORKER_BINARY_DIST_UNAVAILABLE',
+    });
   return res.type('text/plain').set('cache-control', 'no-store').sendFile(manifest);
 });
 
 router.get('/worker/dist/:file', (req, res) => {
   const file = String(req.params.file || '');
-  if (!DIST_FILES.includes(file)) return res.status(404).json({ error: 'Endpoint not found', code: 'NOT_FOUND' });
+  if (!DIST_FILES.includes(file))
+    return res.status(404).json({ error: 'Endpoint not found', code: 'NOT_FOUND' });
   const directory = BINARY_DIST_FILES.includes(file) ? WORKER_BIN_DIR : WORKER_DIR;
   const target = path.join(directory, file);
-  if (!fs.existsSync(target)) return res.status(503).json({ error: 'Worker binary distribution is not built.', code: 'WORKER_BINARY_DIST_UNAVAILABLE' });
+  if (!fs.existsSync(target))
+    return res.status(503).json({
+      error: 'Worker binary distribution is not built.',
+      code: 'WORKER_BINARY_DIST_UNAVAILABLE',
+    });
   return res.set('cache-control', 'no-store').sendFile(target);
 });
 
@@ -521,35 +595,52 @@ router.post('/worker/v1/enroll', enrollmentLimiter, async (req, res, next) => {
       return res.status(503).json({
         error: 'temporarily_unavailable',
         code: databaseManager.status().state,
-        message: 'MySQL must be ready before workers can enroll.'
+        message: 'MySQL must be ready before workers can enroll.',
       });
     }
     const worker = await workerAuthService.enroll({
       token: req.body?.token,
       name: req.body?.name,
       publicKey: req.body?.public_key,
-      capabilities: req.body?.capabilities
+      capabilities: req.body?.capabilities,
     });
-    if (!worker) throw Object.assign(new Error('Worker enrollment did not return an identity.'), {code: 'WORKER_ENROLLMENT_INVALID', status: 500});
+    if (!worker)
+      throw Object.assign(new Error('Worker enrollment did not return an identity.'), {
+        code: 'WORKER_ENROLLMENT_INVALID',
+        status: 500,
+      });
     const wantsProfile = req.body?.create_profile === true;
-    const profile = wantsProfile ? await createEnrollmentProfile(worker, {
-      requestedName: req.body?.profile_name
-    }) : null;
+    const profile = wantsProfile
+      ? await createEnrollmentProfile(worker, {
+          requestedName: req.body?.profile_name,
+        })
+      : null;
     return res.status(201).json({
       worker_id: worker.id,
       name: worker.name,
       capabilities: worker.capabilities,
       connect_path: '/worker/v1/connect',
-      profile: profile ? { id: profile.id, name: profile.name } : null
+      profile: profile ? { id: profile.id, name: profile.name } : null,
     });
   } catch (error) {
     if (error instanceof Error && 'status' in error && typeof error.status === 'number') {
-      return res.status(error.status).json({ error: 'worker_enrollment_failed', code: 'code' in error ? error.code : undefined, message: error.message });
+      return res.status(error.status).json({
+        error: 'worker_enrollment_failed',
+        code: 'code' in error ? error.code : undefined,
+        message: error.message,
+      });
     }
     return next(error);
   }
 });
 
-export = Object.assign(router, {DIST_FILES, BINARY_DIST_FILES, LEGACY_DIST_FILES,
-  installerScript, macInstallerScript, windowsInstallerScript,
-  windowsInstallerPayloadScript, createEnrollmentProfile});
+export = Object.assign(router, {
+  DIST_FILES,
+  BINARY_DIST_FILES,
+  LEGACY_DIST_FILES,
+  installerScript,
+  macInstallerScript,
+  windowsInstallerScript,
+  windowsInstallerPayloadScript,
+  createEnrollmentProfile,
+});
