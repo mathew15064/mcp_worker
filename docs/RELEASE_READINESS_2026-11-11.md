@@ -49,9 +49,13 @@ owner approval, or authorization to publish/tag/merge.
   MySQL derivative obligations need owner/legal approval.
 - Native **Linux user-mode** manual installer lifecycle passed a local
   non-privileged, disposable-home test (fresh install; unchanged reinstall;
+  valid ephemeral-key RSA signature; rejection of invalid/missing signatures;
   tampered checksum rejection; distinct binary fixture upgrade; rollback;
-  uninstall). It is now included in the isolated release verification script.
-  This does **not** validate a systemd-managed installation or macOS/Windows.
+  refusal of manual update/uninstall on a systemd-managed identity; ordinary
+  uninstall). It is integrated into the isolated release verification script.
+  Signing keys were **test-only**; these tests do **not** validate an actual
+  systemd-managed upgrade/recovery/uninstall, macOS/Windows, or public
+  release signing/key distribution.
 - Native macOS/Windows installer install/upgrade/rollback/uninstall and
   Linux systemd recovery/uninstall checks are still outstanding.
 - Public HTTPS reverse-proxy, remote Worker WSS and real MCP OAuth client

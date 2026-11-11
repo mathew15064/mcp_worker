@@ -68,8 +68,20 @@ async function main() {
     const binaryB = Buffer.concat([binaryA, Buffer.from('\nTS63_FIXTURE_ONLY_DISTINCT_ELF\n')]);
     assert.notEqual(fingerprint(binaryA), fingerprint(binaryB));
 
+    // Exercise the exact opt-in verified-download path with an ephemeral key.
+    // No release signing key or signing material is persisted or published.
+    const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const trustedKey = path.join(testRoot, 'test-only-public-key.pem');
+    fs.writeFileSync(trustedKey, publicKey.export({ type: 'spki', format: 'pem' }), { mode: 0o644 });
     let variant = 'A';
     let badChecksum = false;
+    let badSignature = false;
+    let missingSignature = false;
+    function manifest() {
+      const file = variant === 'A' ? binaryA : binaryB;
+      return (badChecksum ? '0'.repeat(64) : fingerprint(file)) +
+        '  bot-report-worker-linux-amd64\n';
+    }
     server = http.createServer((req, res) => {
       const file = variant === 'A' ? binaryA : binaryB;
       if (req.url === '/worker/dist/bot-report-worker-linux-amd64') {
@@ -77,8 +89,12 @@ async function main() {
         res.end(file);
       } else if (req.url === '/worker/dist/SHA256SUMS') {
         res.writeHead(200, { 'Content-Type': 'text/plain' });
-        res.end((badChecksum ? '0'.repeat(64) : fingerprint(file)) +
-          '  bot-report-worker-linux-amd64\n');
+        res.end(manifest());
+      } else if (req.url === '/worker/dist/SHA256SUMS.sig' && !missingSignature) {
+        const signature = crypto.sign('sha256', Buffer.from(manifest()), privateKey);
+        if (badSignature) signature[0] ^= 0xff;
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+        res.end(signature);
       } else {
         res.writeHead(404); res.end('not found');
       }
@@ -101,6 +117,7 @@ async function main() {
       BOT_REPORT_WORKER_BIN_DIR: bin,
       BOT_REPORT_WORKER_SYSTEMD: '0',
       BOT_REPORT_WORKER_SKIP_SERVICE: '1',
+      BOT_REPORT_WORKER_TRUSTED_KEY: trustedKey,
     };
     const opts = { env, cwd: testRoot, uid, gid };
     const current = path.join(install, 'current', 'systemtd');
@@ -114,7 +131,7 @@ async function main() {
       console.log('PASS ' + label);
     }
 
-    requireSuccess(await run(['sh', installer]), 'fresh user-mode install');
+    requireSuccess(await run(['sh', installer]), 'signed user-mode fresh install');
     assert.equal(fingerprint(fs.readFileSync(current)), fingerprint(binaryA));
     assert.equal(fs.readlinkSync(path.join(bin, 'systemtd')), current);
     assert.equal(fs.readlinkSync(path.join(bin, 'bot-report-worker')), current);
@@ -125,7 +142,23 @@ async function main() {
     requireSuccess(await run(['sh', installer]), 'same-build reinstall is no-op');
     assert.ok(!fs.existsSync(previous), 'Identical install created unexpected rollback build');
 
-    variant = 'B'; badChecksum = true;
+    variant = 'B';
+    badSignature = true;
+    const tamperedSignature = await run(['sh', installer]);
+    assert.notEqual(tamperedSignature.code, 0, 'Invalid signing signature was accepted');
+    assert.match(tamperedSignature.err + tamperedSignature.out, /signature|verification/i);
+    assert.equal(fingerprint(fs.readFileSync(current)), fingerprint(binaryA));
+    console.log('PASS invalid signed manifest rejected before replacement');
+
+    badSignature = false;
+    missingSignature = true;
+    const unsigned = await run(['sh', installer]);
+    assert.notEqual(unsigned.code, 0, 'Missing signature was accepted with trust key configured');
+    assert.equal(fingerprint(fs.readFileSync(current)), fingerprint(binaryA));
+    console.log('PASS missing signed manifest rejected before replacement');
+
+    missingSignature = false;
+    badChecksum = true;
     const rejected = await run(['sh', installer]);
     assert.notEqual(rejected.code, 0, 'Tampered checksum was accepted');
     assert.match(rejected.err + rejected.out, /checksum verification failed/i);
@@ -142,6 +175,20 @@ async function main() {
       'checksum-verified manual rollback');
     assert.equal(fingerprint(fs.readFileSync(current)), fingerprint(binaryA));
     assert.equal(fingerprint(fs.readFileSync(previous)), fingerprint(binaryB));
+
+    // Verify the privileged service mode cannot be modified by a manual
+    // user-mode installer or uninstalled through the native CLI.
+    const serviceMode = path.join(state, 'service-mode');
+    fs.writeFileSync(serviceMode, 'systemd\n', { mode: 0o600 });
+    if (process.getuid() === 0) fs.chownSync(serviceMode, uid, gid);
+    const unsafeManualUpdate = await run(['sh', installer]);
+    assert.notEqual(unsafeManualUpdate.code, 0, 'Manual installer changed a systemd-managed runtime');
+    assert.match(unsafeManualUpdate.err + unsafeManualUpdate.out, /managed service detected/i);
+    const unsafeManagedUninstall = await run([current, 'uninstall']);
+    assert.notEqual(unsafeManagedUninstall.code, 0, 'Native uninstall removed a managed service');
+    assert.equal(fingerprint(fs.readFileSync(current)), fingerprint(binaryA));
+    fs.unlinkSync(serviceMode);
+    console.log('PASS systemd-managed identity rejects manual update and uninstall');
 
     requireSuccess(await run([current, 'uninstall']), 'native worker uninstall');
     assert.ok(!fs.existsSync(install), 'Installer-managed binaries not removed');
