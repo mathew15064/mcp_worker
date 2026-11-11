@@ -1,23 +1,31 @@
-const mysql = require('mysql2/promise');
+import mysql = require('mysql2/promise');
+import type { Pool, Connection, PoolConnection, ResultSetHeader, PoolOptions } from 'mysql2/promise';
+import type { DatabaseAdapter, SqlRow, SqlValue } from '../contracts';
+interface MysqlConfig { host: string; port?: number | string; username: string; password: string; database: string; queueLimit?: number; connectionLimit?: number; connectTimeoutMs?: number; ssl?: boolean | Exclude<PoolOptions['ssl'], string | undefined> }
+type MysqlDriver = Pool | Connection;
+function isPool(db: MysqlDriver): db is Pool { return 'getConnection' in db; }
 
-function normalizeMysqlError(error) {
+export function normalizeMysqlError(error: unknown) {
   if (!error || typeof error !== 'object') return error;
-  if (error.code === 'ER_DUP_ENTRY') error.code = 'DB_UNIQUE_CONSTRAINT';
-  if (error.message === 'Queue limit reached.') {
-    error.code = 'MYSQL_POOL_BUSY';
-    error.status = 503;
+  const mutable = error as { code?: string; message?: string; status?: number };
+  if (mutable.code === 'ER_DUP_ENTRY') mutable.code = 'DB_UNIQUE_CONSTRAINT';
+  if (mutable.message === 'Queue limit reached.') {
+    mutable.code = 'MYSQL_POOL_BUSY';
+    mutable.status = 503;
   }
   return error;
 }
 
-class MysqlAdapter {
-  constructor(poolOrConnection, { ownsPool = false } = {}) {
-    this.kind = 'mysql';
+export class MysqlAdapter implements DatabaseAdapter {
+  readonly kind = 'mysql' as const;
+  private _db: MysqlDriver;
+  private _ownsPool: boolean;
+  constructor(poolOrConnection: MysqlDriver, { ownsPool = false } = {}) {
     this._db = poolOrConnection;
     this._ownsPool = ownsPool;
   }
 
-  static create(config) {
+  static create(config: MysqlConfig) {
     const requestedQueueLimit = Number(config.queueLimit ?? process.env.MYSQL_POOL_QUEUE_LIMIT);
     const queueLimit = Number.isSafeInteger(requestedQueueLimit) && requestedQueueLimit >= 1 && requestedQueueLimit <= 10_000
       ? requestedQueueLimit : 128;
@@ -40,27 +48,27 @@ class MysqlAdapter {
     return new MysqlAdapter(pool, { ownsPool: true });
   }
 
-  async queryOne(sql, params = []) {
+  async queryOne<T extends object = SqlRow>(sql: string, params: SqlValue[] = []): Promise<T | null> {
     try {
       const [rows] = await this._db.execute(sql, params);
-      return Array.isArray(rows) ? (rows[0] || null) : null;
+      return Array.isArray(rows) ? (rows[0] as T || null) : null;
     } catch (error) {
       throw normalizeMysqlError(error);
     }
   }
 
-  async queryAll(sql, params = []) {
+  async queryAll<T extends object = SqlRow>(sql: string, params: SqlValue[] = []): Promise<T[]> {
     try {
       const [rows] = await this._db.execute(sql, params);
-      return Array.isArray(rows) ? rows : [];
+      return Array.isArray(rows) ? rows as T[] : [];
     } catch (error) {
       throw normalizeMysqlError(error);
     }
   }
 
-  async execute(sql, params = []) {
+  async execute(sql: string, params: SqlValue[] = []) {
     try {
-      const [result] = await this._db.execute(sql, params);
+      const [result] = await this._db.execute<ResultSetHeader>(sql, params);
       return {
         changes: Number(result?.affectedRows || 0),
         insertId: result?.insertId || null,
@@ -71,7 +79,7 @@ class MysqlAdapter {
     }
   }
 
-  async exec(sql) {
+  async exec(sql: string) {
     try {
       return await this._db.query(sql);
     } catch (error) {
@@ -80,8 +88,8 @@ class MysqlAdapter {
   }
 
   async ping() {
-    let connection = null;
-    if (this._db.getConnection) {
+    let connection: PoolConnection | null = null;
+    if (isPool(this._db)) {
       try { connection = await this._db.getConnection(); }
       catch (error) { throw normalizeMysqlError(error); }
     }
@@ -93,7 +101,7 @@ class MysqlAdapter {
         connection.release();
       }
     }
-    await this._db.ping();
+    if (!isPool(this._db)) await this._db.ping();
     return true;
   }
 
@@ -102,8 +110,8 @@ class MysqlAdapter {
     return row || {};
   }
 
-  async transaction(callback) {
-    if (!this._db.getConnection) {
+  async transaction<T>(callback: (tx: DatabaseAdapter) => Promise<T> | T): Promise<T> {
+    if (!isPool(this._db)) {
       await this._db.beginTransaction();
       try {
         const result = await callback(new MysqlAdapter(this._db));
@@ -115,7 +123,7 @@ class MysqlAdapter {
       }
     }
 
-    let connection;
+    let connection: PoolConnection;
     try { connection = await this._db.getConnection(); }
     catch (error) { throw normalizeMysqlError(error); }
     try {
@@ -135,5 +143,3 @@ class MysqlAdapter {
     if (this._ownsPool && this._db?.end) await this._db.end();
   }
 }
-
-module.exports = { MysqlAdapter, normalizeMysqlError };

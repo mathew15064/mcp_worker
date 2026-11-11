@@ -1,19 +1,21 @@
-const Database = require('better-sqlite3');
-const fs = require('fs');
-const path = require('path');
-const config = require('../config/env');
+import Database = require('better-sqlite3');
+import fs = require('node:fs');
+import path = require('node:path');
+import config = require('../config/env');
 
-let dbInstance = null;
-let currentDbPath = null;
+let dbInstance: Database.Database | null = null;
+let currentDbPath: string | null = null;
 
-const PROD_DB_PATH = path.resolve(__dirname, '../../data/bot_report.sqlite');
+const projectRoot = path.resolve(__dirname, '../../..');
+const PROD_DB_PATH = path.resolve(projectRoot, 'data/bot_report.sqlite');
+const COMPILED_DB_PATH = path.resolve(__dirname, '../../data/bot_report.sqlite');
 
-function getDb(customPath = null) {
+export function getDb(customPath: string | null = null) {
   const targetPath = customPath || config.DATABASE_PATH;
   const resolvedTarget = path.resolve(targetPath);
 
   // FAIL-CLOSED DATA SAFETY GUARD
-  if (process.env.NODE_ENV === 'test' && resolvedTarget === PROD_DB_PATH) {
+  if (process.env.NODE_ENV === 'test' && (resolvedTarget === PROD_DB_PATH || resolvedTarget === COMPILED_DB_PATH)) {
     throw new Error('[DATA_SAFETY_VIOLATION] Refusing to open production SQLite database in test mode! Target: ' + resolvedTarget);
   }
 
@@ -53,7 +55,7 @@ function getDb(customPath = null) {
   return db;
 }
 
-function closeDb() {
+export function closeDb() {
   if (dbInstance) {
     try {
       dbInstance.close();
@@ -64,8 +66,3 @@ function closeDb() {
     currentDbPath = null;
   }
 }
-
-module.exports = {
-  getDb,
-  closeDb
-};
