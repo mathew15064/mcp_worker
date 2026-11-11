@@ -13,6 +13,7 @@ MYSQL="$ID-mysql:local"
 GO_IMAGE="golang:1.26.10-alpine@sha256:87c65a688975c0b1d4585d204874c45ca78354670e3a5f11368c5a492303d696"
 OUT="${BOT_REPORT_RELEASE_OUT:-$ROOT/reports/$ID}"
 mkdir -p "$OUT"
+TEST_TMP=$(mktemp -d)
 export BOT_REPORT_SETUP_ENV="$ENVFILE" BOT_REPORT_SETUP_PROJECT="$ID" BOT_REPORT_SETUP_PORT="$PORT"
 compose() { docker compose --env-file "$ENVFILE" -p "$ID" -f docker-compose.yml "$@"; }
 cleanup() {
@@ -21,6 +22,7 @@ cleanup() {
   docker network rm "$ID-net" >/dev/null 2>&1 || true
   if [ -f "$ENVFILE" ]; then compose down -v >/dev/null 2>&1 || true; fi
   rm -f "$ENVFILE" "$ENVFILE.lock"
+  rm -rf "$TEST_TMP"
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
@@ -42,7 +44,9 @@ docker run -d --name "$ID-run" --network "$ID-net" --user root --entrypoint sh "
 # Do not ship test files or TypeScript dev dependencies in the runtime image.
 docker build --target builder -t "$ID-test:local" . >"$OUT/test-build.log" 2>&1
 docker create --name "$ID-test-builder" "$ID-test:local" >/dev/null
-docker cp "$ID-test-builder":/app/dist/tests "$ID-run":/app/dist/
+docker cp "$ID-test-builder":/app/dist/tests "$TEST_TMP/"
+docker cp "$TEST_TMP/tests" "$ID-run":/app/dist/
+rm -rf "$TEST_TMP/tests"
 docker exec "$ID-run" apk add --no-cache curl git bash ripgrep openssl >"$OUT/test-prerequisites.log" 2>&1
 # Build a distinct fixture from the same source, never from a production worker.
 docker create --name "$ID-builder" --entrypoint sh "$GO_IMAGE" -c 'cd /src && CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=2.3.4 -X main.commit=release-test-alternate" -o /tmp/alternate .' >/dev/null
