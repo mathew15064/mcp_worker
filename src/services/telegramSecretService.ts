@@ -1,5 +1,5 @@
-const crypto = require('crypto');
-const config = require('../config/env');
+import crypto from 'node:crypto';
+import config = require('../config/env');
 
 const LEGACY_V1_PREFIX = 'enc:v1';
 const LEGACY_V2_PREFIX = 'enc:v2';
@@ -8,13 +8,9 @@ const LEGACY_V1_AAD = Buffer.from('bot_report:telegram-token:v1', 'utf8');
 const LEGACY_V2_AAD = Buffer.from('bot_report:telegram-token:v2', 'utf8');
 const AAD = Buffer.from('bot_report:telegram-token:v3', 'utf8');
 
-function secretError(message) {
-  const error = new Error(message);
-  error.code = 'TELEGRAM_SECRET_DECRYPT_FAILED';
-  return error;
-}
+function secretError(message: string) { return Object.assign(new Error(message), {code: 'TELEGRAM_SECRET_DECRYPT_FAILED'}); }
 
-function decodeKey(encoded, message) {
+function decodeKey(encoded: string | undefined, message: string) {
   if (!encoded) throw secretError(message);
   const normalized = encoded.trim();
   const key = Buffer.from(normalized, 'base64');
@@ -49,15 +45,15 @@ function readLegacyV1Key() {
     .digest();
 }
 
-function isEncrypted(value) {
+function isEncrypted(value: unknown) {
   return typeof value === 'string' && value.startsWith('enc:');
 }
 
-function needsMigration(value) {
+function needsMigration(value: unknown) {
   return typeof value === 'string' && Boolean(value.trim()) && !value.trim().startsWith(`${PREFIX}:`);
 }
 
-function encrypt(value) {
+function encrypt(value: string) {
   if (typeof value !== 'string' || !value.trim()) {
     throw secretError('Telegram bot token is required.');
   }
@@ -74,7 +70,7 @@ function encrypt(value) {
   return [PREFIX, iv.toString('base64url'), tag.toString('base64url'), ciphertext.toString('base64url')].join(':');
 }
 
-function decryptEnvelope(stored, prefix, key, aad) {
+function decryptEnvelope(stored: string, prefix: string, key: Buffer, aad: Buffer) {
   const parts = stored.split(':');
   if (parts.length !== 5 || `${parts[0]}:${parts[1]}` !== prefix) {
     throw secretError('Stored Telegram token envelope is invalid.');
@@ -91,7 +87,7 @@ function decryptEnvelope(stored, prefix, key, aad) {
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
 }
 
-function decrypt(value) {
+function decrypt(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return '';
   const stored = value.trim();
 
@@ -110,9 +106,9 @@ function decrypt(value) {
     }
     throw secretError('Stored Telegram token envelope version is unsupported.');
   } catch (error) {
-    if (error.code === 'TELEGRAM_SECRET_DECRYPT_FAILED') throw error;
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'TELEGRAM_SECRET_DECRYPT_FAILED') throw error;
     throw secretError('Stored Telegram token could not be decrypted.');
   }
 }
 
-module.exports = { encrypt, decrypt, isEncrypted, needsMigration };
+export = { encrypt, decrypt, isEncrypted, needsMigration };

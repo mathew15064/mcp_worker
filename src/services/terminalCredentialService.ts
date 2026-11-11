@@ -1,12 +1,8 @@
-const crypto = require('crypto');
+import crypto from 'node:crypto';
 
 const AAD = Buffer.from('bot_report:terminal-credential:v1', 'utf8');
 
-function credentialError(message) {
-  const error = new Error(message);
-  error.code = 'CREDENTIAL_DECRYPT_FAILED';
-  return error;
-}
+function credentialError(message: string) { return Object.assign(new Error(message), {code: 'CREDENTIAL_DECRYPT_FAILED'}); }
 
 function readKey() {
   const encoded = process.env.APP_ENCRYPTION_KEY || process.env.TERMINAL_CREDENTIAL_KEY;
@@ -18,10 +14,9 @@ function readKey() {
   return key;
 }
 
-function encrypt(password) {
+function encrypt(password: string) {
   if (typeof password !== 'string' || password.length === 0 || Buffer.byteLength(password) > 4096) {
-    const error = new Error('Password is required.');
-    error.code = 'PASSWORD_REQUIRED';
+    const error = Object.assign(new Error('Password is required.'), {code: 'PASSWORD_REQUIRED'});
     throw error;
   }
   const key = readKey();
@@ -33,7 +28,7 @@ function encrypt(password) {
   return ['v1', iv.toString('base64url'), tag.toString('base64url'), ciphertext.toString('base64url')].join(':');
 }
 
-function decrypt(envelope) {
+function decrypt(envelope: unknown) {
   try {
     const key = readKey();
     const parts = typeof envelope === 'string' ? envelope.split(':') : [];
@@ -47,14 +42,14 @@ function decrypt(envelope) {
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
   } catch (error) {
-    if (error.code === 'CREDENTIAL_DECRYPT_FAILED') throw error;
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'CREDENTIAL_DECRYPT_FAILED') throw error;
     throw credentialError('Stored terminal credential could not be decrypted.');
   }
 }
 
 // Verify GCM authenticity before reusing an envelope. Do not decode a password
 // string or re-encrypt: the original encrypted bytes are inherited unchanged.
-function validateForCopy(envelope) {
+function validateForCopy(envelope: unknown) {
   try {
     const key = readKey();
     const parts = typeof envelope === 'string' && envelope.length <= 6000 ? envelope.split(':') : [];
@@ -77,4 +72,4 @@ function validateForCopy(envelope) {
   }
 }
 
-module.exports = { encrypt, decrypt, validateForCopy };
+export = { encrypt, decrypt, validateForCopy };

@@ -1,6 +1,8 @@
+interface TelegramResponse {ok: boolean; description?: string; result?: {message_id?: number}}
 class TelegramService {
-  constructor(fetchImpl = globalThis.fetch) { this.fetchImpl = fetchImpl; }
-  async sendMessage(botToken, chatId, text) {
+  fetchImpl: typeof fetch;
+  constructor(fetchImpl: typeof fetch = globalThis.fetch) { this.fetchImpl = fetchImpl; }
+  async sendMessage(botToken: string, chatId: string, text: string) {
     const token = String(botToken || '').trim();
     const target = String(chatId || '').trim();
     const message = String(text || '').trim();
@@ -17,14 +19,13 @@ class TelegramService {
         body: JSON.stringify({ chat_id: target, text: message.slice(0, 4000) }),
         signal: controller.signal
       });
-      const payload = await response.json().catch(() => ({}));
+      const payload = await response.json().catch(() => ({})) as TelegramResponse;
       if (!response.ok || payload.ok !== true) throw new Error(payload.description || `Telegram API returned HTTP ${response.status}.`);
       return { ok: true, message_id: payload.result?.message_id || null };
     } finally { clearTimeout(timer); }
   }
-  async sendTest(botToken, chatId) {
+  async sendTest(botToken: string, chatId: string) {
     return this.sendMessage(botToken, chatId, `mcp_worker configuration test\n${new Date().toISOString()}`);
   }
 }
-module.exports = new TelegramService();
-module.exports.TelegramService = TelegramService;
+export = Object.assign(new TelegramService(), {TelegramService});

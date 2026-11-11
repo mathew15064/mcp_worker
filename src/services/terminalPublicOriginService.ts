@@ -1,8 +1,9 @@
+import type { Request } from 'express';
 function originError() {
   return Object.assign(new Error('Terminal browser origin could not be verified.'), { code: 'WEBSOCKET_ORIGIN_REJECTED' });
 }
 
-function canonicalOrigin(value) {
+function canonicalOrigin(value: unknown) {
   if (typeof value !== 'string' || !value || value.length > 512) return null;
   try {
     const url = new URL(value);
@@ -13,7 +14,7 @@ function canonicalOrigin(value) {
   }
 }
 
-function resolve(req) {
+function resolve(req: Request) {
   const browserOrigin = canonicalOrigin(req.headers?.origin);
   if (!browserOrigin) throw originError();
   const host = req.get?.('host') || req.headers?.host;
@@ -23,7 +24,7 @@ function resolve(req) {
   return browserOrigin;
 }
 
-function websocketUrl(origin, attempt) {
+function websocketUrl(origin: string, attempt: { attempt_id: string; nonce: string }) {
   const url = new URL('/terminal/ws', origin);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('attempt_id', attempt.attempt_id);
@@ -31,4 +32,4 @@ function websocketUrl(origin, attempt) {
   return url.href;
 }
 
-module.exports = { resolve, canonicalOrigin, websocketUrl };
+export = { resolve, canonicalOrigin, websocketUrl };
