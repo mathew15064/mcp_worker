@@ -177,7 +177,7 @@ class TerminalSshService {
       signal?.addEventListener('abort', fail, { once: true });
       (client as NodeJS.EventEmitter).once('close',  fail);
       client.once('error', fail);
-      stream.on('close', code => {
+      stream.on('close', (code: number | undefined) => {
         if (settled) return;
         settled = true;
         cleanup();
@@ -254,7 +254,7 @@ class TerminalSshService {
       };
       const complete = (code: number | null | undefined) => {
         if (!Number.isInteger(code)) return;
-        finish(code);
+        finish(Number(code));
       };
       const fail = () => {
         if (settled) return;
@@ -324,10 +324,10 @@ class TerminalSshService {
     const command = `tmux capture-pane -p -J -t '${target}' -S -`;
     return new Promise<ReadCapture>((resolve, reject) => {
       let stream: ClientChannel | undefined, done = false, tail = Buffer.alloc(0), truncated = false;
-      const finish = (code: number | null | undefined) => {
+      const finish = (code: string | null) => {
         if (done) return; done = true; clearTimeout(timer);
         signal?.removeEventListener('abort', abort);
-        connection.(client as NodeJS.EventEmitter).removeListener('close',  abort); connection.client.removeListener('error', abort);
+        (connection.client as NodeJS.EventEmitter).removeListener('close', abort); connection.client.removeListener('error', abort);
         if (stream) { stream.removeListener('data', data); stream.removeListener('error', abort); stream.removeListener('close', closed); try { stream.close(); } catch (_) {} }
         if (code) return reject(terminalError(code, 'Unable to read tmux history.'));
         while (tail.length && (tail[0] & 0xc0) === 0x80) tail = tail.subarray(1);
@@ -348,7 +348,7 @@ class TerminalSshService {
       };
       const timer = setTimeout(abort, this.commandTimeoutMs);
       signal?.addEventListener('abort', abort, { once: true });
-      connection.(client as NodeJS.EventEmitter).once('close',  abort); connection.client.once('error', abort);
+      (connection.client as NodeJS.EventEmitter).once('close', abort); connection.client.once('error', abort);
       try {
         connection.client.exec(command, {}, (error, channel) => {
           if (done) { try { channel?.close(); } catch (_) {} return; }
@@ -448,7 +448,7 @@ class TerminalSshService {
           clearTimeout(timer);
           signal?.removeEventListener('abort', onAbort);
           (client as NodeJS.EventEmitter).removeListener('close',  onFail);
-          client.removeListener('error', onFail);
+          client?.removeListener('error', onFail);
         };
 
         const onTimeout = () => {
@@ -478,7 +478,7 @@ class TerminalSshService {
         const timer = setTimeout(onTimeout, timeout);
         signal?.addEventListener('abort', onAbort, { once: true });
         (client as NodeJS.EventEmitter).once('close',  onFail);
-        client.once('error', onFail);
+        client?.once('error', onFail);
 
         stream.on('data', (chunk: Buffer | string) => {
           const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
@@ -510,15 +510,15 @@ class TerminalSshService {
           }
         });
 
-        stream.once('exit', (code) => {
-          if (Number.isInteger(code)) exitCode = code;
+        stream.once('exit', (code: number | undefined) => {
+          if (Number.isInteger(code)) exitCode = Number(code);
         });
 
-        stream.once('close', (code) => {
+        stream.once('close', (code: number | undefined) => {
           if (settled) return;
           settled = true;
           cleanup();
-          if (exitCode === null && Number.isInteger(code)) exitCode = code;
+          if (exitCode === null && Number.isInteger(code)) exitCode = Number(code);
           const duration_ms = Date.now() - start;
           resolve({
             exit_code: exitCode ?? 0,
@@ -578,13 +578,13 @@ class TerminalSshService {
       });
       stream.stderr?.resume();
       stream.once('exit', (code: number | undefined) => {
-        if (Number.isInteger(code)) exitCode = code;
+        if (Number.isInteger(code)) exitCode = Number(code);
       });
       stream.once('close', (code: number | undefined) => {
         if (settled) return;
         settled = true;
         cleanup();
-        if (exitCode === null && Number.isInteger(code)) exitCode = code;
+        if (exitCode === null && Number.isInteger(code)) exitCode = Number(code);
         if (exitCode === 2) return reject(terminalError('ARTIFACT_NOT_FOUND', 'Artifact file not found.'));
         if (exitCode === 3) return reject(terminalError('NOT_A_REGULAR_FILE', 'Artifact path is not a regular file.'));
         if (exitCode !== 0) return reject(terminalError('ARTIFACT_INSPECTION_FAILED', `Failed to inspect artifact path (exit code ${exitCode}).`));
@@ -745,7 +745,7 @@ class TerminalSshService {
       });
       stream.once('exit', (code: number | undefined) => {
         if (!Number.isInteger(code)) return;
-        exitCode = code;
+        exitCode = Number(code);
         // Some SSH servers emit an exit status but keep the channel open until
         // the client disconnects. Settle from the authoritative exit event so
         // successful stdin-driven writes do not report a false timeout.
@@ -936,7 +936,7 @@ class TerminalSshService {
         stream,
         close() {
           try { stream.close(); } catch (_) {}
-          try { client.end(); } catch (_) {}
+          try { client?.end(); } catch (_) {}
         }
       };
     } catch (error) {
