@@ -1,4 +1,5 @@
-const databaseManager = require('../db/databaseManager');
+import databaseManager = require('../db/databaseManager');
+import type { DatabaseAdapter } from '../db/contracts';
 
 const DEFAULTS = Object.freeze({
   'mcp.enabled': process.env.MCP_ENABLED !== 'false' ? 'true' : 'false',
@@ -13,12 +14,14 @@ const DEFAULTS = Object.freeze({
 });
 
 class RuntimeSettingsService {
+  values: Map<string, string>;
+  loaded: boolean;
   constructor() {
     this.values = new Map(Object.entries(DEFAULTS));
     this.loaded = false;
   }
 
-  async load(adapter = null) {
+  async load(adapter: DatabaseAdapter | null = null) {
     const db = adapter || databaseManager.getAdapter();
     this.values = new Map(Object.entries(DEFAULTS));
     if (!db) {
@@ -35,21 +38,21 @@ class RuntimeSettingsService {
     return this.snapshot();
   }
 
-  get(key, fallback = '') {
-    return this.values.has(key) ? this.values.get(key) : fallback;
+  get(key: string, fallback = '') {
+    return this.values.has(key) ? this.values.get(key)! : fallback;
   }
 
-  bool(key, fallback = false) {
+  bool(key: string, fallback = false) {
     const value = this.get(key, fallback ? 'true' : 'false');
     return value === 'true' || value === '1';
   }
 
-  int(key, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
+  int(key: string, fallback: number, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
     const value = Number.parseInt(this.get(key, String(fallback)), 10);
     return Number.isFinite(value) && value >= min && value <= max ? value : fallback;
   }
 
-  async set(key, value, adapter = null) {
+  async set(key: string, value: unknown, adapter: DatabaseAdapter | null = null) {
     const db = adapter || databaseManager.requireAdapter();
     const now = new Date().toISOString();
     if (db.kind === 'mysql') {
@@ -64,16 +67,16 @@ class RuntimeSettingsService {
     this.values.set(key, String(value ?? ''));
   }
 
-  async setMany(entries, adapter = null) {
+  async setMany(entries: Record<string, unknown>, adapter: DatabaseAdapter | null = null) {
     const db = adapter || databaseManager.requireAdapter();
     for (const [key, value] of Object.entries(entries)) await this.set(key, value, db);
     return this.snapshot();
   }
 
-  async seedDefaults(adapter = null) {
+  async seedDefaults(adapter: DatabaseAdapter | null = null) {
     const db = adapter || databaseManager.requireAdapter();
-    let rows = [];
-    try { rows = await db.queryAll('SELECT `key` FROM system_settings'); } catch (_) {}
+    let rows: {key: string}[] = [];
+    try { rows = await db.queryAll<{key: string}>('SELECT `key` FROM system_settings'); } catch (_) {}
     const existing = new Set(rows.map(row => String(row.key)));
     const currentBase = String(process.env.MCP_PUBLIC_BASE_URL || DEFAULTS['mcp.public_base_url']).replace(/\/+$/, '');
     const seed = { ...DEFAULTS, 'mcp.public_base_url': currentBase };
@@ -91,6 +94,5 @@ class RuntimeSettingsService {
   }
 }
 
-module.exports = new RuntimeSettingsService();
-module.exports.RuntimeSettingsService = RuntimeSettingsService;
-module.exports.DEFAULTS = DEFAULTS;
+const instance = Object.assign(new RuntimeSettingsService(), {RuntimeSettingsService, DEFAULTS});
+export = instance;

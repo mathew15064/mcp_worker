@@ -1,13 +1,14 @@
-const crypto = require('crypto');
-const { errorPage } = require('../http/pages');
+import crypto from 'node:crypto';
+import type {Request, Response, NextFunction} from 'express';
+const { errorPage }: { errorPage(status: number, message: string): string } = require('../http/pages');
 
-function isMachineEndpoint(req) {
+export function isMachineEndpoint(req: Request) {
   return req.path === '/mcp' || req.path.startsWith('/mcp/') ||
     req.path === '/oauth/token' || req.path === '/oauth/revoke' ||
     req.path.startsWith('/.well-known/') || req.path.startsWith('/worker/v1/');
 }
 
-function csrfProtection(req, res, next) {
+export function csrfProtection(req: Request, res: Response, next: NextFunction) {
   if (isMachineEndpoint(req) || !req.session) return next();
   if (!req.session.csrfToken) req.session.csrfToken = crypto.randomBytes(24).toString('hex');
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
@@ -17,5 +18,3 @@ function csrfProtection(req, res, next) {
   }
   return next();
 }
-
-module.exports = { csrfProtection, isMachineEndpoint };

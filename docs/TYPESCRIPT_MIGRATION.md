@@ -26,7 +26,7 @@ historical identifiers.
 
 - TS1: strict compiler, mixed build, typed principal/context/environment,
   compiled regression and browser tests, Docker and GitHub CI.
-- TS2: database contracts, adapters, migrations, repositories, authentication.
+- TS2: database contracts, adapters, all 13 migrations, all seven repositories, database manager/bootstrap, authentication, session stores, CSRF/session middleware and runtime settings.
 - TS3: MCP tools, OAuth, execution services and Worker message protocol.
 - TS4: routes, browser scripts, legacy Node Worker and scripts.
 - TS5: all tests typed, lint, strict build, full regression, security scans
@@ -36,3 +36,9 @@ No blanket any, ts-nocheck or weakening strict mode for migrated modules.
 Keep the 19 tool names, schema contract, OAuth scopes, migration names, Worker
 protocol and installer persistence intact. Move one bounded component at a
 time, with behavior tests before and after. Main remains unchanged until review.
+
+TS2 keeps the OAuth token formats and scopes, SQL migration identities,
+AES-GCM envelope and session cookie name unchanged. The OAuth issuance
+service, HTTP routes and other execution/transport services remain JS for TS3/TS4.
+The release harness compiles typed tests using the Docker builder and copies
+only the test output into an isolated test container.

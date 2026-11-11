@@ -16,7 +16,8 @@ mkdir -p "$OUT"
 export BOT_REPORT_SETUP_ENV="$ENVFILE" BOT_REPORT_SETUP_PROJECT="$ID" BOT_REPORT_SETUP_PORT="$PORT"
 compose() { docker compose --env-file "$ENVFILE" -p "$ID" -f docker-compose.yml "$@"; }
 cleanup() {
-  docker rm -fv "$ID-run" "$ID-db" "$ID-builder" >/dev/null 2>&1 || true
+  docker rm -fv "$ID-run" "$ID-db" "$ID-builder" "$ID-test-builder" >/dev/null 2>&1 || true
+  docker image rm "$ID-test:local" >/dev/null 2>&1 || true
   docker network rm "$ID-net" >/dev/null 2>&1 || true
   if [ -f "$ENVFILE" ]; then compose down -v >/dev/null 2>&1 || true; fi
   rm -f "$ENVFILE" "$ENVFILE.lock"
@@ -37,7 +38,11 @@ docker network create "$ID-net" >/dev/null
 pass=$(openssl rand -hex 24)
 docker run -d --name "$ID-db" --network "$ID-net" -e MYSQL_ROOT_PASSWORD="$pass" -e MYSQL_ROOT_HOST=% -e MYSQL_DATABASE=bot_report_test "$MYSQL" >/dev/null
 docker run -d --name "$ID-run" --network "$ID-net" --user root --entrypoint sh "$IMAGE" -c 'sleep 3600' >/dev/null
-docker cp tests "$ID-run":/app/dist/
+# Compile the typed tests in the same builder used for the production image.
+# Do not ship test files or TypeScript dev dependencies in the runtime image.
+docker build --target builder -t "$ID-test:local" . >"$OUT/test-build.log" 2>&1
+docker create --name "$ID-test-builder" "$ID-test:local" >/dev/null
+docker cp "$ID-test-builder":/app/dist/tests "$ID-run":/app/dist/
 docker exec "$ID-run" apk add --no-cache curl git bash ripgrep openssl >"$OUT/test-prerequisites.log" 2>&1
 # Build a distinct fixture from the same source, never from a production worker.
 docker create --name "$ID-builder" --entrypoint sh "$GO_IMAGE" -c 'cd /src && CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=2.3.4 -X main.commit=release-test-alternate" -o /tmp/alternate .' >/dev/null

@@ -1,6 +1,12 @@
-const session = require('express-session');
+import session = require('express-session');
+import type { SessionData } from 'express-session';
+type Callback = (err?: unknown) => void;
+type GetCallback = (err: unknown, data?: SessionData | null) => void;
 
 class BoundedMemorySessionStore extends session.Store {
+  maxSessions: number;
+  sessions: Map<string, {session: SessionData; expired: number}>;
+  cleanupInterval: NodeJS.Timeout;
   constructor({ maxSessions = 500, cleanupIntervalMs = 15 * 60 * 1000 } = {}) {
     super();
     this.maxSessions = Math.max(10, Number(maxSessions) || 500);
@@ -9,12 +15,12 @@ class BoundedMemorySessionStore extends session.Store {
     this.cleanupInterval.unref?.();
   }
 
-  _expiry(sess) {
+  _expiry(sess: SessionData) {
     const maxAge = sess?.cookie && typeof sess.cookie.maxAge === 'number' ? sess.cookie.maxAge : 24 * 60 * 60 * 1000;
     return Date.now() + maxAge;
   }
 
-  _clone(value) { return JSON.parse(JSON.stringify(value)); }
+  _clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)); }
 
   clearExpired() {
     const now = Date.now();
@@ -32,7 +38,7 @@ class BoundedMemorySessionStore extends session.Store {
     }
   }
 
-  get(sid, cb) {
+  get(sid: string, cb: GetCallback) {
     try {
       const record = this.sessions.get(sid);
       if (!record || record.expired <= Date.now()) {
@@ -45,7 +51,7 @@ class BoundedMemorySessionStore extends session.Store {
     } catch (error) { cb(error); }
   }
 
-  set(sid, sess, cb) {
+  set(sid: string, sess: SessionData, cb?: Callback) {
     try {
       if (!this.sessions.has(sid)) this._evictIfNeeded();
       this.sessions.set(sid, { session: this._clone(sess), expired: this._expiry(sess) });
@@ -53,12 +59,12 @@ class BoundedMemorySessionStore extends session.Store {
     } catch (error) { cb?.(error); }
   }
 
-  destroy(sid, cb) {
+  destroy(sid: string, cb?: Callback) {
     this.sessions.delete(sid);
     cb?.(null);
   }
 
-  touch(sid, sess, cb) {
+  touch(sid: string, sess: SessionData, cb?: Callback) {
     const record = this.sessions.get(sid);
     if (record) {
       record.expired = this._expiry(sess);
@@ -69,7 +75,7 @@ class BoundedMemorySessionStore extends session.Store {
     cb?.(null);
   }
 
-  clear(cb) {
+  clear(cb?: Callback) {
     this.sessions.clear();
     cb?.(null);
   }
@@ -77,4 +83,4 @@ class BoundedMemorySessionStore extends session.Store {
   close() { clearInterval(this.cleanupInterval); this.sessions.clear(); }
 }
 
-module.exports = BoundedMemorySessionStore;
+export = BoundedMemorySessionStore;

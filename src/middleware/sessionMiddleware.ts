@@ -1,6 +1,7 @@
-const session = require('express-session');
-const config = require('../config/env');
-const BoundedMemorySessionStore = require('../db/memorySessionStore');
+import session = require('express-session');
+declare module 'express-session' { interface SessionData { csrfToken?: string; userId?: string; role?: string; sessionVersion?: number; authSource?: string } }
+import config = require('../config/env');
+import BoundedMemorySessionStore = require('../db/memorySessionStore');
 
 const secureCookie = config.NODE_ENV === 'production'
   ? process.env.COOKIE_SECURE !== 'false'
@@ -24,5 +25,4 @@ const sessionMiddleware = session({
   }
 });
 
-module.exports = sessionMiddleware;
-module.exports.store = store;
+export = Object.assign(sessionMiddleware, {store});

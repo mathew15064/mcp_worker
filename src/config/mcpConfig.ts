@@ -1,6 +1,6 @@
-const { URL } = require('url');
-const runtimeSettings = require('../services/runtimeSettingsService');
-const databaseManager = require('../db/databaseManager');
+import { URL } from 'node:url';
+import runtimeSettings = require('../services/runtimeSettingsService');
+import databaseManager = require('../db/databaseManager');
 
 const DEFAULT_SCOPES = Object.freeze(['bot_report.read', 'bot_report.terminal', 'offline_access']);
 
@@ -40,6 +40,5 @@ class McpConfig {
   }
 }
 
-module.exports = new McpConfig();
-module.exports.McpConfig = McpConfig;
-module.exports.DEFAULT_SCOPES = DEFAULT_SCOPES;
+const instance = Object.assign(new McpConfig(), {McpConfig, DEFAULT_SCOPES});
+export = instance;

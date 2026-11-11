@@ -1,8 +1,14 @@
-const session = require('express-session');
-const { getDb } = require('./connection');
+import session = require('express-session');
+import type { SessionData } from 'express-session';
+type Callback = (err?: unknown) => void;
+type GetCallback = (err: unknown, data?: SessionData | null) => void;
+import { getDb } from './connection';
+import type Database from 'better-sqlite3';
 
 class SqliteSessionStore extends session.Store {
-  constructor(options = {}) {
+  private _customDb: Database.Database | null;
+  cleanupInterval: NodeJS.Timeout;
+  constructor(options: {db?: Database.Database} = {}) {
     super();
     this._customDb = options.db || null;
 
@@ -26,10 +32,10 @@ class SqliteSessionStore extends session.Store {
     }
   }
 
-  get(sid, cb) {
+  get(sid: string, cb: GetCallback) {
     try {
       const now = Date.now();
-      const row = this.db.prepare('SELECT sess, expired FROM sessions WHERE sid = ?').get(sid);
+      const row = this.db.prepare<[string], {sess: string; expired: number}>('SELECT sess, expired FROM sessions WHERE sid = ?').get(sid);
       if (!row) {
         return cb(null, null);
       }
@@ -44,7 +50,7 @@ class SqliteSessionStore extends session.Store {
     }
   }
 
-  set(sid, sess, cb) {
+  set(sid: string, sess: SessionData, cb?: Callback) {
     try {
       let maxAge = 24 * 60 * 60 * 1000; // default 24h
       if (sess && sess.cookie && typeof sess.cookie.maxAge === 'number') {
@@ -65,7 +71,7 @@ class SqliteSessionStore extends session.Store {
     }
   }
 
-  destroy(sid, cb) {
+  destroy(sid: string, cb?: Callback) {
     try {
       this.db.prepare('DELETE FROM sessions WHERE sid = ?').run(sid);
       if (cb) cb(null);
@@ -74,7 +80,7 @@ class SqliteSessionStore extends session.Store {
     }
   }
 
-  touch(sid, sess, cb) {
+  touch(sid: string, sess: SessionData, cb?: Callback) {
     try {
       let maxAge = 24 * 60 * 60 * 1000;
       if (sess && sess.cookie && typeof sess.cookie.maxAge === 'number') {
@@ -89,4 +95,4 @@ class SqliteSessionStore extends session.Store {
   }
 }
 
-module.exports = SqliteSessionStore;
+export = SqliteSessionStore;

@@ -1,9 +1,9 @@
-const adminIdentity = require('./adminIdentityService');
-const databaseManager = require('../db/databaseManager');
-const userService = require('./userService');
+import * as adminIdentity from './adminIdentityService';
+import databaseManager = require('../db/databaseManager');
+import userService = require('./userService');
 
 class AuthService {
-  async authenticate(username, password) {
+  async authenticate(username: string, password: string) {
     if (!username || !password) return { success: false, message: 'Username and password are required' };
     const admin = adminIdentity.authenticate(username, password);
     if (admin) return { success: true, user: admin };
@@ -14,7 +14,7 @@ class AuthService {
     return { success: false, message: 'Invalid username or password' };
   }
 
-  async currentIdentity(session) {
+  async currentIdentity(session: Parameters<typeof userService.currentFromSession>[0] & Parameters<typeof adminIdentity.currentFromSession>[0]) {
     const admin = adminIdentity.currentFromSession(session);
     if (admin) return admin;
     if (!databaseManager.isOperational()) return null;
@@ -22,4 +22,4 @@ class AuthService {
   }
 }
 
-module.exports = new AuthService();
+export = new AuthService();

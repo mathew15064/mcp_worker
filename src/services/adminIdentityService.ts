@@ -1,19 +1,21 @@
-const crypto = require('crypto');
-const bcrypt = require('bcryptjs');
-const Database = require('better-sqlite3');
-const config = require('../config/env');
+import crypto from 'node:crypto';
+import bcrypt from 'bcryptjs';
+import Database = require('better-sqlite3');
+import config = require('../config/env');
+import databaseManager = require('../db/databaseManager');
+interface AdminSession {userId?: string; role?: string; sessionVersion?: number; authSource?: string}
 
-const ADMIN_ID = 'env-admin';
-const SESSION_VERSION = 1;
+export const ADMIN_ID = 'env-admin';
+export const SESSION_VERSION = 1;
 
-function timingSafeStringEqual(a, b) {
+export function timingSafeStringEqual(a: unknown, b: unknown) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
   const ah = crypto.createHash('sha256').update(a).digest();
   const bh = crypto.createHash('sha256').update(b).digest();
   return crypto.timingSafeEqual(ah, bh);
 }
 
-function identity(authSource = 'env') {
+export function identity(authSource = 'env') {
   return {
     id: ADMIN_ID,
     username: config.ADMIN_USERNAME,
@@ -25,24 +27,22 @@ function identity(authSource = 'env') {
   };
 }
 
-function envAuthenticate(username, password) {
+function envAuthenticate(username: unknown, password: unknown) {
   const configuredPassword = config.ADMIN_PASSWORD;
   if (!configuredPassword || configuredPassword.trim().length < 8) {
-    const error = new Error('ADMIN_PASSWORD must be configured with at least 8 characters.');
-    error.code = 'ADMIN_PASSWORD_INVALID';
+    const error = Object.assign(new Error('ADMIN_PASSWORD must be configured with at least 8 characters.'), {code: 'ADMIN_PASSWORD_INVALID'});
     throw error;
   }
   return timingSafeStringEqual(String(username || ''), config.ADMIN_USERNAME)
     && timingSafeStringEqual(String(password || ''), configuredPassword);
 }
 
-function legacyAuthenticate(username, password) {
-  const databaseManager = require('../db/databaseManager');
+function legacyAuthenticate(username: unknown, password: unknown) {
   if (databaseManager.status().state !== 'MIGRATION_REQUIRED' || !databaseManager.legacyAvailable()) return false;
-  let db = null;
+  let db: Database.Database | null = null;
   try {
     db = new Database(config.DATABASE_PATH, { readonly: true, fileMustExist: true });
-    const row = db.prepare("SELECT username, password_hash FROM users WHERE role = 'admin' ORDER BY created_at ASC LIMIT 1").get();
+    const row = db.prepare<[], {username: string; password_hash: string}>("SELECT username, password_hash FROM users WHERE role = 'admin' ORDER BY created_at ASC LIMIT 1").get();
     if (!row || !timingSafeStringEqual(String(username || ''), String(row.username || ''))) return false;
     return bcrypt.compareSync(String(password || ''), String(row.password_hash || ''));
   } catch (_) {
@@ -52,16 +52,14 @@ function legacyAuthenticate(username, password) {
   }
 }
 
-function authenticate(username, password) {
+export function authenticate(username: unknown, password: unknown) {
   if (envAuthenticate(username, password)) return identity('env');
   if (legacyAuthenticate(username, password)) return identity('legacy');
   return null;
 }
 
-function currentFromSession(session) {
+export function currentFromSession(session: AdminSession | null | undefined) {
   if (!session || session.userId !== ADMIN_ID || session.role !== 'admin') return null;
   if ((session.sessionVersion || SESSION_VERSION) !== SESSION_VERSION) return null;
   return identity(session.authSource === 'legacy' ? 'legacy' : 'env');
 }
-
-module.exports = { ADMIN_ID, SESSION_VERSION, identity, authenticate, currentFromSession, timingSafeStringEqual };
