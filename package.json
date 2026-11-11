@@ -21,7 +21,8 @@
     "migrate:fresh": "node dist/scripts/migrate.js fresh",
     "build": "node scripts/build.cjs",
     "typecheck": "tsc --noEmit",
-    "first:mcp": "npm run build && node dist/scripts/first-mcp-call.js"
+    "first:mcp": "npm run build && node dist/scripts/first-mcp-call.js",
+    "lint": "node scripts/lint-typescript.cjs"
   },
   "keywords": [
     "mcp",

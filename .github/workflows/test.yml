@@ -59,6 +59,9 @@ jobs:
           npm audit --omit=dev --audit-level=high
           npm --prefix worker audit --omit=dev --audit-level=high
 
+      - name: TypeScript source lint
+        run: npm run lint
+
       - name: Strict TypeScript check
         run: npm run typecheck
 

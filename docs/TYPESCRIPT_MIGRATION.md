@@ -29,8 +29,10 @@ historical identifiers.
 - TS2: database contracts, adapters, all 13 migrations, all seven repositories, database manager/bootstrap, authentication, session stores, CSRF/session middleware and runtime settings.
 - TS3: MCP server/transport and all 19 Zod-typed tools, OAuth token issuance/refresh/revoke, audit capture, Ed25519 Worker authentication, WebSocket broker and execution services.
 - TS4: HTTP entrypoints and routes, browser UI scripts, legacy Node Worker agent/CLI/lifecycle and Node administrative scripts (source TypeScript, build emits JavaScript).
-- TS5: all tests typed, lint, strict build, full regression, security scans
-  and release candidate validation.
+- TS5: complete typed renderer and SSH compatibility, type-focused
+  regression coverage, static source lint, strict build, full Docker regression,
+  security scans, and release candidate validation. Work is isolated in
+  a draft PR until all checks pass.
 
 No blanket any, ts-nocheck or weakening strict mode for migrated modules.
 Keep the 19 tool names, schema contract, OAuth scopes, migration names, Worker
