@@ -1,0 +1,646 @@
+import express, { type Request } from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
+import { rateLimit } from 'express-rate-limit';
+import databaseManager from '../db/databaseManager';
+import workerAuthService from '../services/workerAuthService';
+import workerRepository from '../repositories/workerRepository';
+
+const router = express.Router();
+const WORKER_DIR = path.resolve(__dirname, '../../worker');
+const WORKER_BIN_DIR = path.join(WORKER_DIR, 'bin');
+const LEGACY_DIST_FILES = Object.freeze([
+  'agent.js',
+  'cli.js',
+  'lifecycle.js',
+  'package.json',
+  'package-lock.json',
+]);
+const BINARY_DIST_FILES = Object.freeze([
+  'bot-report-worker-linux-amd64',
+  'bot-report-worker-linux-arm64',
+  'bot-report-worker-linux-386',
+  'bot-report-worker-linux-armv7',
+  'bot-report-worker-darwin-amd64',
+  'bot-report-worker-darwin-arm64',
+  'bot-report-worker-windows-amd64.exe',
+  'bot-report-worker-windows-arm64.exe',
+]);
+const DIST_FILES = Object.freeze([...LEGACY_DIST_FILES, ...BINARY_DIST_FILES]);
+
+const enrollmentLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+function publicBaseUrl(req: Request) {
+  const value = `${req.protocol}://${req.get('host')}`;
+  const parsed = new URL(value);
+  if (!['http:', 'https:'].includes(parsed.protocol))
+    throw new Error('Unsupported installer origin.');
+  return parsed.origin;
+}
+
+function shellSingleQuote(value: string) {
+  return `'${String(value).replace(/'/g, `'"'"'`)}'`;
+}
+
+function unixInstallerScript(baseUrl: string, expectedOS: string) {
+  const base = shellSingleQuote(baseUrl);
+  const osName = shellSingleQuote(expectedOS);
+  return `#!/bin/sh
+set -eu
+
+BASE_URL=${base}
+EXPECTED_OS=${osName}
+INSTALL_ROOT="${'${BOT_REPORT_WORKER_INSTALL_ROOT:-$HOME/.local/share/bot-report-worker}'}"
+BIN_DIR="${'${BOT_REPORT_WORKER_BIN_DIR:-$HOME/.local/bin}'}"
+WORKER_HOME="${'${BOT_REPORT_WORKER_HOME:-$HOME/.bot-report-worker}'}"
+TARGET="$INSTALL_ROOT/current"
+SYSTEMTD="$TARGET/systemtd"
+TMP="$(mktemp -d)"
+LOCK=""
+cleanup() { rm -rf "$TMP"; if [ -n "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null || true; fi; }
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+ACTION="${'${BOT_REPORT_WORKER_ACTION:-install}'}"
+SERVICE="${'${BOT_REPORT_WORKER_SYSTEMD:-0}'}"
+if [ "${'${BOT_REPORT_WORKER_SKIP_SERVICE:-0}'}" = 1 ]; then SERVICE=0; fi
+case "$SERVICE" in 0|1) ;; *) echo "[systemtd] invalid service mode" >&2; exit 1;; esac
+case "$ACTION" in install|rollback) ;; *) echo "[systemtd] invalid action" >&2; exit 1;; esac
+if [ -f "$WORKER_HOME/service-mode" ] && [ "$(cat "$WORKER_HOME/service-mode")" = systemd ] && [ "$SERVICE" != 1 ]; then
+  echo "[systemtd] managed service detected; use explicit systemd maintenance, not manual installer." >&2; exit 1
+fi
+if [ "$ACTION" = rollback ] && [ "$SERVICE" = 1 ]; then
+  echo "[systemtd] manual rollback is not supported for systemd; use administrative recovery." >&2; exit 1
+fi
+
+need() { command -v "$1" >/dev/null 2>&1 || { echo "[systemtd] missing required command: $1" >&2; exit 1; }; }
+need curl
+need uname
+need id
+
+OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+ARCH_RAW="$(uname -m)"
+if [ "$OS" != "$EXPECTED_OS" ]; then
+  echo "[systemtd] this installer is for $EXPECTED_OS; detected $OS." >&2
+  exit 1
+fi
+case "$OS:$ARCH_RAW" in
+  linux:x86_64|linux:amd64|darwin:x86_64|darwin:amd64) ARCH="amd64" ;;
+  linux:aarch64|linux:arm64|darwin:aarch64|darwin:arm64) ARCH="arm64" ;;
+  linux:i386|linux:i486|linux:i586|linux:i686) ARCH="386" ;;
+  linux:armv7l|linux:armv7*) ARCH="armv7" ;;
+  *) echo "[systemtd] unsupported platform: $OS/$ARCH_RAW" >&2; exit 1 ;;
+esac
+FILE="bot-report-worker-$OS-$ARCH"
+
+mkdir -p "$INSTALL_ROOT" "$BIN_DIR"
+if [ -L "$INSTALL_ROOT" ] || [ -L "$TARGET" ] || [ -L "$SYSTEMTD" ] || [ -L "$WORKER_HOME" ] || [ -L "$INSTALL_ROOT/previous" ]; then
+  echo "[systemtd] symlink installation refused" >&2; exit 1
+fi
+if [ -f "$WORKER_HOME/install-root" ] && [ "$(cat "$WORKER_HOME/install-root")" != "$INSTALL_ROOT" ]; then
+  echo "[systemtd] existing identity belongs to a different install root" >&2; exit 1
+fi
+if [ -f "$WORKER_HOME/default-server" ] && [ "$(cat "$WORKER_HOME/default-server")" != "$BASE_URL" ]; then
+  echo "[systemtd] existing installation belongs to a different server" >&2; exit 1
+fi
+mkdir "$INSTALL_ROOT/.install-lock" || { echo "[systemtd] installer already running or stale lock; inspect before removal" >&2; exit 1; }
+LOCK="$INSTALL_ROOT/.install-lock"
+PREVIOUS="$INSTALL_ROOT/previous"
+if [ "$ACTION" = rollback ]; then
+  [ -f "$PREVIOUS/systemtd" ] && [ -f "$PREVIOUS/SHA256SUMS" ] && [ ! -L "$PREVIOUS" ] && [ ! -L "$PREVIOUS/systemtd" ] || { echo "[systemtd] no verified previous runtime" >&2; exit 1; }
+  cp "$PREVIOUS/systemtd" "$TMP/systemtd"
+  cp "$PREVIOUS/SHA256SUMS" "$TMP/SHA256SUMS"
+else
+  curl -fsSL "$BASE_URL/worker/dist/$FILE" -o "$TMP/systemtd"
+  curl -fsSL "$BASE_URL/worker/dist/SHA256SUMS" -o "$TMP/SHA256SUMS"
+  if [ -n "${'${BOT_REPORT_WORKER_TRUSTED_KEY:-}'}" ]; then
+    need openssl
+    curl -fsSL "$BASE_URL/worker/dist/SHA256SUMS.sig" -o "$TMP/SHA256SUMS.sig"
+    openssl dgst -sha256 -verify "$BOT_REPORT_WORKER_TRUSTED_KEY" -signature "$TMP/SHA256SUMS.sig" "$TMP/SHA256SUMS" >/dev/null
+  fi
+fi
+EXPECTED="$(awk -v file="$FILE" '$2 == file { print $1; exit }' "$TMP/SHA256SUMS")"
+if [ -z "$EXPECTED" ]; then
+  echo "[systemtd] checksum manifest does not contain $FILE." >&2
+  exit 1
+fi
+if command -v sha256sum >/dev/null 2>&1; then
+  ACTUAL="$(sha256sum "$TMP/systemtd" | awk '{print $1}')"
+elif command -v shasum >/dev/null 2>&1; then
+  ACTUAL="$(shasum -a 256 "$TMP/systemtd" | awk '{print $1}')"
+elif command -v openssl >/dev/null 2>&1; then
+  ACTUAL="$(openssl dgst -sha256 "$TMP/systemtd" | awk '{print $NF}')"
+else
+  echo "[systemtd] sha256sum, shasum, or openssl is required for download verification." >&2
+  exit 1
+fi
+if [ "$ACTUAL" != "$EXPECTED" ]; then
+  echo "[systemtd] checksum verification failed for $FILE." >&2
+  exit 1
+fi
+chmod 0755 "$TMP/systemtd"
+"$TMP/systemtd" version >/dev/null
+
+SERVICE_ACTIVE=0
+if [ "$OS" = linux ] && [ "$SERVICE" = 1 ]; then
+  need systemctl
+  if [ "$(id -u)" -ne 0 ]; then need sudo; sudo -n true >/dev/null 2>&1 || { echo "[systemtd] systemd requires passwordless sudo" >&2; exit 1; }; fi
+  if systemctl cat systemtd.service >/dev/null 2>&1; then
+    [ -f "$WORKER_HOME/service-mode" ] && [ "$(cat "$WORKER_HOME/service-mode")" = systemd ] || { echo "[systemtd] existing systemd unit belongs to another installation" >&2; exit 1; }
+  fi
+  if systemctl is-active --quiet systemtd.service 2>/dev/null; then
+    [ -f "$WORKER_HOME/service-mode" ] && [ "$(cat "$WORKER_HOME/service-mode")" = systemd ] || { echo "[systemtd] another system service is active; refusing" >&2; exit 1; }
+    SERVICE_ACTIVE=1
+  fi
+fi
+
+for ALIAS in "$BIN_DIR/systemtd" "$BIN_DIR/bot-report-worker"; do
+  if [ -e "$ALIAS" ] || [ -L "$ALIAS" ]; then
+    [ -L "$ALIAS" ] && { [ "$(readlink "$ALIAS")" = "$SYSTEMTD" ] || [ "$(readlink "$ALIAS")" = "$TARGET/bot-report-worker" ]; } || { echo "[systemtd] unrelated CLI path exists: $ALIAS" >&2; exit 1; }
+  fi
+done
+if [ "$SERVICE" = 0 ] && [ "$ACTION" = install ] && [ -f "$SYSTEMTD" ] && cmp -s "$SYSTEMTD" "$TMP/systemtd"; then
+  echo "[systemtd] runtime already current; identity and rollback retained"
+  exit 0
+fi
+WAS_RUNNING=0
+if [ "$SERVICE_ACTIVE" -eq 0 ]; then
+  for LEGACY in "$BIN_DIR/bot-report-worker" "$TARGET/bot-report-worker" "$SYSTEMTD"; do
+    if [ -x "$LEGACY" ]; then
+      if "$LEGACY" status 2>/dev/null | grep -q 'status: RUNNING'; then WAS_RUNNING=1; fi
+      "$LEGACY" stop >/dev/null
+      break
+    fi
+  done
+fi
+mkdir -p "$TARGET"
+# Retain the running binary until a verified replacement has been staged.
+if [ -f "$SYSTEMTD" ]; then
+  cp "$SYSTEMTD" "$TMP/old"
+
+fi
+NEXT="$(mktemp "$TARGET/.systemtd.XXXXXX")"
+cp "$TMP/systemtd" "$NEXT"
+chmod 0755 "$NEXT"
+mv -f "$NEXT" "$SYSTEMTD"
+ln -sfn "$TARGET/systemtd" "$BIN_DIR/systemtd"
+ln -sfn "$TARGET/systemtd" "$BIN_DIR/bot-report-worker"
+
+mkdir -p "$WORKER_HOME"
+[ -f "$WORKER_HOME/default-server" ] || printf '%s\n' "$BASE_URL" > "$WORKER_HOME/default-server"
+printf '%s\n' "$INSTALL_ROOT" > "$WORKER_HOME/install-root"
+printf '%s\n' "$BIN_DIR/systemtd" > "$WORKER_HOME/bin-path"
+chmod 0700 "$WORKER_HOME"
+chmod 0600 "$WORKER_HOME/default-server" "$WORKER_HOME/install-root" "$WORKER_HOME/bin-path"
+
+echo "[systemtd] installed standalone runtime: $BIN_DIR/systemtd ($OS/$ARCH)"
+
+if [ "$OS" = linux ] && [ "$SERVICE" = 1 ]; then
+  RUN_USER="$(id -un)"
+  RUN_GROUP="$(id -gn)"
+  RUN_HOME="$HOME"
+  if [ "$(id -u)" -eq 0 ]; then
+    root_cmd() { "$@"; }
+  else
+    need sudo
+    sudo -n true >/dev/null 2>&1 || { echo "[systemtd] Linux system service installation requires root or passwordless sudo." >&2; exit 1; }
+    root_cmd() { sudo -n "$@"; }
+  fi
+  SYSTEMD_VERSION="$(systemctl --version 2>/dev/null | awk 'NR==1 { print $2 }')"
+  MEMORY_DIRECTIVE=MemoryLimit
+  case "$SYSTEMD_VERSION" in
+    ''|*[!0-9]*) ;;
+    *) if [ "$SYSTEMD_VERSION" -ge 231 ]; then MEMORY_DIRECTIVE=MemoryMax; fi ;;
+  esac
+  cat > "$TMP/systemtd.service" <<UNIT
+[Unit]
+Description=mcp_worker System Task Daemon
+After=network-online.target
+Wants=network-online.target
+RefuseManualStop=yes
+
+[Service]
+Type=simple
+StartLimitInterval=60
+StartLimitBurst=5
+User=$RUN_USER
+Group=$RUN_GROUP
+Environment="HOME=$RUN_HOME"
+Environment="BOT_REPORT_WORKER_HOME=$WORKER_HOME"
+ExecStart=/usr/local/sbin/systemtd run
+Restart=always
+RestartSec=3
+TimeoutStopSec=10
+$MEMORY_DIRECTIVE=512M
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  SYSTEM_BIN_NEXT="/usr/local/sbin/.systemtd.next.$$"
+  root_cmd install -m 0755 "$SYSTEMTD" "$SYSTEM_BIN_NEXT"
+  root_cmd mv -f "$SYSTEM_BIN_NEXT" /usr/local/sbin/systemtd
+  root_cmd install -m 0644 "$TMP/systemtd.service" /etc/systemd/system/systemtd.service
+  root_cmd systemctl daemon-reload
+  root_cmd systemctl enable systemtd.service >/dev/null
+  printf '%s\n' systemd > "$WORKER_HOME/service-mode"
+  chmod 0600 "$WORKER_HOME/service-mode"
+  if [ -f "$WORKER_HOME/state.json" ]; then
+    if [ "$SERVICE_ACTIVE" -eq 1 ]; then
+      root_cmd systemctl kill --kill-who=main --signal=TERM systemtd.service
+    else
+      root_cmd systemctl start systemtd.service
+    fi
+    i=0
+    while [ "$i" -lt 40 ]; do
+      if root_cmd systemctl is-active --quiet systemtd.service; then break; fi
+      i=$((i + 1))
+      sleep 0.25
+    done
+    root_cmd systemctl is-active --quiet systemtd.service || { echo "[systemtd] systemtd.service failed to become active." >&2; exit 1; }
+    echo "[systemtd] systemd service enabled and active"
+  else
+    echo "[systemtd] systemd service installed; enroll first with: systemtd login"
+  fi
+fi
+
+# Manual installs restore the prior running state and fail back on connection failure.
+if [ "$SERVICE" = 0 ] && [ "$WAS_RUNNING" = 1 ]; then
+  if ! "$SYSTEMTD" start; then
+    "$SYSTEMTD" stop >/dev/null 2>&1 || true
+    if [ -f "$TMP/old" ]; then
+      NEXT="$(mktemp "$TARGET/.systemtd.XXXXXX")"
+      cp "$TMP/old" "$NEXT"
+      chmod 0755 "$NEXT"
+      mv -f "$NEXT" "$SYSTEMTD"
+      "$SYSTEMTD" start || true
+    fi
+    echo "[systemtd] replacement failed; previous binary restored when available" >&2
+    exit 1
+  fi
+fi
+if [ -f "$TMP/old" ]; then
+  mkdir -p "$PREVIOUS"
+  NEXT="$(mktemp "$PREVIOUS/.systemtd.XXXXXX")"
+  cp "$TMP/old" "$NEXT"
+  chmod 0755 "$NEXT"
+  mv -f "$NEXT" "$PREVIOUS/systemtd"
+  if command -v sha256sum >/dev/null 2>&1; then OLD_HASH="$(sha256sum "$PREVIOUS/systemtd" | awk '{print $1}')"
+  elif command -v shasum >/dev/null 2>&1; then OLD_HASH="$(shasum -a 256 "$PREVIOUS/systemtd" | awk '{print $1}')"
+  else OLD_HASH="$(openssl dgst -sha256 "$PREVIOUS/systemtd" | awk '{print $NF}')"; fi
+  printf '%s  %s\n' "$OLD_HASH" "$FILE" > "$PREVIOUS/SHA256SUMS"
+fi
+
+case ":$PATH:" in
+  *":$BIN_DIR:"*) ;;
+  *) echo "[systemtd] add $BIN_DIR to PATH if needed." ;;
+esac
+if [ -f "$WORKER_HOME/state.json" ]; then
+  if [ "$OS" = linux ] && [ "$SERVICE" = 1 ]; then
+    echo "[systemtd] existing identity preserved; service: systemtd.service"
+  else
+    echo "[systemtd] existing identity preserved; next: systemtd start"
+  fi
+else
+  echo "[systemtd] next: systemtd login"
+fi
+`;
+}
+
+function installerScript(baseUrl: string) {
+  return unixInstallerScript(baseUrl, 'linux');
+}
+function macInstallerScript(baseUrl: string) {
+  return unixInstallerScript(baseUrl, 'darwin');
+}
+function powershellSingleQuote(value: string) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+function windowsInstallerScript(baseUrl: string) {
+  const payloadUrl = powershellSingleQuote(`${baseUrl}/worker/install-windows.ps1`);
+  return `$ErrorActionPreference = 'Stop'
+$InstallerUrl = ${payloadUrl}
+$Tmp = Join-Path ([IO.Path]::GetTempPath()) ('bot-report-worker-install-' + [guid]::NewGuid().ToString('N') + '.ps1')
+try {
+  Invoke-WebRequest -UseBasicParsing -Uri $InstallerUrl -OutFile $Tmp
+  $PowerShellExe = (Get-Process -Id $PID).Path
+  if (-not $PowerShellExe) { $PowerShellExe = 'powershell.exe' }
+  & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $Tmp
+  if ($LASTEXITCODE -ne 0) { throw "Worker installer failed with exit code $LASTEXITCODE" }
+} finally {
+  Remove-Item -Force -ErrorAction SilentlyContinue $Tmp
+}
+`;
+}
+
+function windowsInstallerPayloadScript(baseUrl: string) {
+  const base = powershellSingleQuote(baseUrl);
+  return `$ErrorActionPreference = 'Stop'
+$BaseUrl = ${base}
+$InstallRoot = if ($env:BOT_REPORT_WORKER_INSTALL_ROOT) { $env:BOT_REPORT_WORKER_INSTALL_ROOT } else { Join-Path $env:LOCALAPPDATA 'BotReportWorker' }
+$Target = Join-Path $InstallRoot 'current'
+$Previous = Join-Path $InstallRoot 'previous'
+$Action = if ($env:BOT_REPORT_WORKER_ACTION) { $env:BOT_REPORT_WORKER_ACTION } else { 'install' }
+if ($Action -notin @('install','rollback')) { throw 'Invalid installer action' }
+$WorkerHome = if ($env:BOT_REPORT_WORKER_HOME) { $env:BOT_REPORT_WORKER_HOME } else { Join-Path $HOME '.bot-report-worker' }
+$Tmp = Join-Path ([IO.Path]::GetTempPath()) ('bot-report-worker-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
+$Lock = Join-Path $InstallRoot '.install-lock'
+$LockOwned = $false
+try {
+  New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
+  foreach ($Path in @($InstallRoot, $Target, $Previous, $WorkerHome)) {
+    if ((Test-Path $Path) -and ((Get-Item -LiteralPath $Path).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Reparse point installation refused' }
+  }
+  $RecordedRoot = Join-Path $WorkerHome 'install-root'
+  $RecordedServer = Join-Path $WorkerHome 'default-server'
+  if ((Test-Path $RecordedRoot) -and ((Get-Content $RecordedRoot -Raw).Trim() -ne $InstallRoot)) { throw 'Different existing installation root' }
+  if ((Test-Path $RecordedServer) -and ((Get-Content $RecordedServer -Raw).Trim() -ne $BaseUrl)) { throw 'Different existing server' }
+  New-Item -ItemType Directory -Path $Lock -ErrorAction Stop | Out-Null
+  $LockOwned = $true
+  $ArchRaw = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
+  switch ($ArchRaw) {
+    'x64' { $Arch = 'amd64' }
+    'arm64' { $Arch = 'arm64' }
+    default { throw "Unsupported Windows architecture: $ArchRaw" }
+  }
+  $File = "bot-report-worker-windows-$Arch.exe"
+  $Downloaded = Join-Path $Tmp 'bot-report-worker.exe'
+  $Sums = Join-Path $Tmp 'SHA256SUMS'
+  if ($Action -eq 'rollback') {
+    Copy-Item (Join-Path $Previous 'bot-report-worker.exe') $Downloaded
+    Copy-Item (Join-Path $Previous 'SHA256SUMS') $Sums
+  } else {
+    Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/worker/dist/$File" -OutFile $Downloaded
+  Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/worker/dist/SHA256SUMS" -OutFile $Sums
+    if ($env:BOT_REPORT_WORKER_TRUSTED_KEY) {
+      $Signature = Join-Path $Tmp 'SHA256SUMS.sig'
+      Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/worker/dist/SHA256SUMS.sig" -OutFile $Signature
+      & openssl dgst -sha256 -verify $env:BOT_REPORT_WORKER_TRUSTED_KEY -signature $Signature $Sums
+      if ($LASTEXITCODE -ne 0) { throw 'Manifest signature verification failed' }
+    }
+  }
+  $Expected = Get-Content $Sums | ForEach-Object { $parts = $_ -split '\\s+'; if ($parts.Count -ge 2 -and $parts[-1] -eq $File) { $parts[0] } } | Select-Object -First 1
+  if (-not $Expected) { throw "Checksum manifest does not contain $File" }
+  $Actual = (Get-FileHash -Algorithm SHA256 $Downloaded).Hash.ToLowerInvariant()
+  if ($Actual -ne $Expected.ToLowerInvariant()) { throw "Checksum verification failed for $File" }
+
+  & $Downloaded version | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw 'Downloaded runtime failed version check' }
+  $Existing = Join-Path $Target 'bot-report-worker.exe'
+  $Old = Join-Path $Tmp 'old.exe'
+  $Next = Join-Path $Target ('.next-' + [guid]::NewGuid().ToString('N') + '.exe')
+  if ((Test-Path $Existing) -and ($Action -eq 'install') -and ((Get-FileHash -Algorithm SHA256 $Existing).Hash.ToLowerInvariant() -eq $Actual)) {
+    Write-Host '[bot-report-worker] runtime already current; rollback retained'
+    return
+  }
+  $WasRunning = $false
+  New-Item -ItemType Directory -Force -Path $Target | Out-Null
+  if (Test-Path $Existing) {
+    Copy-Item $Existing $Old
+    $WasRunning = ((& $Existing status) -match 'status: RUNNING').Count -gt 0
+    & $Existing stop | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to stop existing runtime' }
+  }
+  Copy-Item $Downloaded $Next
+  if (Test-Path $Existing) { [IO.File]::Replace($Next, $Existing, $null) }
+  else { Move-Item $Next $Existing }
+  if ($WasRunning) {
+    & $Existing start
+    if ($LASTEXITCODE -ne 0) {
+      & $Existing stop | Out-Null
+      Copy-Item $Old $Next
+      [IO.File]::Replace($Next, $Existing, $null)
+      & $Existing start
+      throw 'Replacement failed; previous binary restored'
+    }
+  }
+  if (Test-Path $Old) {
+    New-Item -ItemType Directory -Force -Path $Previous | Out-Null
+    Copy-Item -Force $Old (Join-Path $Previous 'bot-report-worker.exe')
+    $OldHash = (Get-FileHash -Algorithm SHA256 $Old).Hash.ToLowerInvariant()
+    Set-Content -Encoding ascii -Path (Join-Path $Previous 'SHA256SUMS') -Value "$OldHash  $File"
+  }
+
+  New-Item -ItemType Directory -Force -Path $WorkerHome | Out-Null
+  if (-not (Test-Path (Join-Path $WorkerHome 'default-server'))) { Set-Content -Encoding ascii -Path (Join-Path $WorkerHome 'default-server') -Value $BaseUrl }
+  Set-Content -Encoding ascii -Path (Join-Path $WorkerHome 'install-root') -Value $InstallRoot
+  Set-Content -Encoding ascii -Path (Join-Path $WorkerHome 'bin-path') -Value (Join-Path $Target 'bot-report-worker.exe')
+
+  if ($env:BOT_REPORT_WORKER_SKIP_PATH -ne '1') {
+    $UserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $PathItems = @($UserPath -split ';' | Where-Object { $_ })
+    if (-not ($PathItems | Where-Object { [string]::Equals([IO.Path]::GetFullPath($_), [IO.Path]::GetFullPath($Target), [StringComparison]::OrdinalIgnoreCase) })) {
+      $NewPath = (($PathItems + $Target) -join ';')
+      [Environment]::SetEnvironmentVariable('Path', $NewPath, 'User')
+    }
+  }
+  $env:Path = "$Target;$env:Path"
+  Write-Host "[bot-report-worker] installed standalone runtime: $(Join-Path $Target 'bot-report-worker.exe') (windows/$Arch)"
+  if (Test-Path (Join-Path $WorkerHome 'state.json')) {
+    Write-Host '[bot-report-worker] existing identity preserved; next: bot-report-worker start'
+  } else {
+    Write-Host '[bot-report-worker] next: bot-report-worker login'
+  }
+} finally {
+  Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $Tmp
+  if ($LockOwned) { Remove-Item -Force -ErrorAction SilentlyContinue $Lock }
+}
+`;
+}
+
+function normalizeProfileBase(value: unknown) {
+  const clean = String(value || '')
+    .trim()
+    .replace(/[\x00-\x1f\x7f]/g, '')
+    .slice(0, 90);
+  return clean || 'Worker';
+}
+
+async function createEnrollmentProfile(
+  worker: { id: string; name: string },
+  { requestedName }: { requestedName?: string } = {},
+) {
+  const base = normalizeProfileBase(requestedName || worker.name);
+  const suffix = worker.id.replace(/-/g, '').slice(0, 8);
+  const candidates = [base, `${base}-${suffix}`];
+  for (const name of candidates) {
+    try {
+      return await workerRepository.createProfile({
+        name,
+        description: `Auto-created during enrollment for ${worker.name}`,
+        workerId: worker.id,
+        enabled: true,
+      });
+    } catch (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'WORKER_PROFILE_NAME_CONFLICT'
+      )
+        continue;
+      throw error;
+    }
+  }
+  throw Object.assign(new Error('Unable to allocate a unique Worker Profile alias.'), {
+    code: 'WORKER_PROFILE_NAME_CONFLICT',
+    status: 409,
+  });
+}
+
+router.get('/worker/install.sh', (req, res, next) => {
+  try {
+    return res
+      .type('text/x-shellscript')
+      .set('cache-control', 'no-store')
+      .send(installerScript(publicBaseUrl(req)));
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/worker/install-linux.sh', (req, res, next) => {
+  try {
+    return res
+      .type('text/x-shellscript')
+      .set('cache-control', 'no-store')
+      .send(installerScript(publicBaseUrl(req)));
+  } catch (error) {
+    return next(error);
+  }
+});
+router.get('/worker/install-macos.sh', (req, res, next) => {
+  try {
+    return res
+      .type('text/x-shellscript')
+      .set('cache-control', 'no-store')
+      .send(macInstallerScript(publicBaseUrl(req)));
+  } catch (error) {
+    return next(error);
+  }
+});
+router.get('/worker/install.ps1', (req, res, next) => {
+  try {
+    return res
+      .type('text/plain')
+      .set('cache-control', 'no-store')
+      .send(windowsInstallerScript(publicBaseUrl(req)));
+  } catch (error) {
+    return next(error);
+  }
+});
+router.get('/worker/install-windows.ps1', (req, res, next) => {
+  try {
+    return res
+      .type('text/plain')
+      .set('cache-control', 'no-store')
+      .send(windowsInstallerPayloadScript(publicBaseUrl(req)));
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/worker/dist/WORKER_RELEASE', (req, res) => {
+  const metadata = path.join(WORKER_BIN_DIR, 'WORKER_RELEASE');
+  if (!fs.existsSync(metadata))
+    return res.status(503).json({
+      error: 'Worker release metadata is not available.',
+      code: 'WORKER_RELEASE_UNAVAILABLE',
+    });
+  return res.type('text/plain').set('cache-control', 'no-store').sendFile(metadata);
+});
+
+router.get('/worker/dist/SHA256SUMS.sig', (req, res) => {
+  const signature = path.join(WORKER_BIN_DIR, 'SHA256SUMS.sig');
+  if (!fs.existsSync(signature))
+    return res.status(503).json({
+      error: 'Signed Worker manifest is not available.',
+      code: 'WORKER_SIGNATURE_UNAVAILABLE',
+    });
+  return res.type('application/octet-stream').set('cache-control', 'no-store').sendFile(signature);
+});
+
+router.get('/worker/dist/SHA256SUMS', (req, res) => {
+  const manifest = path.join(WORKER_BIN_DIR, 'SHA256SUMS');
+  if (!fs.existsSync(manifest))
+    return res.status(503).json({
+      error: 'Worker binary distribution is not built.',
+      code: 'WORKER_BINARY_DIST_UNAVAILABLE',
+    });
+  return res.type('text/plain').set('cache-control', 'no-store').sendFile(manifest);
+});
+
+router.get('/worker/dist/:file', (req, res) => {
+  const file = String(req.params.file || '');
+  if (!DIST_FILES.includes(file))
+    return res.status(404).json({ error: 'Endpoint not found', code: 'NOT_FOUND' });
+  const directory = BINARY_DIST_FILES.includes(file) ? WORKER_BIN_DIR : WORKER_DIR;
+  const target = path.join(directory, file);
+  if (!fs.existsSync(target))
+    return res.status(503).json({
+      error: 'Worker binary distribution is not built.',
+      code: 'WORKER_BINARY_DIST_UNAVAILABLE',
+    });
+  return res.set('cache-control', 'no-store').sendFile(target);
+});
+
+router.post('/worker/v1/enroll', enrollmentLimiter, async (req, res, next) => {
+  try {
+    if (!databaseManager.isMysqlReady()) {
+      return res.status(503).json({
+        error: 'temporarily_unavailable',
+        code: databaseManager.status().state,
+        message: 'MySQL must be ready before workers can enroll.',
+      });
+    }
+    const worker = await workerAuthService.enroll({
+      token: req.body?.token,
+      name: req.body?.name,
+      publicKey: req.body?.public_key,
+      capabilities: req.body?.capabilities,
+    });
+    if (!worker)
+      throw Object.assign(new Error('Worker enrollment did not return an identity.'), {
+        code: 'WORKER_ENROLLMENT_INVALID',
+        status: 500,
+      });
+    const wantsProfile = req.body?.create_profile === true;
+    const profile = wantsProfile
+      ? await createEnrollmentProfile(worker, {
+          requestedName: req.body?.profile_name,
+        })
+      : null;
+    return res.status(201).json({
+      worker_id: worker.id,
+      name: worker.name,
+      capabilities: worker.capabilities,
+      connect_path: '/worker/v1/connect',
+      profile: profile ? { id: profile.id, name: profile.name } : null,
+    });
+  } catch (error) {
+    if (error instanceof Error && 'status' in error && typeof error.status === 'number') {
+      return res.status(error.status).json({
+        error: 'worker_enrollment_failed',
+        code: 'code' in error ? error.code : undefined,
+        message: error.message,
+      });
+    }
+    return next(error);
+  }
+});
+
+export = Object.assign(router, {
+  DIST_FILES,
+  BINARY_DIST_FILES,
+  LEGACY_DIST_FILES,
+  installerScript,
+  macInstallerScript,
+  windowsInstallerScript,
+  windowsInstallerPayloadScript,
+  createEnrollmentProfile,
+});

@@ -1,0 +1,9 @@
+dist/
+node_modules/
+worker/node_modules/
+worker/bin/
+reports/
+test-results/
+playwright-report/
+package-lock.json
+worker/package-lock.json

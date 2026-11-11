@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - main
+      - refactor/typescript
+      - refactor/typescript-ts6
 
 permissions:
   contents: read
@@ -36,6 +38,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Use Node.js 26.13.0
         uses: actions/setup-node@v4
@@ -58,12 +62,34 @@ jobs:
           npm audit --omit=dev --audit-level=high
           npm --prefix worker audit --omit=dev --audit-level=high
 
+      - name: TypeScript source lint
+        run: npm run lint
+
+      - name: Type-aware ESLint and Prettier quality gate
+        env:
+          QUALITY_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: npm run quality:check
+
+      - name: Strict TypeScript check
+        run: npm run typecheck
+
       - name: Run MCP-only tests
         run: npm test
 
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
-
+  browser:
+    name: Admin UI Chromium
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    container:
+      image: mcr.microsoft.com/playwright:v1.58.2-noble@sha256:6446946a1d9fd62d9ae501312a2d76a43ee688542b21622056a372959b65d63d
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26.13.0'
+          cache: npm
+      - run: npm ci
       - name: Run Admin UI Playwright tests
         run: npm run test:e2e
 

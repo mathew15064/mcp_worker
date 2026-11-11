@@ -3,9 +3,16 @@ name: mcp_worker release verification (no publishing)
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, refactor/typescript, refactor/typescript-ts6]
   pull_request:
     paths:
+      - 'tsconfig.json'
+      - 'eslint.config.mjs'
+      - '.prettierrc.json'
+      - '.prettierignore'
+      - 'quality/**'
+      - 'playwright.config.ts'
+      - 'package*.json'
       - 'Dockerfile'
       - 'Dockerfile.mysql'
       - 'docker-compose.yml'

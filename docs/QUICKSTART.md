@@ -66,7 +66,7 @@ http://127.0.0.1:43871/callback. Select bot_report.read only; uncheck Terminal
 and Offline access. Save the one-time secret privately. On the same machine
 as the browser and server, run:
 
-    node scripts/first-mcp-call.js http://127.0.0.1:3333
+    node dist/scripts/first-mcp-call.js http://127.0.0.1:3333
 
 Enter the ID and secret, open the printed URL in the browser and approve.
 The helper validates OAuth state, uses PKCE, invokes runtime_info and attempts

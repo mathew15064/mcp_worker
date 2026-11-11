@@ -18,8 +18,6 @@ data/backups/
 backups/
 
 # Test Suites, Fixtures, and Coverage
-tests/
-playwright.config.js
 playwright-report/
 test-results/
 coverage/
@@ -38,3 +36,9 @@ backups/
 *.orig
 *.rej
 .setup*
+
+# Host build output
+dist/
+
+worker/node_modules/
+worker/bin/

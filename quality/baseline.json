@@ -1,0 +1,362 @@
+{
+  "lint": {
+    "scripts/backup-db.ts": {
+      "@typescript-eslint/no-require-imports": 2,
+      "@typescript-eslint/no-unsafe-member-access": 1
+    },
+    "scripts/first-mcp-call.ts": {
+      "@typescript-eslint/no-unsafe-argument": 1,
+      "@typescript-eslint/no-unsafe-assignment": 1,
+      "@typescript-eslint/no-unsafe-member-access": 3,
+      "@typescript-eslint/no-unused-vars": 1
+    },
+    "scripts/init-bundled-db.ts": {
+      "@typescript-eslint/no-require-imports": 3
+    },
+    "scripts/mcp-client.ts": {
+      "@typescript-eslint/no-base-to-string": 1,
+      "@typescript-eslint/no-require-imports": 4,
+      "@typescript-eslint/no-unused-vars": 1
+    },
+    "scripts/migrate.ts": {
+      "@typescript-eslint/no-require-imports": 1
+    },
+    "scripts/terminal-profile.ts": {
+      "@typescript-eslint/no-base-to-string": 1,
+      "@typescript-eslint/no-require-imports": 5,
+      "@typescript-eslint/no-unnecessary-type-assertion": 1,
+      "@typescript-eslint/no-unused-vars": 3
+    },
+    "src/auth/oauthResourceServer.ts": {
+      "@typescript-eslint/no-unused-vars": 1
+    },
+    "src/config/mcpConfig.ts": {
+      "@typescript-eslint/no-unused-vars": 1
+    },
+    "src/db/adapters/mysqlAdapter.ts": {
+      "@typescript-eslint/no-unused-vars": 1
+    },
+    "src/db/adapters/sqliteAdapter.ts": {
+      "@typescript-eslint/no-unused-vars": 1
+    },
+    "src/db/bootstrapConfigStore.ts": {
+      "@typescript-eslint/no-base-to-string": 7,
+      "@typescript-eslint/no-unsafe-assignment": 2,
+      "@typescript-eslint/no-unused-vars": 3
+    },
+    "src/db/connection.ts": {
+      "@typescript-eslint/no-unused-vars": 2
+    },
+    "src/db/databaseManager.ts": {
+      "@typescript-eslint/no-unused-vars": 6
+    },
+    "src/db/memorySessionStore.ts": {
+      "@typescript-eslint/no-unsafe-return": 1
+    },
+    "src/db/migrationRunner.ts": {
+      "@typescript-eslint/no-require-imports": 1,
+      "@typescript-eslint/no-unsafe-assignment": 1
+    },
+    "src/db/migrations.ts": {
+      "@typescript-eslint/no-unused-vars": 1
+    },
+    "src/db/sessionStore.ts": {
+      "@typescript-eslint/no-unsafe-argument": 1,
+      "@typescript-eslint/no-unsafe-assignment": 1,
+      "@typescript-eslint/no-unused-vars": 1
+    },
+    "src/http/pages.ts": {
+      "@typescript-eslint/no-base-to-string": 1,
+      "@typescript-eslint/no-unused-vars": 4
+    },
+    "src/mcp/context.ts": {
+      "@typescript-eslint/consistent-type-imports": 1
+    },
+    "src/mcp/tools/terminalTools.ts": {
+      "@typescript-eslint/no-unused-vars": 1
+    },
+    "src/mcp/toolTypes.ts": {
+      "@typescript-eslint/consistent-type-imports": 1
+    },
+    "src/mcp/transport.ts": {
+      "@typescript-eslint/no-unused-vars": 5
+    },
+    "src/middleware/csrfMiddleware.ts": {
+      "@typescript-eslint/no-require-imports": 1,
+      "@typescript-eslint/no-unsafe-assignment": 2,
+      "@typescript-eslint/no-unsafe-member-access": 1,
+      "@typescript-eslint/unbound-method": 1
+    },
+    "src/public/admin.ts": {
+      "@typescript-eslint/no-base-to-string": 2,
+      "@typescript-eslint/no-non-null-assertion": 4
+    },
+    "src/public/terminal-console.ts": {
+      "@typescript-eslint/no-unused-vars": 4
+    },
+    "src/repositories/executionProfileRepository.ts": {
+      "@typescript-eslint/no-unused-vars": 1,
+      "@typescript-eslint/require-await": 1
+    },
+    "src/repositories/mcpOAuthRepository.ts": {
+      "@typescript-eslint/no-unsafe-assignment": 3,
+      "@typescript-eslint/no-unused-vars": 3
+    },
+    "src/repositories/settingsRepository.ts": {
+      "@typescript-eslint/no-base-to-string": 2
+    },
+    "src/repositories/userRepository.ts": {
+      "@typescript-eslint/no-unused-vars": 1
+    },
+    "src/repositories/workerRepository.ts": {
+      "@typescript-eslint/no-base-to-string": 4,
+      "@typescript-eslint/no-unsafe-assignment": 1,
+      "@typescript-eslint/no-unused-vars": 1
+    },
+    "src/routes/accountRoutes.ts": {
+      "@typescript-eslint/no-base-to-string": 2,
+      "@typescript-eslint/no-unsafe-member-access": 1,
+      "@typescript-eslint/no-unused-vars": 1
+    },
+    "src/routes/adminRoutes.ts": {
+      "@typescript-eslint/no-base-to-string": 11,
+      "@typescript-eslint/no-require-imports": 1,
+      "@typescript-eslint/no-unsafe-assignment": 3,
+      "@typescript-eslint/no-unsafe-member-access": 2,
+      "@typescript-eslint/no-unused-vars": 1,
+      "@typescript-eslint/require-await": 1,
+      "@typescript-eslint/restrict-template-expressions": 1
+    },
+    "src/routes/workerRoutes.ts": {
+      "@typescript-eslint/no-base-to-string": 1,
+      "@typescript-eslint/no-unsafe-assignment": 5,
+      "@typescript-eslint/no-unsafe-member-access": 6
+    },
+    "src/server.ts": {
+      "@typescript-eslint/no-unused-vars": 5
+    },
+    "src/services/adminIdentityService.ts": {
+      "@typescript-eslint/no-base-to-string": 4,
+      "@typescript-eslint/no-unused-vars": 2
+    },
+    "src/services/auditPayloadService.ts": {
+      "@typescript-eslint/no-base-to-string": 1,
+      "@typescript-eslint/no-unsafe-return": 1,
+      "@typescript-eslint/no-unused-vars": 3,
+      "@typescript-eslint/unbound-method": 2
+    },
+    "src/services/legacySqliteImportService.ts": {
+      "@typescript-eslint/no-unused-vars": 1
+    },
+    "src/services/runtimeSettingsService.ts": {
+      "@typescript-eslint/no-base-to-string": 4,
+      "@typescript-eslint/no-non-null-assertion": 1,
+      "@typescript-eslint/no-unused-vars": 2
+    },
+    "src/services/terminalCredentialService.ts": {
+      "@typescript-eslint/no-unused-vars": 1
+    },
+    "src/services/terminalMcpService.ts": {
+      "@typescript-eslint/no-base-to-string": 4,
+      "@typescript-eslint/no-require-imports": 2,
+      "@typescript-eslint/no-unsafe-assignment": 2,
+      "@typescript-eslint/no-unused-vars": 1
+    },
+    "src/services/terminalPublicOriginService.ts": {
+      "@typescript-eslint/no-unused-vars": 1
+    },
+    "src/services/terminalSshService.ts": {
+      "@typescript-eslint/no-base-to-string": 1,
+      "@typescript-eslint/no-unused-vars": 34
+    },
+    "src/services/userService.ts": {
+      "@typescript-eslint/no-base-to-string": 3,
+      "@typescript-eslint/no-unused-vars": 1
+    },
+    "src/services/userTelegramSettingsService.ts": {
+      "@typescript-eslint/no-base-to-string": 2
+    },
+    "src/services/workerAuthService.ts": {
+      "@typescript-eslint/no-base-to-string": 1,
+      "@typescript-eslint/no-unused-vars": 2
+    },
+    "src/services/workerConnectionBroker.ts": {
+      "@typescript-eslint/no-base-to-string": 6,
+      "@typescript-eslint/no-unnecessary-type-assertion": 2,
+      "prefer-const": 1
+    },
+    "src/services/workerLifecycleService.ts": {
+      "@typescript-eslint/no-unused-vars": 1
+    },
+    "tests/admin-config-ui.test.ts": {
+      "@typescript-eslint/consistent-type-imports": 1,
+      "@typescript-eslint/no-unsafe-argument": 4,
+      "@typescript-eslint/no-unsafe-assignment": 3,
+      "@typescript-eslint/no-unsafe-member-access": 8,
+      "@typescript-eslint/require-await": 1
+    },
+    "tests/audit-payload.test.ts": {
+      "@typescript-eslint/no-unsafe-assignment": 1,
+      "@typescript-eslint/no-unsafe-member-access": 2
+    },
+    "tests/catalog-retirement.test.ts": {
+      "@typescript-eslint/consistent-type-imports": 1
+    },
+    "tests/coding-service-core.test.ts": {
+      "@typescript-eslint/require-await": 2
+    },
+    "tests/e2e/admin-ux.spec.ts": {
+      "@typescript-eslint/no-non-null-assertion": 18,
+      "@typescript-eslint/no-require-imports": 1
+    },
+    "tests/e2e/fixtures/start-test-server.ts": {
+      "@typescript-eslint/consistent-type-imports": 10,
+      "@typescript-eslint/no-require-imports": 10,
+      "@typescript-eslint/no-unused-vars": 1
+    },
+    "tests/execution-regression.test.ts": {
+      "@typescript-eslint/consistent-type-imports": 2,
+      "@typescript-eslint/require-await": 8
+    },
+    "tests/helper.ts": {
+      "@typescript-eslint/no-require-imports": 6,
+      "@typescript-eslint/no-unsafe-return": 2
+    },
+    "tests/mysql-integration.test.ts": {
+      "@typescript-eslint/no-unused-vars": 1
+    },
+    "tests/mysql-setup-ui-integration.test.ts": {
+      "@typescript-eslint/no-unsafe-member-access": 3,
+      "@typescript-eslint/no-unused-vars": 1
+    },
+    "tests/oauth-core.test.ts": {
+      "@typescript-eslint/no-require-imports": 1,
+      "@typescript-eslint/unbound-method": 4
+    },
+    "tests/owner-notification.test.ts": {
+      "@typescript-eslint/require-await": 4
+    },
+    "tests/registry-core.test.ts": {
+      "@typescript-eslint/no-require-imports": 1,
+      "@typescript-eslint/unbound-method": 3
+    },
+    "tests/schema-core.test.ts": {
+      "@typescript-eslint/require-await": 2
+    },
+    "tests/setup-mode.test.ts": {
+      "@typescript-eslint/consistent-type-imports": 1,
+      "@typescript-eslint/no-unsafe-assignment": 1
+    },
+    "tests/standalone-install-smoke.ts": {
+      "@typescript-eslint/no-require-imports": 9
+    },
+    "tests/terminal-profile-core.test.ts": {
+      "@typescript-eslint/no-non-null-assertion": 2,
+      "@typescript-eslint/no-unnecessary-type-assertion": 1
+    },
+    "tests/terminal-typed-service.test.ts": {
+      "@typescript-eslint/require-await": 2
+    },
+    "tests/terminal-websocket.test.ts": {
+      "@typescript-eslint/consistent-type-imports": 6,
+      "@typescript-eslint/no-base-to-string": 1,
+      "@typescript-eslint/no-unsafe-argument": 1,
+      "@typescript-eslint/require-await": 6
+    },
+    "tests/user-account-integration.test.ts": {
+      "@typescript-eslint/consistent-type-imports": 1,
+      "@typescript-eslint/no-unsafe-assignment": 1,
+      "@typescript-eslint/no-unsafe-member-access": 2,
+      "@typescript-eslint/no-unused-vars": 1
+    },
+    "tests/user-telegram-settings.test.ts": {
+      "@typescript-eslint/no-base-to-string": 1,
+      "@typescript-eslint/require-await": 2
+    },
+    "tests/worker-control-broker.test.ts": {
+      "@typescript-eslint/no-unsafe-assignment": 1,
+      "@typescript-eslint/require-await": 1
+    },
+    "tests/worker-core.test.ts": {
+      "@typescript-eslint/no-require-imports": 4,
+      "@typescript-eslint/no-unsafe-argument": 7,
+      "@typescript-eslint/no-unsafe-assignment": 32,
+      "@typescript-eslint/no-unsafe-call": 67,
+      "@typescript-eslint/no-unsafe-member-access": 68,
+      "@typescript-eslint/no-unsafe-return": 8,
+      "@typescript-eslint/require-await": 18
+    },
+    "tests/worker-lifecycle-service.test.ts": {
+      "@typescript-eslint/require-await": 7
+    },
+    "tests/worker-live-integration.test.ts": {
+      "@typescript-eslint/consistent-type-imports": 1,
+      "@typescript-eslint/no-require-imports": 9,
+      "@typescript-eslint/no-unnecessary-type-assertion": 1,
+      "@typescript-eslint/no-unsafe-argument": 2,
+      "@typescript-eslint/no-unsafe-assignment": 22,
+      "@typescript-eslint/no-unsafe-call": 39,
+      "@typescript-eslint/no-unsafe-member-access": 64,
+      "@typescript-eslint/no-unsafe-return": 5,
+      "@typescript-eslint/no-unused-vars": 5,
+      "@typescript-eslint/only-throw-error": 1,
+      "@typescript-eslint/require-await": 1
+    },
+    "worker/agent.ts": {
+      "@typescript-eslint/no-base-to-string": 1,
+      "@typescript-eslint/no-require-imports": 1,
+      "@typescript-eslint/no-unsafe-argument": 5,
+      "@typescript-eslint/no-unsafe-assignment": 1,
+      "@typescript-eslint/no-unsafe-member-access": 1,
+      "@typescript-eslint/no-unsafe-return": 1,
+      "@typescript-eslint/no-unused-vars": 11
+    },
+    "worker/cli.ts": {
+      "@typescript-eslint/no-base-to-string": 4,
+      "@typescript-eslint/no-require-imports": 2,
+      "@typescript-eslint/no-unsafe-return": 1,
+      "@typescript-eslint/no-unused-vars": 16
+    },
+    "worker/lifecycle.ts": {
+      "@typescript-eslint/no-base-to-string": 1,
+      "@typescript-eslint/no-unsafe-return": 1
+    }
+  },
+  "format": {
+    "scripts/backup-db.ts": "34586c7269dc53f50e6c9674aac201129590f1e30f845d2bc59117c9af241b0d",
+    "scripts/first-mcp-call.ts": "038b846b317c6b4115c07b5b02147b9cee2a3618d8df9c19af08a6f60821a0ed",
+    "scripts/init-bundled-db.ts": "e5ed670a0c7b2dd02426a557a1bb1f71666ee2fc883557e26137af7f54147a19",
+    "scripts/mcp-client.ts": "f87d59bf7102ebe7fb2eb02403e98323eecbafccb459dd9fb4d2a643755cdf9c",
+    "scripts/migrate.ts": "e337b00d8db5f6af70922ebaa93a6e67611cf66c66a0c93c7d25db5240c1c578",
+    "scripts/terminal-profile.ts": "2d35115f0ef334490cbfea0097eb6c8afa68e9bd2f8198741486a36600e43991",
+    "src/db/adapters/sqliteAdapter.ts": "01390a31dcf880ffe2034b860ebb537fbe8df0d2e7308dd036f5d0124bc60605",
+    "src/db/bootstrapConfigStore.ts": "668c08deeaa881f1ee030be715aff489aee7b7355694c3b63c9b87db3fe39007",
+    "src/db/migrationRunner.ts": "d44f68677ada9f148f03d7190e370e1371af0c1c979c14e441a0f7869f35a829",
+    "src/db/migrations.ts": "800c05a584794c25b4b148e4b9d7efa5bcb151b38b0236d2ea014e84fafb8532",
+    "src/db/migrations/2026_11_01_000001_create_system_settings_table.ts": "e697509fda2859fa9db1c9317961155298c6e5afaf20459566e078072407cff7",
+    "src/db/migrations/2026_11_01_000002_create_terminal_profiles_table.ts": "11d7f0428688d23b94ce52117ecffb5ed57159ce5576086eed4020aea086b3ca",
+    "src/db/migrations/2026_11_01_000003_create_terminal_connection_audit_table.ts": "dbb1a2b4d372d3c11cb148f3c76658f32d1a5d91d71672714694566b013e089a",
+    "src/db/migrations/2026_11_01_000004_create_mcp_oauth_clients_table.ts": "029a772fe778655d6bdeb760ae5e18ac2864691118aff09eb03ea0219d415f12",
+    "src/db/migrations/2026_11_01_000005_create_mcp_oauth_tokens_tables.ts": "d21b5b3cd92a8799e969cf05d5e7d4d6c687989eae554eda1dac1d7cca34b8a3",
+    "src/db/migrations/2026_11_01_000006_create_mcp_request_audit_table.ts": "bd3c49a50f02dd4576fa903bf56bd5c9a17be13a17d2e5fff41f756ad237f586",
+    "src/db/migrations/2026_11_01_000007_create_workers_table.ts": "80f2fae3e8aa3a9119403b87cd0feea29f7617d544afa5c4c678c3139889d4f8",
+    "src/db/migrations/2026_11_01_000008_create_worker_enrollment_tokens_table.ts": "414f604de4f5824105523b17e909a780c58d6af0e349a5d19f5477f478ad5352",
+    "src/db/migrations/2026_11_01_000009_create_worker_profiles_table.ts": "8ca7932324d5d29c945e0751e9b0d0f385574864cbf97cb1809aa5c62ee9f623",
+    "src/db/migrations/2026_11_01_000010_create_users_table.ts": "7fc9c310e6c539986bdcb84ed71a98a6a025777b16307441f6a3c5fba717f071",
+    "src/db/migrations/2026_11_01_000011_add_user_ownership_to_oauth_clients.ts": "4d1b68e3ea67ab4a1f4dcb8d0313e82583d9bd11248f54eb29cd4e63a91eb7e2",
+    "src/db/migrations/2026_11_02_000011_add_payloads_to_mcp_request_audit.ts": "af026d6f11828475918522eef27c6b8b939944e8c00ad4a7c535cdeb577b32aa",
+    "src/db/migrations/2026_11_02_000012_add_user_ownership_to_workers.ts": "c133e5f7299abba080413dbe3475905beb5a68ba06c5c39ef775da652c32c323",
+    "src/mcp/context.ts": "5a3caf16d3d115055f7941c4fde21a547e05801ed01d6768264028122ad77e4e",
+    "src/mcp/toolTypes.ts": "cba2ee9d8c534fe7b3e11e3985ed0bf24e388947160e69f402b0ecb421b280d6",
+    "src/middleware/csrfMiddleware.ts": "b23977076ccdd1f471154523438a399334baefbba8b575462540b8b4bba554ee",
+    "src/services/auditPayloadService.ts": "e274ba705d37e3266c724b3d38f55f72e33c288a7c2cc9c33e50a0c90429da45",
+    "src/services/terminalCredentialService.ts": "f6082b63bee5f51d45776afc31749119b0a5b6f0fcad146cb2ff068748f9dc3b",
+    "src/services/terminalPublicOriginService.ts": "3439f78f6f7867503a55b7fa5c6768c32ab42e415635adcf2fc97e9f5a11f5af",
+    "tests/e2e/admin-ux.spec.ts": "899933732c15e584a7949e39f2401ecfca9e196ce2c41df1917903d19053b078",
+    "tests/e2e/fixtures/start-test-server.ts": "cd60c3e9e45eb84551ba0204b9c6b8e143e61545a6c8a9a49623435845ae041a",
+    "tests/standalone-install-smoke.ts": "dfd433ff05024cc8a57f1c487dd6f0f1b5948c83410579ed21d48d36be3d37a7",
+    "worker/agent.ts": "8f3497ae45ec1a3dcdd7505b639d0c07f34925f5aa270e02e57b6bda2f1d0d73",
+    "worker/cli.ts": "d8f20c7d7552783c749a377f94bc57dd50423244aba8a97d82ff3da211ddb197",
+    "worker/lifecycle.ts": "67b8caccf1846a114f946183e3aff8f7b85a737b1c8d9438013b958ce16d4580"
+  }
+}
