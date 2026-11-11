@@ -25,7 +25,7 @@ COPY src/ ./src/
 COPY scripts/ ./scripts/
 COPY worker/ ./worker/
 COPY tests/ ./tests/
-COPY playwright.config.js ./
+COPY playwright.config.ts ./
 RUN npm run build && npm prune --omit=dev && npm cache clean --force
 
 # Verify native addon binary integrity inside Alpine

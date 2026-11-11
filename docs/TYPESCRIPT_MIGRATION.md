@@ -1,9 +1,10 @@
 # TypeScript migration
 
-The refactor/typescript branch preserves the V2 protocol and Go Worker. The
-first phase enables strict TypeScript with an incremental, mixed-language
-build. Only TypeScript files are typechecked; existing JavaScript is copied
-unchanged. This is not yet a fully typed codebase.
+The TypeScript migration branch preserves the V2 MCP contract and Go Worker.
+Application modules, browser assets, Node Worker legacy sources, CLI scripts,
+Playwright configuration, regression tests and test fixtures are all strict
+TypeScript and compile to their historical JavaScript runtime paths in dist/.
+Only the self-hosting build/lint bootstrap scripts use CommonJS .cjs.
 
 ## Development
 
@@ -29,24 +30,26 @@ historical identifiers.
 - TS2: database contracts, adapters, all 13 migrations, all seven repositories, database manager/bootstrap, authentication, session stores, CSRF/session middleware and runtime settings.
 - TS3: MCP server/transport and all 19 Zod-typed tools, OAuth token issuance/refresh/revoke, audit capture, Ed25519 Worker authentication, WebSocket broker and execution services.
 - TS4: HTTP entrypoints and routes, browser UI scripts, legacy Node Worker agent/CLI/lifecycle and Node administrative scripts (source TypeScript, build emits JavaScript).
-- TS5: all tests typed, lint, strict build, full regression, security scans
-  and release candidate validation.
+- TS5: typed renderer and SSH compatibility, typed Node and browser tests,
+  TypeScript Playwright configuration, static source lint, strict build, and
+  full Docker/MySQL/Go Worker regression. Work remains in a separate review PR
+  until all CI and release-security gates pass.
 
 No blanket any, ts-nocheck or weakening strict mode for migrated modules.
 Keep the 19 tool names, schema contract, OAuth scopes, migration names, Worker
 protocol and installer persistence intact. Move one bounded component at a
 time, with behavior tests before and after. Main remains unchanged until review.
 
-TS2 keeps the OAuth token formats and scopes, SQL migration identities,
-AES-GCM envelope and session cookie name unchanged. The OAuth issuance
-service, HTTP routes and other execution/transport services remain JS for TS3/TS4.
+TS2 kept OAuth token formats and scopes, SQL migration identities, AES-GCM
+credential envelopes, and the session cookie name unchanged. TS3/TS4 migrated
+the formerly JavaScript OAuth issuance, HTTP routes and execution transports.
 The release harness compiles typed tests using the Docker builder and copies
 only the test output into an isolated test container.
 
 TS3 keeps the historical tool-schema fingerprint and all 19 tool names,
 `bot_report.*` OAuth scopes, Worker Ed25519 signature payload, job/stream wire
-fields, lifecycle rollback and revocation semantics. A typed bridge remains for
-the legacy SSH transport until TS4; it does not change the Go Worker.
+fields, lifecycle rollback and revocation semantics. TS5 has now migrated the
+SSH transport as well. The Go Worker remains unchanged.
 
 The TypeScript compiler uses `skipLibCheck: true` to work around upstream
 MCP SDK declaration-resolution errors under Node16 module mode. This does not
@@ -66,3 +69,21 @@ at their historical URLs. New local source checkouts should first run
 is `npm run worker`. Existing Worker settings and persistent state paths stay
 unchanged. Never run the legacy Node installer or CLI lifecycle commands on
 a production machine during tests.
+
+## TS5 typed testing and reproducible release verification
+
+`npm run typecheck` uses `strict: true`. `npm run lint` is a dependency-light
+TypeScript syntax/migration guard, not a substitute for full ESLint rules.
+It rejects JavaScript sources under src/, worker/, scripts/ and tests/ (the
+intentionally separate build/lint `.cjs` bootstrap tools are exempt),
+TypeScript compilation suppressions and explicit `any` in TS5 security
+boundaries. Both gates run on every CI pull request.
+
+`playwright.config.ts` compiles to `dist/playwright.config.js`. The Playwright
+fixture sets its disposable environment before loading application modules.
+`tests/standalone-install-smoke.ts` compiles to
+`dist/tests/standalone-install-smoke.js`; the isolated Docker verification
+copies this compiled fixture into its temporary test containers before seed
+and verify. This fixture must never run on an actual installation. The
+runtime production image does not contain tests. No change has been made to
+`main`, Go Worker sources, or the deployed application.

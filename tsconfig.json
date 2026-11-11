@@ -8,9 +8,22 @@
     "strict": true,
     "noEmitOnError": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "worker/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts"],
-  "exclude": ["node_modules", "dist", "worker/node_modules", "worker/bin"]
+  "include": [
+    "src/**/*.ts",
+    "worker/**/*.ts",
+    "tests/**/*.ts",
+    "scripts/**/*.ts",
+    "playwright.config.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "worker/node_modules",
+    "worker/bin"
+  ]
 }

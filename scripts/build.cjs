@@ -1,5 +1,6 @@
-// Transitional build: keep unmigrated JS unchanged; compile strict TS into
-// the same relative layout. All generated files live outside the source tree.
+// Compile strict TypeScript into the historical relative runtime paths.
+// Only .cjs bootstrap tools remain JavaScript; all application and test
+// entrypoints are typed TS compiled to JS in dist/.
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
@@ -7,7 +8,7 @@ const root = path.resolve(__dirname, '..');
 const dist = path.join(root, 'dist');
 fs.rmSync(dist, { recursive: true, force: true });
 fs.mkdirSync(dist, { recursive: true });
-for (const name of ['src', 'scripts', 'worker', 'tests', 'package.json', 'playwright.config.js']) {
+for (const name of ['src', 'scripts', 'worker', 'tests', 'package.json']) {
   const source = path.join(root, name);
   if (!fs.existsSync(source)) continue;
   fs.cpSync(source, path.join(dist, name), {
