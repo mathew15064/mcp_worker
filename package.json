@@ -22,7 +22,12 @@
     "build": "node scripts/build.cjs",
     "typecheck": "tsc --noEmit",
     "first:mcp": "npm run build && node dist/scripts/first-mcp-call.js",
-    "lint": "node scripts/lint-typescript.cjs"
+    "lint": "node scripts/lint-typescript.cjs",
+    "lint:typed": "eslint \"src/**/*.ts\" \"worker/**/*.ts\" \"scripts/**/*.ts\" \"tests/**/*.ts\" playwright.config.ts",
+    "format:check": "prettier --check \"src/**/*.ts\" \"worker/**/*.ts\" \"scripts/**/*.ts\" \"tests/**/*.ts\" playwright.config.ts",
+    "format:write": "prettier --write \"src/**/*.ts\" \"worker/**/*.ts\" \"scripts/**/*.ts\" \"tests/**/*.ts\" playwright.config.ts",
+    "quality:check": "node scripts/quality-gate.mjs check",
+    "quality:baseline": "node scripts/quality-gate.mjs record"
   },
   "keywords": [
     "mcp",
@@ -56,6 +61,9 @@
     "@types/node": "26.6.6",
     "@types/ssh2": "1.15.5",
     "@types/ws": "8.18.2",
-    "typescript": "5.9.3"
+    "eslint": "10.14.0",
+    "prettier": "3.9.10",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.2"
   }
 }

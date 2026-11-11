@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - refactor/typescript
+      - refactor/typescript-ts6
 
 permissions:
   contents: read
@@ -61,6 +62,9 @@ jobs:
 
       - name: TypeScript source lint
         run: npm run lint
+
+      - name: Type-aware ESLint and Prettier quality gate
+        run: npm run quality:check
 
       - name: Strict TypeScript check
         run: npm run typecheck
