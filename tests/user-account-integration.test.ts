@@ -16,7 +16,7 @@ function cookieFrom(response: Response) {
 }
 
 async function adminConnection(database: string) {
-  const mysql = require('mysql2/promise');
+  const mysql = await import('mysql2/promise');
   return mysql.createConnection({
     host: process.env.MYSQL_TEST_HOST,
     port: Number(process.env.MYSQL_TEST_PORT || 3306),
@@ -87,7 +87,7 @@ void test(
       LOGIN_RATE_LIMIT_MAX: '1000',
     });
 
-    const bootstrapStore = require('../src/db/bootstrapConfigStore');
+    const bootstrapStore = (await import('../src/db/bootstrapConfigStore.js')).default;
     bootstrapStore.save({
       host: process.env.MYSQL_TEST_HOST,
       port: Number(process.env.MYSQL_TEST_PORT || 3306),
@@ -97,8 +97,8 @@ void test(
       ssl: false,
     });
 
-    const databaseManager = require('../src/db/databaseManager');
-    const runtimeSettings = require('../src/services/runtimeSettingsService');
+    const databaseManager = (await import('../src/db/databaseManager.js')).default;
+    const runtimeSettings = (await import('../src/services/runtimeSettingsService.js')).default;
     databaseManager.resetForTests();
     runtimeSettings.resetForTests();
     await databaseManager.initialize();
@@ -108,7 +108,7 @@ void test(
     await runtimeSettings.load(databaseManager.getAdapter());
     assert.equal(databaseManager.status().state, 'READY');
 
-    const app = require('../src/app');
+    const app = (await import('../src/app.js')).default;
     const server = http.createServer(app);
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     t.after(async () => {
@@ -149,18 +149,13 @@ void test(
       assert.equal(created.headers.get('location'), '/admin/users');
     }
 
-    const userRepo = require('../src/repositories/userRepository');
-    const oauthRepo = require('../src/repositories/mcpOAuthRepository');
+    const userRepo = (await import('../src/repositories/userRepository.js')).default;
+    const oauthRepo = (await import('../src/repositories/mcpOAuthRepository.js')).default;
     const users = await userRepo.list();
-    const alice = users.find(
-      (user: { username: string; principal_id: string; profile_id: string; id: string }) =>
-        user.username === 'alice',
-    );
-    const bob = users.find(
-      (user: { username: string; principal_id: string; profile_id: string; id: string }) =>
-        user.username === 'bob',
-    );
+    const alice = users.find((user) => user?.username === 'alice');
+    const bob = users.find((user) => user?.username === 'bob');
     assert.ok(alice && bob);
+    assert.ok(alice.profile_id && bob.profile_id);
     assert.notEqual(alice.principal_id, bob.principal_id);
     assert.notEqual(alice.profile_id, bob.profile_id);
     assert.match(alice.principal_id, /^principal:user:usr_/);
@@ -190,15 +185,17 @@ void test(
     assert.equal(createAliceClient.status, 302);
     const aliceClients = await oauthRepo.listClientsByOwner(alice.id);
     assert.equal(aliceClients.length, 1);
-    assert.equal(aliceClients[0].owner_user_id, alice.id);
-    assert.equal(aliceClients[0].principal_id, alice.principal_id);
-    assert.equal(aliceClients[0].profile_id, alice.profile_id);
+    const aliceClient = aliceClients[0];
+    assert.ok(aliceClient);
+    assert.equal(aliceClient.owner_user_id, alice.id);
+    assert.equal(aliceClient.principal_id, alice.principal_id);
+    assert.equal(aliceClient.profile_id, alice.profile_id);
     assert.deepEqual(
-      aliceClients[0].allowed_scopes.sort(),
+      aliceClient.allowed_scopes.sort(),
       ['bot_report.read', 'bot_report.terminal', 'offline_access'].sort(),
     );
 
-    const workerRepo = require('../src/repositories/workerRepository');
+    const workerRepo = (await import('../src/repositories/workerRepository.js')).default;
     const aliceWorkersPage = await pageWithCsrf(base, '/account/workers', aliceLogin.cookie);
     assert.equal(aliceWorkersPage.response.status, 200);
     assert.match(aliceWorkersPage.html, /Generate Enrollment Token/);
@@ -231,20 +228,22 @@ void test(
     const enrolled = await enrollWorker.json();
     assert.equal((await workerRepo.listWorkersByOwner(alice.id)).length, 1);
     assert.equal((await workerRepo.listWorkersByOwner(bob.id)).length, 0);
-    assert.equal((await workerRepo.listProfilesByOwner(alice.id))[0].name, enrolled.profile.name);
+    const aliceProfile = (await workerRepo.listProfilesByOwner(alice.id))[0];
+    assert.ok(aliceProfile);
+    assert.equal(aliceProfile.name, enrolled.profile.name);
 
     const globalWorker = await workerRepo.createWorker({
       name: 'Admin Global Worker',
       publicKey: 'test-key',
       capabilities: [],
     });
+    assert.ok(globalWorker);
     await workerRepo.createProfile({
       name: 'Admin Global Profile',
       workerId: globalWorker.id,
-      tmuxSession: 'main',
       enabled: true,
     });
-    const terminalMcpService = require('../src/services/terminalMcpService');
+    const terminalMcpService = (await import('../src/services/terminalMcpService.js')).default;
     assert.deepEqual(
       (await terminalMcpService.list({ actorId: alice.principal_id })).map(
         (item: { name: string }) => item.name,
@@ -268,13 +267,13 @@ void test(
     const rawAccessToken = 'br_at_user_owner_status_integration';
     await oauthRepo.createAccessToken({
       tokenHash: crypto.createHash('sha256').update(rawAccessToken).digest('hex'),
-      clientId: aliceClients[0].client_id,
+      clientId: aliceClient.client_id,
       principalId: alice.principal_id,
       resource: 'http://127.0.0.1:3333/mcp',
       scopes: ['bot_report.read', 'bot_report.terminal'],
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     });
-    const { OAuthResourceServer } = require('../src/auth/oauthResourceServer');
+    const { OAuthResourceServer } = await import('../src/auth/oauthResourceServer.js');
     const resourceServer = new OAuthResourceServer({ repo: oauthRepo, allowTestFixtures: false });
     const alicePrincipal = await resourceServer.verifyToken(rawAccessToken);
     assert.equal(alicePrincipal.principal_id, alice.principal_id);
@@ -295,6 +294,7 @@ void test(
     });
     assert.equal(createBobClient.status, 302);
     const bobClient = (await oauthRepo.listClientsByOwner(bob.id))[0];
+    assert.ok(bobClient);
     assert.ok(bobClient);
 
     const crossAction = await fetch(`${base}/account/clients/${bobClient.id}/disable`, {
@@ -318,7 +318,7 @@ void test(
         code_challenge_method: 'S256',
         resource: 'http://127.0.0.1:3333/mcp',
       });
-    const ownConsent = await fetch(`${base}/oauth/authorize?${authorizeParams(aliceClients[0])}`, {
+    const ownConsent = await fetch(`${base}/oauth/authorize?${authorizeParams(aliceClient)}`, {
       headers: { cookie: aliceLogin.cookie },
     });
     assert.equal(ownConsent.status, 200);
@@ -328,7 +328,7 @@ void test(
     });
     assert.equal(crossConsent.status, 403);
     const adminCannotImpersonate = await fetch(
-      `${base}/oauth/authorize?${authorizeParams(aliceClients[0])}`,
+      `${base}/oauth/authorize?${authorizeParams(aliceClient)}`,
       { headers: { cookie: adminLogin.cookie } },
     );
     assert.equal(adminCannotImpersonate.status, 403);
@@ -393,12 +393,12 @@ void test(
     });
     assert.equal(revokedSession.status, 302);
     assert.match(revokedSession.headers.get('location') || '', /^\/login/);
-    const oauthService = require('../src/services/mcpOAuthService');
+    const oauthService = (await import('../src/services/mcpOAuthService.js')).default;
     await assert.rejects(
       () =>
         oauthService.validateAuthorizeRequest({
-          clientId: aliceClients[0].client_id,
-          redirectUri: aliceClients[0].redirect_uris[0],
+          clientId: aliceClient.client_id,
+          redirectUri: aliceClient.redirect_uris[0],
           responseType: 'code',
           scope: 'bot_report.read',
           state: 'disabled-user',
