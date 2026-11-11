@@ -37,7 +37,7 @@ docker network create "$ID-net" >/dev/null
 pass=$(openssl rand -hex 24)
 docker run -d --name "$ID-db" --network "$ID-net" -e MYSQL_ROOT_PASSWORD="$pass" -e MYSQL_ROOT_HOST=% -e MYSQL_DATABASE=bot_report_test "$MYSQL" >/dev/null
 docker run -d --name "$ID-run" --network "$ID-net" --user root --entrypoint sh "$IMAGE" -c 'sleep 3600' >/dev/null
-docker cp tests "$ID-run":/app/
+docker cp tests "$ID-run":/app/dist/
 docker exec "$ID-run" apk add --no-cache curl git bash ripgrep openssl >"$OUT/test-prerequisites.log" 2>&1
 # Build a distinct fixture from the same source, never from a production worker.
 docker create --name "$ID-builder" --entrypoint sh "$GO_IMAGE" -c 'cd /src && CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=2.3.4 -X main.commit=release-test-alternate" -o /tmp/alternate .' >/dev/null
@@ -50,7 +50,7 @@ i=0
 until docker exec -e MYSQL_PWD="$pass" "$ID-db" mysql -uroot -Nse 'SELECT 1' >/dev/null 2>&1; do
   i=$((i+1)); [ "$i" -lt 60 ] || exit 1; sleep 2
 done
-docker exec -e NODE_ENV=test -e BOT_REPORT_ISOLATED_WORKER_TEST=1 -e MYSQL_TEST_HOST="$ID-db" -e MYSQL_TEST_PASSWORD="$pass" -e BOT_REPORT_WORKER_UPGRADE_FIXTURE=/tmp/alternate "$ID-run" sh -c 'cd /app && npm test' >"$OUT/regression.log" 2>&1
+docker exec -e NODE_ENV=test -e BOT_REPORT_ISOLATED_WORKER_TEST=1 -e MYSQL_TEST_HOST="$ID-db" -e MYSQL_TEST_PASSWORD="$pass" -e BOT_REPORT_WORKER_UPGRADE_FIXTURE=/tmp/alternate "$ID-run" sh -c 'cd /app/dist && node --test --test-concurrency=1 tests/*.test.js' >"$OUT/regression.log" 2>&1
 tail -12 "$OUT/regression.log"
 printf '%s\n' "$SHA" >"$OUT/commit.txt"
 printf '%s\n' "$IMAGE" >"$OUT/image.txt"

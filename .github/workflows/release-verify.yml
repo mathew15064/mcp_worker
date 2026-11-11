@@ -3,9 +3,11 @@ name: mcp_worker release verification (no publishing)
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, refactor/typescript]
   pull_request:
     paths:
+      - 'tsconfig.json'
+      - 'package*.json'
       - 'Dockerfile'
       - 'Dockerfile.mysql'
       - 'docker-compose.yml'

@@ -3,22 +3,24 @@
   "version": "2.0.0",
   "private": true,
   "description": "Deterministic MCP coding execution harness with outbound worker and SSH compatibility transports",
-  "main": "src/server.js",
+  "main": "dist/src/server.js",
   "scripts": {
-    "start": "node src/server.js",
-    "init-db": "node scripts/init-db.js",
-    "test": "node --test --test-concurrency=1 tests/*.test.js",
-    "test:e2e": "playwright test",
-    "backup-db": "node scripts/backup-db.js",
-    "rotate-admin-password": "node scripts/rotate-admin-password.js",
-    "terminal-profile": "node scripts/terminal-profile.js",
-    "mcp-client": "node scripts/mcp-client.js",
+    "start": "node dist/src/server.js",
+    "init-db": "node dist/scripts/init-db.js",
+    "test": "npm run build && node --test --test-concurrency=1 dist/tests/*.test.js",
+    "test:e2e": "npm run build && playwright test --config dist/playwright.config.js",
+    "backup-db": "node dist/scripts/backup-db.js",
+    "rotate-admin-password": "node dist/scripts/rotate-admin-password.js",
+    "terminal-profile": "node dist/scripts/terminal-profile.js",
+    "mcp-client": "node dist/scripts/mcp-client.js",
     "worker": "node worker/agent.js",
-    "migrate": "node scripts/migrate.js migrate",
-    "migrate:status": "node scripts/migrate.js status",
-    "migrate:rollback": "node scripts/migrate.js rollback",
-    "migrate:reset": "node scripts/migrate.js reset",
-    "migrate:fresh": "node scripts/migrate.js fresh"
+    "migrate": "node dist/scripts/migrate.js migrate",
+    "migrate:status": "node dist/scripts/migrate.js status",
+    "migrate:rollback": "node dist/scripts/migrate.js rollback",
+    "migrate:reset": "node dist/scripts/migrate.js reset",
+    "migrate:fresh": "node dist/scripts/migrate.js fresh",
+    "build": "node scripts/build.cjs",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "mcp",
@@ -44,6 +46,8 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@playwright/test": "^1.58.2"
+    "@playwright/test": "^1.58.2",
+    "@types/node": "26.6.6",
+    "typescript": "5.9.3"
   }
 }

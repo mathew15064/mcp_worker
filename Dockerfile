@@ -19,7 +19,14 @@ RUN apk add --no-cache python3 make g++
 COPY package.json package-lock.json ./
 
 # Install only production dependencies (better-sqlite3 compiled against Alpine musl)
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm ci
+COPY tsconfig.json ./
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+COPY worker/ ./worker/
+COPY tests/ ./tests/
+COPY playwright.config.js ./
+RUN npm run build && npm prune --omit=dev && npm cache clean --force
 
 # Verify native addon binary integrity inside Alpine
 RUN node -e "const Database = require('better-sqlite3'); const db = new Database(':memory:'); db.prepare('SELECT 1 AS result').get(); db.close();"
@@ -75,11 +82,13 @@ COPY --from=builder /app/node_modules ./node_modules
 
 # Copy MCP-only application source, CLI helpers, and manifests
 COPY package.json ./
-COPY src/ ./src/
-COPY scripts/ ./scripts/
-# Public v2 worker distribution served by /worker/install.sh and /worker/dist/*
-COPY worker/package.json worker/package-lock.json worker/agent.js worker/cli.js worker/lifecycle.js ./worker/
-COPY --from=worker-builder /src/worker/bin ./worker/bin
+COPY --from=builder /app/dist/src ./dist/src/
+COPY --from=builder /app/dist/scripts ./dist/scripts/
+COPY --from=builder /app/dist/worker ./dist/worker/
+COPY --from=builder /app/dist/package.json ./dist/package.json
+# Compatibility paths used by the standalone installer and release harness.
+RUN ln -s dist/src src && ln -s dist/scripts scripts && ln -s dist/worker worker
+COPY --from=worker-builder /src/worker/bin ./dist/worker/bin
 
 # Copy entrypoint script and ensure execution permissions
 COPY docker-entrypoint.sh /usr/local/bin/
@@ -99,4 +108,4 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
 ENTRYPOINT ["docker-entrypoint.sh"]
 
 # Production command
-CMD ["node", "src/server.js"]
+CMD ["node", "dist/src/server.js"]

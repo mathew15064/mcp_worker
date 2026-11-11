@@ -36,3 +36,6 @@ worker/bin/WORKER_RELEASE
 *.key
 *.orig
 *.rej
+
+# Compiled TypeScript and transitional JS build
+/dist/
