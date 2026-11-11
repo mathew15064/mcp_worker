@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { LibsqlAdapter } from '../src/db/adapters/libsqlAdapter';
 import { LibsqlSessionStore } from '../src/db/libsqlSessionStore';
+import { initializePreviewOwnerClaimSchema } from '../src/deployment/previewOwnerClaim';
 import { MigrationRunner } from '../src/db/migrationRunner';
 import { createVercelPreviewHandler, parsePreviewConfig } from '../src/deployment/vercelPreview';
 import type { DeploymentEnvironment } from '../src/deployment/profile';
@@ -77,6 +78,9 @@ void test('Vercel preview probe is read-only and does not leak connection secret
       secret: env.SESSION_SECRET || '',
     });
     await sessions.initialize();
+    const missingOwnerClaimTable = await call(handler);
+    assert.equal(missingOwnerClaimTable.status, 503);
+    await initializePreviewOwnerClaimSchema(adapter);
     const response = await call(handler);
     assert.equal(response.status, 200);
     const data: unknown = await response.json();
@@ -86,7 +90,7 @@ void test('Vercel preview probe is read-only and does not leak connection secret
       preview: 'database-only',
       mcpAvailable: false,
     });
-    assert.equal(captured.length, 6);
+    assert.equal(captured.length, 8);
     assert.ok(!JSON.stringify(data).includes('dummy-test-only'));
     assert.equal((await call(handler, 'POST')).status, 405);
   } finally {

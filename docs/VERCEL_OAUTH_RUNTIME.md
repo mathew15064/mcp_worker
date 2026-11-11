@@ -22,15 +22,16 @@ function for future Express integration.
   provisioned ahead of time via the guarded disposable-schema CLI.
   It does **not** create/repair the session table from a cold start.
 - Returns a scoped encrypted session store, secure-cookie Express
-  session middleware, `McpOAuthRepository`, `McpOAuthService`, and an
+  session middleware, `McpOAuthRepository`, `McpOAuthService`, an isolated Owner-claim service, and an
   immutable OAuth policy with a canonical `https://.../mcp` resource.
   No request uses the global MySQL-backed repository/settings singleton.
 - Keeps the existing `bot_report.read`, `bot_report.terminal` and
   `offline_access` scopes and bounded TTLs. Unknown/invalid TTL
   overrides cause configuration rejection rather than silent defaults.
 - Close the returned runtime after the owning Function lifecycle. It is
-  **not** an HTTP handler: route middleware, protected-resource discovery,
-  Admin identity and consent have not been wired.
+  **not** an HTTP handler. OAuth route dependency injection and the
+  Owner-claim service exist, but no Vercel public claim/login, consent or
+  MCP router is mounted. See [Owner-claim security](VERCEL_OWNER_CLAIM.md).
 
 ## Local integration evidence
 
@@ -48,19 +49,23 @@ for remote libSQL, **not** persistent Vercel storage). It verifies:
 4. Instances do not share in-process OAuth repository/service objects
    and do not mutate the migration record set merely by starting.
 
+Additional local HTTP tests now use two Express OAuth routers with injected
+per-instance libSQL repositories and real Owner session validation. They
+exercise CSRF consent, PKCE redirect/token exchange, revoke and session
+revocation across instances. A test-only login fixture is not part of any
+runtime endpoint.
+
 These tests do **not** validate remote Turso transactional behavior, a
-Vercel HTTPS deployment, Admin first-owner claim, an OAuth consent page,
-real client redirect/cookie/CSRF flow, static assets, or the 19 MCP tool
-execution backends.
+Vercel HTTPS deployment, public Owner claim/login or consent flows,
+static assets, or the 19 MCP tool execution backends.
 
 ## Follow-on acceptance gate
 
-Before exposing real `/oauth/*` or `/mcp` routes on Vercel, refactor
-the Express route factory to accept these explicit dependencies per
-deployment, implement a secure single-owner claim flow, prevent
-unauthenticated token creation, run an actual external OAuth client
-PKCE/consent/revoke E2E, and provide an execution backend (Sandbox or
-durable Worker). Maintain the unsupported deployment-profile lock
+Before exposing real `/oauth/*` or `/mcp` routes on Vercel, connect the
+now-injectable router and claim-once Owner service to a public **HTTPS-only**
+entrypoint with distributed throttling, CSRF/origin enforcement and owner
+recovery; run an actual external OAuth client PKCE/consent/revoke E2E,
+and provide an execution backend (Sandbox or durable Worker). Maintain the unsupported deployment-profile lock
 until those acceptance gates pass.
 
 Do not use disposable test credentials for production, run schema

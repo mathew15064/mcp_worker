@@ -16,6 +16,7 @@ const environment: DeploymentEnvironment = {
   TURSO_DATABASE_URL: 'libsql://disposable-test.example.invalid',
   TURSO_AUTH_TOKEN: 'fake-test-token',
   VERCEL_PREVIEW_PROBE_TOKEN: 'test-only-preview-probe-token-0123456789',
+  VERCEL_OWNER_CLAIM_TOKEN: 'test-owner-proof-only-not-real-abcdefghijklmnopqrstuvwxyz',
   VERCEL_PREVIEW_PROVISION_ACK: 'yes-create-disposable-preview-schema',
   VERCEL_PREVIEW_PROVISION_CONFIRM_HOST: 'disposable-test.example.invalid',
 };
@@ -25,6 +26,7 @@ void test('preview provisioning refuses production, bad host and no explicit ack
     { ...environment, VERCEL_ENV: 'production' },
     { ...environment, VERCEL_PREVIEW_PROVISION_CONFIRM_HOST: 'production.example.invalid' },
     { ...environment, VERCEL_PREVIEW_PROVISION_ACK: '' },
+    { ...environment, VERCEL_OWNER_CLAIM_TOKEN: '' },
     { ...environment, TURSO_DATABASE_URL: 'file:/tmp/do-not-write.db' },
   ];
   for (const config of configs) {

@@ -126,9 +126,16 @@ export function createVercelPreviewHandler(
       const sessions = await adapter.queryOne<{ count: number }>(
         "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'admin_sessions'",
       );
+      const ownerClaims = await adapter.queryOne<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'preview_owner_claims'",
+      );
       // This endpoint proves DB connectivity and required schema only.
       // It is intentionally not an OAuth login, MCP transport or Worker.
-      if (Number(migrations?.count) < 13 || Number(sessions?.count) !== 1)
+      if (
+        Number(migrations?.count) < 13 ||
+        Number(sessions?.count) !== 1 ||
+        Number(ownerClaims?.count) !== 1
+      )
         throw new PreviewUnavailable('VERCEL_PREVIEW_DATABASE_UNREADY');
       return Response.json(
         { ready: true, service: 'mcp_worker', preview: 'database-only', mcpAvailable: false },
