@@ -87,12 +87,12 @@ class TerminalSshService {
         clearTimeout(timer);
         signal?.removeEventListener('abort', abort);
       };
-      const finishReject = (error) => {
+      const finishReject = (error?: unknown) => {
         if (settled) return;
         settled = true;
         removeSetupListeners();
         try { client.end(); } catch (_) {}
-        if (error?.level === 'client-authentication') return reject(terminalError('SSH_AUTH_FAILED', 'SSH authentication failed.'));
+        if (error !== null && typeof error === 'object' && 'level' in error && error.level === 'client-authentication') return reject(terminalError('SSH_AUTH_FAILED', 'SSH authentication failed.'));
         return reject(terminalError('SSH_CONNECT_FAILED', 'SSH connection failed.'));
       };
 
@@ -103,7 +103,7 @@ class TerminalSshService {
         resolve(client);
       });
       client.on('error', finishReject);
-      client.once('close', finishReject);
+      (client as NodeJS.EventEmitter).once('close',  finishReject);
       signal?.addEventListener('abort', abort, { once: true });
       if (signal?.aborted) return abort();
 
@@ -129,7 +129,7 @@ class TerminalSshService {
       const cleanup = () => {
         clearTimeout(timer);
         signal?.removeEventListener('abort', fail);
-        client.removeListener('close', fail);
+        (client as NodeJS.EventEmitter).removeListener('close',  fail);
         client.removeListener('error', fail);
       };
       const fail = () => {
@@ -141,7 +141,7 @@ class TerminalSshService {
       };
       const timer = setTimeout(fail, this.commandTimeoutMs);
       signal?.addEventListener('abort', fail, { once: true });
-      client.once('close', fail);
+      (client as NodeJS.EventEmitter).once('close',  fail);
       client.once('error', fail);
       if (signal?.aborted) return fail();
       try {
@@ -163,7 +163,7 @@ class TerminalSshService {
       const cleanup = () => {
         clearTimeout(timer);
         signal?.removeEventListener('abort', fail);
-        client.removeListener('close', fail);
+        (client as NodeJS.EventEmitter).removeListener('close',  fail);
         client.removeListener('error', fail);
       };
       const fail = () => {
@@ -175,13 +175,13 @@ class TerminalSshService {
       };
       const timer = setTimeout(fail, this.commandTimeoutMs);
       signal?.addEventListener('abort', fail, { once: true });
-      client.once('close', fail);
+      (client as NodeJS.EventEmitter).once('close',  fail);
       client.once('error', fail);
       stream.on('close', code => {
         if (settled) return;
         settled = true;
         cleanup();
-        resolve(Number.isInteger(code) ? code : 1);
+        resolve(Number.isInteger(code) ? Number(code) : 1);
       });
       stream.on('error', fail);
       if (signal?.aborted) return fail();
@@ -199,28 +199,28 @@ class TerminalSshService {
       const cleanup = () => {
         clearTimeout(timer);
         signal?.removeEventListener('abort', fail);
-        client.removeListener('close', fail);
+        (client as NodeJS.EventEmitter).removeListener('close',  fail);
         client.removeListener('error', fail);
       };
-      const fail = (code = 'SSH_CONNECT_FAILED') => {
+      const fail = (code: unknown = 'SSH_CONNECT_FAILED') => {
         if (settled) return;
         settled = true;
         cleanup();
         try { stream.close(); } catch (_) {}
-        reject(terminalError(code, 'SSH command failed or timed out.'));
+        reject(terminalError(typeof code === 'string' ? code : 'SSH_CONNECT_FAILED', 'SSH command failed or timed out.'));
       };
       const timer = setTimeout(() => fail(), this.commandTimeoutMs);
       signal?.addEventListener('abort', fail, { once: true });
-      client.once('close', fail);
+      (client as NodeJS.EventEmitter).once('close',  fail);
       client.once('error', fail);
-      stream.on('data', chunk => {
+      stream.on('data', (chunk: Buffer | string) => {
         const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
         size += value.length;
         if (size > maxBytes) return fail('TMUX_INSPECTION_FAILED');
         chunks.push(value);
       });
       stream.once('error', fail);
-      stream.once('close', code => {
+      stream.once('close', (code: number | undefined) => {
         if (settled) return;
         settled = true;
         cleanup();
@@ -239,7 +239,7 @@ class TerminalSshService {
       const cleanup = () => {
         clearTimeout(timer);
         signal?.removeEventListener('abort', fail);
-        client.removeListener('close', fail);
+        (client as NodeJS.EventEmitter).removeListener('close',  fail);
         client.removeListener('error', fail);
         stream.removeListener('error', fail);
         stream.removeListener('exit', complete);
@@ -252,7 +252,7 @@ class TerminalSshService {
         if (code === 0) return resolve();
         reject(terminalError('TMUX_INPUT_FAILED', 'Unable to send input to tmux.'));
       };
-      const complete = (code) => {
+      const complete = (code: number | null | undefined) => {
         if (!Number.isInteger(code)) return;
         finish(code);
       };
@@ -265,7 +265,7 @@ class TerminalSshService {
       };
       const timer = setTimeout(fail, this.commandTimeoutMs);
       signal?.addEventListener('abort', fail, { once: true });
-      client.once('close', fail);
+      (client as NodeJS.EventEmitter).once('close',  fail);
       client.once('error', fail);
       stream.once('error', fail);
       stream.once('exit', complete);
@@ -324,10 +324,10 @@ class TerminalSshService {
     const command = `tmux capture-pane -p -J -t '${target}' -S -`;
     return new Promise<ReadCapture>((resolve, reject) => {
       let stream: ClientChannel | undefined, done = false, tail = Buffer.alloc(0), truncated = false;
-      const finish = (code) => {
+      const finish = (code: number | null | undefined) => {
         if (done) return; done = true; clearTimeout(timer);
         signal?.removeEventListener('abort', abort);
-        connection.client.removeListener('close', abort); connection.client.removeListener('error', abort);
+        connection.(client as NodeJS.EventEmitter).removeListener('close',  abort); connection.client.removeListener('error', abort);
         if (stream) { stream.removeListener('data', data); stream.removeListener('error', abort); stream.removeListener('close', closed); try { stream.close(); } catch (_) {} }
         if (code) return reject(terminalError(code, 'Unable to read tmux history.'));
         while (tail.length && (tail[0] & 0xc0) === 0x80) tail = tail.subarray(1);
@@ -348,7 +348,7 @@ class TerminalSshService {
       };
       const timer = setTimeout(abort, this.commandTimeoutMs);
       signal?.addEventListener('abort', abort, { once: true });
-      connection.client.once('close', abort); connection.client.once('error', abort);
+      connection.(client as NodeJS.EventEmitter).once('close',  abort); connection.client.once('error', abort);
       try {
         connection.client.exec(command, {}, (error, channel) => {
           if (done) { try { channel?.close(); } catch (_) {} return; }
@@ -361,7 +361,7 @@ class TerminalSshService {
   }
 
   async withVerifiedClient<T>(profile: SshProfile, password: string, operation: (client: Client) => Promise<T>, { signal }: AbortOptions = {}): Promise<T> {
-    let client;
+    let client: Client | undefined;
     try {
       client = await this.connect(profile, password, { signal });
       await this.checkTmux(client, profile.tmux_session, signal);
@@ -425,7 +425,7 @@ class TerminalSshService {
     runAs = validateRunAs(runAs);
     const timeout = Math.min(Math.max(Number(timeoutMs) || 30000, 100), 300000);
     const start = Date.now();
-    let client;
+    let client: Client | undefined;
     try {
       client = await this.connect(profile, password, { signal });
       const innerCommand = cwd ? `cd -- ${shellQuote(cwd)} && (${command}\n)` : `(${command}\n)`;
@@ -447,7 +447,7 @@ class TerminalSshService {
         const cleanup = () => {
           clearTimeout(timer);
           signal?.removeEventListener('abort', onAbort);
-          client.removeListener('close', onFail);
+          (client as NodeJS.EventEmitter).removeListener('close',  onFail);
           client.removeListener('error', onFail);
         };
 
@@ -477,10 +477,10 @@ class TerminalSshService {
 
         const timer = setTimeout(onTimeout, timeout);
         signal?.addEventListener('abort', onAbort, { once: true });
-        client.once('close', onFail);
+        (client as NodeJS.EventEmitter).once('close',  onFail);
         client.once('error', onFail);
 
-        stream.on('data', chunk => {
+        stream.on('data', (chunk: Buffer | string) => {
           const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
           if (stdoutBytes + buf.length > maxOutputBytes) {
             stdoutTruncated = true;
@@ -495,7 +495,7 @@ class TerminalSshService {
           }
         });
 
-        stream.stderr?.on('data', chunk => {
+        stream.stderr?.on('data', (chunk: Buffer | string) => {
           const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
           if (stderrBytes + buf.length > maxOutputBytes) {
             stderrTruncated = true;
@@ -554,33 +554,33 @@ class TerminalSshService {
     const stream = await this.execChannel(client, inspectCommand, {}, signal);
     return new Promise<{realTarget: string;fileSize: number}>((resolve, reject) => {
       let settled = false;
-      const chunks = [];
-      let exitCode = null;
+      const chunks: Buffer[] = [];
+      let exitCode: number | null = null;
       const cleanup = () => {
         clearTimeout(timer);
         signal?.removeEventListener('abort', fail);
-        client.removeListener('close', fail);
+        (client as NodeJS.EventEmitter).removeListener('close',  fail);
         client.removeListener('error', fail);
       };
-      const fail = (code = 'SSH_CONNECT_FAILED', msg = 'SSH inspection command failed or timed out.') => {
+      const fail = (code: unknown = 'SSH_CONNECT_FAILED', msg = 'SSH inspection command failed or timed out.') => {
         if (settled) return;
         settled = true;
         cleanup();
         try { stream.close(); } catch (_) {}
-        reject(terminalError(code, msg));
+        reject(terminalError(typeof code === 'string' ? code : 'SSH_CONNECT_FAILED', msg));
       };
       const timer = setTimeout(() => fail(), this.commandTimeoutMs);
       signal?.addEventListener('abort', fail, { once: true });
-      client.once('close', fail);
+      (client as NodeJS.EventEmitter).once('close',  fail);
       client.once('error', fail);
-      stream.on('data', chunk => {
+      stream.on('data', (chunk: Buffer | string) => {
         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       });
       stream.stderr?.resume();
-      stream.once('exit', code => {
+      stream.once('exit', (code: number | undefined) => {
         if (Number.isInteger(code)) exitCode = code;
       });
-      stream.once('close', code => {
+      stream.once('close', (code: number | undefined) => {
         if (settled) return;
         settled = true;
         cleanup();
@@ -602,25 +602,25 @@ class TerminalSshService {
     return new Promise<Buffer>((resolve, reject) => {
       let settled = false;
       let size = 0;
-      const chunks = [];
+      const chunks: Buffer[] = [];
       const cleanup = () => {
         clearTimeout(timer);
         signal?.removeEventListener('abort', fail);
-        client.removeListener('close', fail);
+        (client as NodeJS.EventEmitter).removeListener('close',  fail);
         client.removeListener('error', fail);
       };
-      const fail = (code = 'SSH_CONNECT_FAILED', msg = 'SSH command failed or timed out.') => {
+      const fail = (code: unknown = 'SSH_CONNECT_FAILED', msg = 'SSH command failed or timed out.') => {
         if (settled) return;
         settled = true;
         cleanup();
         try { stream.close(); } catch (_) {}
-        reject(terminalError(code, msg));
+        reject(terminalError(typeof code === 'string' ? code : 'SSH_CONNECT_FAILED', msg));
       };
       const timer = setTimeout(() => fail(), this.commandTimeoutMs);
       signal?.addEventListener('abort', fail, { once: true });
-      client.once('close', fail);
+      (client as NodeJS.EventEmitter).once('close',  fail);
       client.once('error', fail);
-      stream.on('data', chunk => {
+      stream.on('data', (chunk: Buffer | string) => {
         const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
         size += value.length;
         if (size > maxBytes) {
@@ -629,7 +629,7 @@ class TerminalSshService {
         chunks.push(value);
       });
       stream.once('error', fail);
-      stream.once('close', code => {
+      stream.once('close', (code: number | undefined) => {
         if (settled) return;
         settled = true;
         cleanup();
@@ -643,7 +643,7 @@ class TerminalSshService {
 
   async collectArtifact(profile: SshProfile, password: string, requestedPath: string, { maxBytes = 2 * 1024 * 1024, runAs = null, signal }: FileOptions = {}) {
     runAs = validateRunAs(runAs);
-    let client;
+    let client: Client | undefined;
     try {
       client = await this.connect(profile, password, { signal });
       const { realTarget, fileSize } = await this.inspectArtifactPath(client, requestedPath, signal, { runAs });
@@ -694,21 +694,21 @@ class TerminalSshService {
     const timeout = Math.min(Math.max(Number(timeoutMs) || 30000, 100), 300000);
     return new Promise<{exit_code: number;stderr: string}>((resolve, reject) => {
       let settled = false;
-      let exitCode = null;
+      let exitCode: number | null = null;
       let stderrBytes = 0;
-      const stderrChunks = [];
+      const stderrChunks: Buffer[] = [];
       const cleanup = () => {
         clearTimeout(timer);
         signal?.removeEventListener('abort', onAbort);
-        client.removeListener('close', onFail);
+        (client as NodeJS.EventEmitter).removeListener('close',  onFail);
         client.removeListener('error', onFail);
         stream.removeListener('error', onFail);
       };
-      const finish = (code) => {
+      const finish = (code: number | null | undefined) => {
         if (settled) return;
         settled = true;
         cleanup();
-        resolve({ exit_code: Number.isInteger(code) ? code : 1, stderr: Buffer.concat(stderrChunks).toString('utf8') });
+        resolve({ exit_code: Number.isInteger(code) ? Number(code) : 1, stderr: Buffer.concat(stderrChunks).toString('utf8') });
       };
       const onFail = () => {
         if (settled) return;
@@ -732,10 +732,10 @@ class TerminalSshService {
         reject(terminalError('EXEC_TIMEOUT', `SSH input command timed out after ${timeout}ms.`));
       }, timeout);
       signal?.addEventListener('abort', onAbort, { once: true });
-      client.once('close', onFail);
+      (client as NodeJS.EventEmitter).once('close',  onFail);
       client.once('error', onFail);
       stream.once('error', onFail);
-      stream.stderr?.on('data', chunk => {
+      stream.stderr?.on('data', (chunk: Buffer | string) => {
         const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
         const remaining = Math.max(0, maxStderrBytes - stderrBytes);
         if (remaining > 0) {
@@ -743,7 +743,7 @@ class TerminalSshService {
           stderrBytes += Math.min(buf.length, remaining);
         }
       });
-      stream.once('exit', code => {
+      stream.once('exit', (code: number | undefined) => {
         if (!Number.isInteger(code)) return;
         exitCode = code;
         // Some SSH servers emit an exit status but keep the channel open until
@@ -751,7 +751,7 @@ class TerminalSshService {
         // successful stdin-driven writes do not report a false timeout.
         setImmediate(() => finish(code));
       });
-      stream.once('close', code => finish(exitCode ?? code));
+      stream.once('close', (code: number | undefined) => finish(exitCode ?? code));
       stream.resume();
       if (signal?.aborted) return onAbort();
       try { stream.end(input); } catch (_) { onFail(); }
@@ -760,7 +760,7 @@ class TerminalSshService {
 
   async writeTextFile(profile: SshProfile, password: string, targetPath: string, content: string, { createDirs = false, runAs = null, signal }: WriteOptions = {}) {
     runAs = validateRunAs(runAs);
-    let client;
+    let client: Client | undefined;
     try {
       client = await this.connect(profile, password, { signal });
       const token = crypto.randomBytes(8).toString('hex');
@@ -812,7 +812,7 @@ class TerminalSshService {
 
   async startManagedProcess(profile: SshProfile, password: string, command: string, { cwd = null, runAs = null, signal }: ProcessOptions = {}) {
     runAs = validateRunAs(runAs);
-    let client;
+    let client: Client | undefined;
     const processId = `brproc-${crypto.randomBytes(8).toString('hex')}`;
     try {
       client = await this.connect(profile, password, { signal });
@@ -842,7 +842,7 @@ class TerminalSshService {
   }
 
   async getManagedProcessStatus(profile: SshProfile, password: string, processId: unknown, { lines = 200, signal }: ProcessReadOptions = {}) {
-    let client;
+    let client: Client | undefined;
     try {
       client = await this.connect(profile, password, { signal });
       return await this.inspectManagedProcess(client, processId, signal, lines);
@@ -858,7 +858,7 @@ class TerminalSshService {
     if (!Number.isInteger(offset) || offset < 0) throw terminalError('INVALID_LOG_CURSOR', 'cursor must be a non-negative integer.');
     if (!Number.isInteger(limit) || limit < 1 || limit > 512 * 1024) throw terminalError('INVALID_LOG_LIMIT', 'max_bytes must be between 1 and 524288.');
     const logPath = managedProcessLogPath(id);
-    let client;
+    let client: Client | undefined;
     try {
       client = await this.connect(profile, password, { signal });
       const exists = await this.execStatus(client, `test -f ${shellQuote(logPath)}`, signal);
@@ -868,7 +868,7 @@ class TerminalSshService {
       if (!Number.isSafeInteger(fileSize) || fileSize < 0) throw terminalError('PROCESS_LOG_INVALID', 'Managed process log size is invalid.');
       if (offset > fileSize) throw terminalError('INVALID_LOG_CURSOR', 'cursor is beyond the current process log size.');
       const count = Math.min(limit, fileSize - offset);
-      let buffer = Buffer.alloc(0);
+      let buffer: Buffer = Buffer.alloc(0);
       if (count > 0) {
         buffer = await this.execBinary(client, `dd if=${shellQuote(logPath)} bs=1 skip=${offset} count=${count} status=none`, signal, count);
       }
@@ -888,7 +888,7 @@ class TerminalSshService {
   }
 
   async stopManagedProcess(profile: SshProfile, password: string, processId: unknown, { force = true, graceMs = 1000, lines = 200, signal }: ProcessStopOptions = {}) {
-    let client;
+    let client: Client | undefined;
     try {
       client = await this.connect(profile, password, { signal });
       const id = validateManagedProcessId(processId);
@@ -922,7 +922,7 @@ class TerminalSshService {
   }
 
   async openInteractive(profile: SshProfile, password: string, { cols = 80, rows = 24, onState = () => {}, signal }: InteractiveOptions = {}) {
-    let client;
+    let client: Client | undefined;
     try {
       client = await this.connect(profile, password, { signal });
       onState('CHECKING_TMUX');
