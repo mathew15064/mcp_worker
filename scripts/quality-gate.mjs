@@ -8,6 +8,7 @@ import prettier from 'prettier';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 
 const root = path.resolve(import.meta.dirname, '..');
 const baselinePath = path.join(root, 'quality', 'baseline.json');
@@ -58,6 +59,30 @@ if (fatal.length) {
 } else {
   const baseline = JSON.parse(await fs.readFile(baselinePath, 'utf8'));
   const violations = [];
+  // A committed baseline cannot be inflated to hide newly added debt.
+  // On the initial adoption commit only, the base has no baseline yet.
+  const baseRef = process.env.QUALITY_BASE_REF;
+  if (baseRef && !/^0+$/.test(baseRef)) {
+    if (!/^[0-9a-f]{40}$/.test(baseRef)) throw new Error('Invalid quality base commit');
+    const git = (args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' });
+    git(['cat-file', '-e', baseRef + '^{commit}']);
+    const previousPath = git(['ls-tree', '--name-only', baseRef, 'quality/baseline.json']).trim();
+    if (previousPath) {
+      const previous = JSON.parse(git(['show', baseRef + ':quality/baseline.json']));
+      for (const [file, rules] of Object.entries(baseline.lint)) {
+        for (const [rule, count] of Object.entries(rules)) {
+          if (count > (previous.lint[file]?.[rule] ?? 0)) {
+            violations.push(`${file}: committed lint baseline increased for ${rule}`);
+          }
+        }
+      }
+      for (const [file, hash] of Object.entries(baseline.format)) {
+        if (previous.format[file] !== hash) {
+          violations.push(`${file}: committed formatting baseline expanded or changed`);
+        }
+      }
+    }
+  }
   for (const [file, rules] of Object.entries(current.lint)) {
     for (const [rule, count] of Object.entries(rules)) {
       const allowed = baseline.lint[file]?.[rule] ?? 0;

@@ -16,6 +16,8 @@ MCP wire contract or the native Go Worker. All work stays on the TS6 branch.
 - `npm run quality:check`: CI gate; ESLint runs with TypeScript project service,
   then Prettier checks every typed target. No newly introduced rule counts or
   changed/new unformatted files are accepted. Parser errors are never baselined.
+  CI compares the committed baseline with the previous branch/base commit
+  and rejects an increase in lint counts or new formatting fingerprints.
 - `npm run quality:baseline`: explicit debt snapshot update, for reviewed
   reductions only. Never run in CI.
 

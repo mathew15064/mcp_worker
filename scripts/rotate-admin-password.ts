@@ -10,6 +10,10 @@ if (generated) {
 }
 
 console.error('Administrator credentials are now bootstrap-only ENV configuration.');
-console.error('Update ADMIN_USERNAME / ADMIN_PASSWORD in the runtime environment and restart mcp_worker.');
-console.error('Use --generate only to generate a strong candidate password; this command no longer writes any database.');
+console.error(
+  'Update ADMIN_USERNAME / ADMIN_PASSWORD in the runtime environment and restart mcp_worker.',
+);
+console.error(
+  'Use --generate only to generate a strong candidate password; this command no longer writes any database.',
+);
 process.exit(1);

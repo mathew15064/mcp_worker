@@ -1,7 +1,11 @@
 /** SQL bindings accepted by both adapters. Rows are typed by the query caller. */
 export type SqlValue = string | number | bigint | boolean | null | Buffer | Date;
 export type SqlRow = Record<string, unknown>;
-export interface ExecutionResult { changes: number; insertId: number | bigint | null; warningStatus?: number }
+export interface ExecutionResult {
+  changes: number;
+  insertId: number | bigint | null;
+  warningStatus?: number;
+}
 export interface DatabaseAdapter {
   readonly kind: 'mysql' | 'sqlite';
   queryOne<T extends object = SqlRow>(sql: string, params?: SqlValue[]): Promise<T | null>;

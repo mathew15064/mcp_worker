@@ -1,12 +1,16 @@
 export class AuthorizationError extends Error {
-  constructor(message: string, public status = 403, public code = 'FORBIDDEN') {
+  constructor(
+    message: string,
+    public status = 403,
+    public code = 'FORBIDDEN',
+  ) {
     super(message);
     this.name = 'AuthorizationError';
   }
 }
 export const SCOPES = Object.freeze({
   READ: 'bot_report.read',
-  TERMINAL: 'bot_report.terminal'
+  TERMINAL: 'bot_report.terminal',
 } as const);
 export interface PrincipalOptions {
   principalId: string;
@@ -26,9 +30,21 @@ export class AuthenticatedPrincipal {
   profile_id: string | null;
   owner_user_id: string | null;
   declare client_name?: string | null;
-  constructor({ principalId, actorId = null, scopes = [], rawToken = null, clientId = null, profileId = null, ownerUserId = null }: PrincipalOptions) {
+  constructor({
+    principalId,
+    actorId = null,
+    scopes = [],
+    rawToken = null,
+    clientId = null,
+    profileId = null,
+    ownerUserId = null,
+  }: PrincipalOptions) {
     if (!principalId || typeof principalId !== 'string') {
-      throw new AuthorizationError('principalId is required for AuthenticatedPrincipal', 401, 'INVALID_PRINCIPAL');
+      throw new AuthorizationError(
+        'principalId is required for AuthenticatedPrincipal',
+        401,
+        'INVALID_PRINCIPAL',
+      );
     }
     this.principal_id = principalId;
     this.actor_id = actorId || principalId;
@@ -38,14 +54,18 @@ export class AuthenticatedPrincipal {
     this.profile_id = profileId;
     this.owner_user_id = ownerUserId || null;
   }
-  get id(): string { return this.principal_id; }
-  hasScope(scope?: string | null): boolean { return !scope || this.scopes.has(scope); }
+  get id(): string {
+    return this.principal_id;
+  }
+  hasScope(scope?: string | null): boolean {
+    return !scope || this.scopes.has(scope);
+  }
   assertScope(scope?: string | null): void {
     if (!this.hasScope(scope)) {
       throw new AuthorizationError(
         `Principal '${this.principal_id}' lacks required scope '${scope}'.`,
         403,
-        'INSUFFICIENT_SCOPE'
+        'INSUFFICIENT_SCOPE',
       );
     }
   }

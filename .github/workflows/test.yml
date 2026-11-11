@@ -38,6 +38,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Use Node.js 26.13.0
         uses: actions/setup-node@v4
@@ -64,6 +66,8 @@ jobs:
         run: npm run lint
 
       - name: Type-aware ESLint and Prettier quality gate
+        env:
+          QUALITY_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: npm run quality:check
 
       - name: Strict TypeScript check
