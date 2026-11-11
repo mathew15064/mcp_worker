@@ -9,8 +9,8 @@ or `main` merge is authorized by this work.
 
 `api/preview.ts` exports a Vercel Node.js Function at `/api/preview`,
 using the documented web handler interface. It checks credentials *server-side*
-against a remote libSQL database, verifies the expected migrations and shared
-Admin-session schema, and returns **only status metadata** with
+against a remote libSQL database, verifies the expected migrations, shared
+Admin-session schema and claim-once Owner schema, and returns **only status metadata** with
 `cache-control: no-store`. It does not print URL/token, run migrations,
 create sessions or mutate the DB.
 
@@ -22,12 +22,13 @@ A deliberately separate preview-only flag is mandatory:
 - `EXECUTION_BACKEND=sandbox`
 - `SESSION_SECRET` stable, strong, >=32 chars
 - `VERCEL_PREVIEW_PROBE_TOKEN` separate random 32+-character bearer token; requests without `Authorization: Bearer <token>` return generic 404 **before opening the database**
+- `VERCEL_OWNER_CLAIM_TOKEN` separate cryptographically random bootstrap proof (32+ characters), never logged or placed in a URL, required for the explicit provisioning CLI and future Owner runtime
 - `MCP_PUBLIC_BASE_URL` exact HTTPS preview origin (no path/query)
 - `TURSO_DATABASE_URL` secure remote `libsql://` or `https://` URL
 - `TURSO_AUTH_TOKEN` provisioned as server-side secret
 
 With missing settings, a wrong profile, `VERCEL_ENV=production`, a
-database outage or missing migrations/session schema, the Function
+database outage or missing migrations/session and Owner-claim schemas, the Function
 returns 503 and a generic error code; it **does not** fall back to local
 SQLite/MySQL or reveal credential details. Non-GET methods return 405.
 
@@ -48,7 +49,7 @@ probe. The operator first verifies access using
 
 Run `npm run libsql:provision:preview` only against the intentionally
 disposable database. This **writes schema**, runs the 13 libSQL migrations
-transactionally and initializes the encrypted Admin-session table. Running it
+transactionally and initializes the encrypted Admin-session and one-time Owner-claim tables. Running it
 again should be idempotent. There is no data deletion or reset step, but
 accidentally targeting an existing production database would still be unsafe:
 the separate host acknowledgement is a guard, not an authorization to migrate
@@ -74,9 +75,9 @@ deployment require connected, authorized preview infrastructure.
    foreign-key behavior and session storage on the real provider; perform
    schema initialization deliberately via a separate authenticated
    provisioning flow, **not** on a public GET request.
-3. Implement a Vercel composition root that injects libSQL + encrypted
-   `LibsqlSessionStore` into the actual Express/OAuth/MCP app, plus a secure,
-   claim-once Admin bootstrap (and stable encryption keys).
+3. Connect the scoped libSQL OAuth runtime and one-time Owner service to the
+   **real** Express routes, with audited public claim/login protections,
+   stable encryption keys and independent HTTPS security testing.
 4. Preserve OAuth metadata/PKCE/CSRF, session revocation and identity across
    cold starts, in external HTTPS E2E. Never use `Map` for cross-instance
    Worker routing; implement Sandbox or durable Worker jobs before

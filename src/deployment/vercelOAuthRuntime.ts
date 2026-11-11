@@ -2,6 +2,7 @@ import type { DatabaseAdapter } from '../db/contracts';
 import { LibsqlAdapter } from '../db/adapters/libsqlAdapter';
 import { MigrationRunner } from '../db/migrationRunner';
 import { LibsqlSessionStore } from '../db/libsqlSessionStore';
+import { PreviewOwnerClaimService } from './previewOwnerClaim';
 import { createSessionMiddleware } from '../middleware/createSessionMiddleware';
 import oauthRepository from '../repositories/mcpOAuthRepository';
 import oauthService from '../services/mcpOAuthService';
@@ -54,9 +55,34 @@ export function buildPreviewOAuthPolicy(
   });
 }
 
+/**
+ * Metadata endpoints for a verified preview origin only. This route policy
+ * does not activate a server, consent page or real owner authentication.
+ */
+export function buildPreviewOAuthRouteConfig(environment: DeploymentEnvironment = process.env) {
+  const policy = buildPreviewOAuthPolicy(environment);
+  const issuer = policy.resourceUrl.slice(0, -'/mcp'.length);
+  return Object.freeze({
+    enabled: true,
+    rateLimitPerMinute: readTtl(environment, 'MCP_RATE_LIMIT_PER_MINUTE', 120, 1, 10000),
+    resourceUrl: policy.resourceUrl,
+    issuer,
+    supportedScopes: policy.supportedScopes,
+    metadataUrls: Object.freeze({
+      protectedResourceMcp: issuer + '/.well-known/oauth-protected-resource/mcp',
+      protectedResourceRoot: issuer + '/.well-known/oauth-protected-resource',
+      authorizationServer: issuer + '/.well-known/oauth-authorization-server',
+      authorizationEndpoint: issuer + '/oauth/authorize',
+      tokenEndpoint: issuer + '/oauth/token',
+      revocationEndpoint: issuer + '/oauth/revoke',
+    }),
+  });
+}
+
 export interface PreviewOAuthRuntime {
   readonly adapter: DatabaseAdapter;
   readonly sessions: LibsqlSessionStore;
+  readonly owner: PreviewOwnerClaimService;
   readonly sessionMiddleware: ReturnType<typeof createSessionMiddleware>;
   readonly repository: InstanceType<typeof oauthRepository.McpOAuthRepository>;
   readonly oauth: InstanceType<typeof oauthService.McpOAuthService>;
@@ -80,7 +106,9 @@ export async function createPreviewOAuthRuntime(
   const config = parsePreviewConfig(environment);
   const policy = buildPreviewOAuthPolicy(environment);
   const secret = environment.SESSION_SECRET;
-  if (!secret) throw new PreviewUnavailable('VERCEL_PREVIEW_INVALID_CONFIGURATION');
+  const ownerProof = environment.VERCEL_OWNER_CLAIM_TOKEN;
+  if (!secret || !ownerProof || ownerProof.length < 32)
+    throw new PreviewUnavailable('VERCEL_PREVIEW_INVALID_CONFIGURATION');
 
   let adapter: DatabaseAdapter | null = null;
   try {
@@ -93,6 +121,8 @@ export async function createPreviewOAuthRuntime(
 
     const sessions = new LibsqlSessionStore({ adapter, secret });
     await sessions.verifyExisting(); // read-only: provision schema explicitly
+    const owner = new PreviewOwnerClaimService(adapter, ownerProof);
+    await owner.verifyExisting(); // read-only; no account claim on cold start
     const repository = new oauthRepository.McpOAuthRepository(adapter);
     const oauth = new oauthService.McpOAuthService(repository, policy);
     const sessionMiddleware = createSessionMiddleware({
@@ -104,6 +134,7 @@ export async function createPreviewOAuthRuntime(
     return Object.freeze({
       adapter: ownedAdapter,
       sessions,
+      owner,
       sessionMiddleware,
       repository,
       oauth,

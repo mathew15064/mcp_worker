@@ -25,6 +25,7 @@ const environment: DeploymentEnvironment = {
   TURSO_DATABASE_URL: 'libsql://disposable-test.example.invalid',
   TURSO_AUTH_TOKEN: 'test-only-not-real',
   VERCEL_PREVIEW_PROBE_TOKEN: 'test-oauth-runtime-probe-token-0123456789',
+  VERCEL_OWNER_CLAIM_TOKEN: 'test-owner-proof-only-not-real-abcdefghijklmnopqrstuvwxyz',
   VERCEL_PREVIEW_PROVISION_ACK: 'yes-create-disposable-preview-schema',
   VERCEL_PREVIEW_PROVISION_CONFIRM_HOST: 'disposable-test.example.invalid',
 };

@@ -2,6 +2,7 @@ import type { DatabaseAdapter } from '../db/contracts';
 import { LibsqlAdapter } from '../db/adapters/libsqlAdapter';
 import { MigrationRunner } from '../db/migrationRunner';
 import { LibsqlSessionStore } from '../db/libsqlSessionStore';
+import { initializePreviewOwnerClaimSchema } from './previewOwnerClaim';
 import { parsePreviewConfig, PreviewUnavailable } from './vercelPreview';
 import type { DeploymentEnvironment } from './profile';
 import type { PreviewAdapterFactory } from './vercelPreview';
@@ -25,7 +26,9 @@ export async function provisionPreviewDatabase(
   }
 
   const secret = environment.SESSION_SECRET;
-  if (!secret) throw new PreviewUnavailable('VERCEL_PREVIEW_INVALID_CONFIGURATION');
+  const ownerProof = environment.VERCEL_OWNER_CLAIM_TOKEN;
+  if (!secret || !ownerProof || ownerProof.length < 32)
+    throw new PreviewUnavailable('VERCEL_PREVIEW_INVALID_CONFIGURATION');
 
   const adapter: DatabaseAdapter = await adapterFactory(config);
   try {
@@ -33,6 +36,7 @@ export async function provisionPreviewDatabase(
     const migrated = await new MigrationRunner(adapter).migrate();
     const sessions = new LibsqlSessionStore({ adapter, secret });
     await sessions.initialize();
+    await initializePreviewOwnerClaimSchema(adapter);
     const status = await new MigrationRunner(adapter).inspectSource();
     if (!status.initialized) throw new PreviewUnavailable('VERCEL_PREVIEW_DATABASE_UNREADY');
     return { appliedMigrations: migrated.ran.length, schemaReady: true, previewOnly: true };
