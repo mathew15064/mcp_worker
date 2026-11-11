@@ -47,6 +47,11 @@ owner approval, or authorization to publish/tag/merge.
   audit and owner-approved sanitized export remain outstanding.
 - Complete license/attribution texts for distributed image/binaries and
   MySQL derivative obligations need owner/legal approval.
+- Native **Linux user-mode** manual installer lifecycle passed a local
+  non-privileged, disposable-home test (fresh install; unchanged reinstall;
+  tampered checksum rejection; distinct binary fixture upgrade; rollback;
+  uninstall). It is now included in the isolated release verification script.
+  This does **not** validate a systemd-managed installation or macOS/Windows.
 - Native macOS/Windows installer install/upgrade/rollback/uninstall and
   Linux systemd recovery/uninstall checks are still outstanding.
 - Public HTTPS reverse-proxy, remote Worker WSS and real MCP OAuth client

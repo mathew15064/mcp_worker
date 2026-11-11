@@ -5,6 +5,9 @@ This is a gate checklist, not an authorization to publish.
 - [x] Local source cleanup and preliminary dependency provenance review.
 - [x] Standalone fresh install, persistence, read-only OAuth/PKCE onboarding.
 - [x] Real Linux Worker: all 19 tools, upgrade, rollback, signature rejection.
+- [x] Native Linux **user-mode** installer lifecycle: fresh install, no-op
+  reinstall, checksum rejection, distinct binary upgrade, verified rollback,
+  and uninstall, all under a disposable unprivileged HOME (2026-11-11).
 - [x] Local release verification: 101/101 TS6.3 regression (2026-11-11);
   eight Worker cross-build checksums.
 - [x] Local Chromium Admin UI suite (12 tests, P8.3).

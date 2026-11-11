@@ -40,6 +40,14 @@ package directories include LICENSE files containing MIT permission terms.
 the Unlicense. A declared SPDX value does not substitute for the
 corresponding actual license/copyright text or manual review.
 
+Runtime image spot-check on 2026-11-11: **155 of 156** installed
+runtime/non-dev packages have a recognizable LICENSE/NOTICE-like file.
+The nested `express-session/node_modules/cookie-signature` 1.0.7 declares
+MIT in its package metadata but contains **no LICENSE file**. Retrieve and
+verify the matching version's attribution/license terms before publishing
+complete notices; do not assume the license file of a different version
+applies without verification.
+
 The legacy Node Worker lockfile has three MIT entries; native Go Worker is
 the supported default. Audit both when distributing either implementation.
 

@@ -69,6 +69,10 @@ until docker exec -e MYSQL_PWD="$pass" "$ID-db" mysql -uroot -Nse 'SELECT 1' >/d
 done
 docker exec -e NODE_ENV=test -e BOT_REPORT_ISOLATED_WORKER_TEST=1 -e MYSQL_TEST_HOST="$ID-db" -e MYSQL_TEST_PASSWORD="$pass" -e BOT_REPORT_WORKER_UPGRADE_FIXTURE=/tmp/alternate "$ID-run" sh -c 'cd /app/dist && node --test --test-concurrency=1 tests/*.test.js' >"$OUT/regression.log" 2>&1
 tail -12 "$OUT/regression.log"
+# Native Linux manual installer install/upgrade/rollback/uninstall in an
+# isolated temporary unprivileged HOME. No systemd, enrollment or host changes.
+BOT_REPORT_LIFECYCLE_TEST_ORIGIN="http://127.0.0.1:$PORT" node scripts/test-linux-installer-lifecycle.cjs >"$OUT/linux-installer-lifecycle.log" 2>&1
+tail -8 "$OUT/linux-installer-lifecycle.log"
 printf '%s\n' "$SHA" >"$OUT/commit.txt"
 printf '%s\n' "$IMAGE" >"$OUT/image.txt"
 printf '%s\n' "$MYSQL" >"$OUT/mysql-image.txt"
