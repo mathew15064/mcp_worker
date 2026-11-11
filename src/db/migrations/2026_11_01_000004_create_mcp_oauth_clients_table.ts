@@ -1,5 +1,6 @@
-module.exports = {
-  async up(schema) {
+import type { SchemaBuilder } from '../schemaBuilder';
+const migration = {
+  async up(schema: SchemaBuilder) {
     await schema.createTable('mcp_oauth_clients', table => {
       table.string('id', 96).primary();
       table.string('client_id', 128).unique();
@@ -16,7 +17,8 @@ module.exports = {
       table.index('status', 'idx_mcp_clients_status');
     });
   },
-  async down(schema) {
+  async down(schema: SchemaBuilder) {
     await schema.dropTable('mcp_oauth_clients');
   }
 };
+export = migration;

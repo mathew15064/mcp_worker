@@ -1,5 +1,6 @@
-module.exports = {
-  async up(schema) {
+import type { SchemaBuilder } from '../schemaBuilder';
+const migration = {
+  async up(schema: SchemaBuilder) {
     await schema.table('mcp_request_audit', table => {
       table.addLongText('request_payload', { nullable: true });
       table.addLongText('response_payload', { nullable: true });
@@ -7,7 +8,7 @@ module.exports = {
       table.addBoolean('response_truncated', { nullable: false, defaultValue: false });
     });
   },
-  async down(schema) {
+  async down(schema: SchemaBuilder) {
     await schema.table('mcp_request_audit', table => {
       table.dropColumn('response_truncated');
       table.dropColumn('request_truncated');
@@ -16,3 +17,4 @@ module.exports = {
     });
   }
 };
+export = migration;

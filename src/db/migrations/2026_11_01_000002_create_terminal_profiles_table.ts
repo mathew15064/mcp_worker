@@ -1,5 +1,6 @@
-module.exports = {
-  async up(schema) {
+import type { SchemaBuilder } from '../schemaBuilder';
+const migration = {
+  async up(schema: SchemaBuilder) {
     await schema.createTable('terminal_profiles', table => {
       table.uuid('id').primary();
       table.string('name', 100);
@@ -15,7 +16,8 @@ module.exports = {
       table.unique('name', 'uq_terminal_profiles_name');
     });
   },
-  async down(schema) {
+  async down(schema: SchemaBuilder) {
     await schema.dropTable('terminal_profiles');
   }
 };
+export = migration;

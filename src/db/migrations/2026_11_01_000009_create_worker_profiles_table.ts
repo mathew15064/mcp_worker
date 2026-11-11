@@ -1,5 +1,6 @@
-module.exports = {
-  async up(schema) {
+import type { SchemaBuilder } from '../schemaBuilder';
+const migration = {
+  async up(schema: SchemaBuilder) {
     await schema.createTable('worker_profiles', table => {
       table.uuid('id').primary();
       table.string('name', 100);
@@ -13,7 +14,8 @@ module.exports = {
       table.foreign('worker_id', 'workers', 'id', { onDelete: 'CASCADE' });
     });
   },
-  async down(schema) {
+  async down(schema: SchemaBuilder) {
     await schema.dropTable('worker_profiles');
   }
 };
+export = migration;

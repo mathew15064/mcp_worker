@@ -1,28 +1,33 @@
-const fs = require('fs');
-const path = require('path');
-const { SchemaBuilder } = require('./schemaBuilder');
+import fs from 'node:fs';
+import path from 'node:path';
+import { SchemaBuilder } from './schemaBuilder';
+import type { DatabaseAdapter } from './contracts';
+interface Migration { up(schema: SchemaBuilder): Promise<void>; down(schema: SchemaBuilder): Promise<void> }
+interface MigrationRecord { migration: string; batch: number; executed_at: string; id: number }
 
 const MIGRATIONS_DIR = path.join(__dirname, 'migrations');
 
-function migrationFiles() {
+export function migrationFiles() {
   return fs.readdirSync(MIGRATIONS_DIR)
     .filter(name => /^\d{4}_\d{2}_\d{2}_\d{6}_[A-Za-z0-9_]+\.js$/.test(name))
     .sort();
 }
 
-function migrationName(file) { return file.replace(/\.js$/, ''); }
-function loadMigration(file) {
+export function migrationName(file: string) { return file.replace(/\.js$/, ''); }
+function loadMigration(file: string): Migration {
   const full = path.join(MIGRATIONS_DIR, file);
   delete require.cache[require.resolve(full)];
-  const migration = require(full);
+  const migration: Migration = require(full);
   if (!migration || typeof migration.up !== 'function' || typeof migration.down !== 'function') {
     throw new Error(`Migration '${file}' must export async up(schema) and down(schema).`);
   }
   return migration;
 }
 
-class MigrationRunner {
-  constructor(adapter) {
+export class MigrationRunner {
+  adapter: DatabaseAdapter;
+  schema: SchemaBuilder;
+  constructor(adapter: DatabaseAdapter) {
     this.adapter = adapter;
     this.schema = new SchemaBuilder(adapter);
   }
@@ -38,7 +43,7 @@ class MigrationRunner {
 
   async executed() {
     await this.ensureTable();
-    return this.adapter.queryAll('SELECT id, migration, batch, executed_at FROM migrations ORDER BY id ASC');
+    return this.adapter.queryAll<MigrationRecord>('SELECT id, migration, batch, executed_at FROM migrations ORDER BY id ASC');
   }
 
   async inspectSource() {
@@ -56,7 +61,7 @@ class MigrationRunner {
       };
     }
 
-    const executed = await this.adapter.queryAll('SELECT migration FROM migrations ORDER BY id ASC');
+    const executed = await this.adapter.queryAll<{migration: string}>('SELECT migration FROM migrations ORDER BY id ASC');
     const ran = new Set(executed.map(row => String(row.migration)));
     const pending = files.map(migrationName).filter(name => !ran.has(name));
     return {
@@ -100,16 +105,16 @@ class MigrationRunner {
     return { batch, ran: completed };
   }
 
-  async rollback({ steps = null } = {}) {
+  async rollback({ steps = null }: {steps?: number | null} = {}) {
     await this.ensureTable();
-    let rows = [];
+    let rows: {migration: string}[] = [];
     if (steps !== null && steps !== undefined) {
       const count = Math.max(1, Number(steps) || 1);
-      rows = await this.adapter.queryAll('SELECT migration FROM migrations ORDER BY id DESC LIMIT ?', [count]);
+      rows = await this.adapter.queryAll<{migration: string}>('SELECT migration FROM migrations ORDER BY id DESC LIMIT ?', [count]);
     } else {
-      const latest = await this.adapter.queryOne('SELECT MAX(batch) AS batch FROM migrations');
+      const latest = await this.adapter.queryOne<{batch: number | null}>('SELECT MAX(batch) AS batch FROM migrations');
       if (latest?.batch !== null && latest?.batch !== undefined) {
-        rows = await this.adapter.queryAll('SELECT migration FROM migrations WHERE batch = ? ORDER BY id DESC', [latest.batch]);
+        rows = await this.adapter.queryAll<{migration: string}>('SELECT migration FROM migrations WHERE batch = ? ORDER BY id DESC', [latest.batch]);
       }
     }
 
@@ -126,7 +131,7 @@ class MigrationRunner {
 
   async reset() {
     await this.ensureTable();
-    const rows = await this.adapter.queryAll('SELECT migration FROM migrations ORDER BY id DESC');
+    const rows = await this.adapter.queryAll<{migration: string}>('SELECT migration FROM migrations ORDER BY id DESC');
     const rolledBack = [];
     for (const row of rows) {
       const file = `${row.migration}.js`;
@@ -140,13 +145,10 @@ class MigrationRunner {
 
   async fresh({ allowDestructive = false } = {}) {
     if (!allowDestructive) {
-      const error = new Error('Fresh migration is destructive and requires explicit allowDestructive=true.');
-      error.code = 'DESTRUCTIVE_MIGRATION_BLOCKED';
+      const error = Object.assign(new Error('Fresh migration is destructive and requires explicit allowDestructive=true.'), {code: 'DESTRUCTIVE_MIGRATION_BLOCKED'});
       throw error;
     }
     await this.reset();
     return this.migrate();
   }
 }
-
-module.exports = { MigrationRunner, migrationFiles, migrationName };

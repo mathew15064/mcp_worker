@@ -1,5 +1,6 @@
-module.exports = {
-  async up(schema) {
+import type { SchemaBuilder } from '../schemaBuilder';
+const migration = {
+  async up(schema: SchemaBuilder) {
     await schema.createTable('worker_enrollment_tokens', table => {
       table.uuid('id').primary();
       table.string('token_hash', 64);
@@ -10,7 +11,8 @@ module.exports = {
       table.index('expires_at', 'idx_worker_enrollment_expires');
     });
   },
-  async down(schema) {
+  async down(schema: SchemaBuilder) {
     await schema.dropTable('worker_enrollment_tokens');
   }
 };
+export = migration;

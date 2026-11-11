@@ -1,5 +1,6 @@
-module.exports = {
-  async up(schema) {
+import type { SchemaBuilder } from '../schemaBuilder';
+const migration = {
+  async up(schema: SchemaBuilder) {
     await schema.table('workers', table => {
       table.addString('owner_user_id', 96, { nullable: true });
     });
@@ -12,7 +13,7 @@ module.exports = {
     await schema.adapter.exec('ALTER TABLE `worker_enrollment_tokens` ADD CONSTRAINT `fk_worker_enrollment_owner_user` FOREIGN KEY (`owner_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE');
     await schema.adapter.exec("UPDATE `mcp_oauth_clients` SET `allowed_scopes_json` = JSON_ARRAY('bot_report.read', 'bot_report.terminal', 'offline_access') WHERE `owner_user_id` IS NOT NULL");
   },
-  async down(schema) {
+  async down(schema: SchemaBuilder) {
     await schema.adapter.exec("UPDATE `mcp_oauth_clients` SET `allowed_scopes_json` = JSON_ARRAY('bot_report.read', 'offline_access') WHERE `owner_user_id` IS NOT NULL");
     await schema.adapter.exec('ALTER TABLE `worker_enrollment_tokens` DROP FOREIGN KEY `fk_worker_enrollment_owner_user`');
     await schema.adapter.exec('ALTER TABLE `workers` DROP FOREIGN KEY `fk_workers_owner_user`');
@@ -26,3 +27,4 @@ module.exports = {
     });
   }
 };
+export = migration;

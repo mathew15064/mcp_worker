@@ -1,5 +1,6 @@
-module.exports = {
-  async up(schema) {
+import type { SchemaBuilder } from '../schemaBuilder';
+const migration = {
+  async up(schema: SchemaBuilder) {
     await schema.createTable('mcp_oauth_authorization_codes', table => {
       table.string('id', 96).primary();
       table.string('code_hash', 128).unique();
@@ -48,9 +49,10 @@ module.exports = {
       table.index('client_id', 'idx_mcp_refresh_tokens_client');
     });
   },
-  async down(schema) {
+  async down(schema: SchemaBuilder) {
     await schema.dropTable('mcp_oauth_refresh_tokens');
     await schema.dropTable('mcp_oauth_access_tokens');
     await schema.dropTable('mcp_oauth_authorization_codes');
   }
 };
+export = migration;
