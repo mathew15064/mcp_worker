@@ -7,7 +7,7 @@ class MemorySettings {
   values: Map<string, string>;
   constructor() { this.values = new Map<string, string>(); }
   async get<T = null>(key: string, fallback: T | null = null): Promise<string | T | null> { return this.values.get(key) ?? fallback; }
-  async set(key: string, value: unknown) { this.values.set(key, String(value ?? '')); }
+  async set(key: string, value: unknown) { this.values.set(key, String(value ?? '')); return {changes: 1, insertId: null}; }
 }
 
 const secrets = {

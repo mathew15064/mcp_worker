@@ -16,7 +16,12 @@ function visit(dir) {
     if (ent.name === 'node_modules' || ent.name === 'dist') continue;
     const file = path.join(dir, ent.name);
     if (ent.isDirectory()) { visit(file); continue; }
-    if (!ent.isFile() || !file.endsWith('.ts')) continue;
+    if (!ent.isFile()) continue;
+    if (file.endsWith('.js') && dir !== path.join(root, 'tests') && !file.split(path.sep).includes('tests')) {
+      console.error('Unmigrated production JavaScript source: ' + path.relative(root, file));
+      violations++;
+    }
+    if (!file.endsWith('.ts')) continue;
     const name = path.relative(root, file).split(path.sep).join('/');
     const source = fs.readFileSync(file, 'utf8');
     checked++;
