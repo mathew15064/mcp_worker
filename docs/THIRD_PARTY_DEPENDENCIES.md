@@ -1,22 +1,47 @@
 # Third-party dependency review — V2 public preparation
 
-This is an inventory and provenance review, not a license grant for mcp_worker.
-The new source repository uses its owner-provided MIT LICENSE; package
-metadata is aligned. Third-party distribution notices still require review.
+This is a **candidate inventory and provenance review**, not a license grant
+or sign-off for distribution. The repository's owner-provided MIT LICENSE
+covers this project's code, not third-party dependencies. Original copyright
+and license notices still need to accompany applicable binaries and images.
 
-## Node.js
+## Node.js (verified against TS6.3 lockfile on 2026-11-11)
 
-The root npm lock contains 160 non-root entries, all with integrity hashes and
-tarball URLs at registry.npmjs.org. The legacy Worker lock contains three MIT
-entries with integrity hashes and the same registry origin.
+The root `package-lock.json` lists **262 non-root entries**: **156 runtime/non-dev**
+and **106 dev-only**. All 262 declare an `integrity` hash and a
+`registry.npmjs.org` resolved tarball URL. For the reproducible runtime
+package/version/license metadata, regenerate
+[the candidate inventory](THIRD_PARTY_RUNTIME_INVENTORY.md) with
+`node scripts/generate-third-party-inventory.cjs > docs/THIRD_PARTY_RUNTIME_INVENTORY.md`.
 
-Root lock license declarations: MIT 131, Apache-2.0 6, BSD-3-Clause 5, ISC 10,
-BSD-2-Clause 2, MIT OR WTFPL 1, BSD-2-Clause OR MIT OR Apache-2.0 1,
-Unlicense 1, missing declaration 3. Installed LICENSE files for the three
-undeclared entries (ssh2 1.16.0, buildcheck 0.0.7 and cpu-features 0.0.10)
-contain MIT permission terms. expand-template 2.0.3 ships an MIT LICENSE;
-tweetnacl 0.14.5 ships the Unlicense. Preserve the original copyright and
-license texts when distributing dependencies.
+Runtime license declarations (156 entries):
+
+| Declared license family | Runtime count |
+| --- | ---: |
+| MIT | 130 |
+| Apache-2.0 | 3 |
+| BSD-3-Clause | 5 |
+| BSD-2-Clause | 2 |
+| ISC | 10 |
+| MIT OR WTFPL | 1 |
+| BSD-2-Clause OR MIT OR Apache-2.0 | 1 |
+| Unlicense | 1 |
+| Missing lockfile license field | 3 |
+
+For all 262 entries including dev-only dependencies the counts are MIT 210,
+Apache-2.0 19, BSD-3-Clause 6, BSD-2-Clause 8, ISC 12, MIT OR WTFPL 1,
+BSD-2-Clause OR MIT OR Apache-2.0 1, Unlicense 1, BlueOak-1.0.0 1
+(`minimatch` 10.2.6; dev-only), and missing metadata 3.
+
+The three missing lockfile license declarations are `ssh2` 1.16.0,
+`buildcheck` 0.0.7 and `cpu-features` 0.0.10. Their installed runtime
+package directories include LICENSE files containing MIT permission terms.
+`expand-template` 2.0.3 has an MIT LICENSE; `tweetnacl` 0.14.5 includes
+the Unlicense. A declared SPDX value does not substitute for the
+corresponding actual license/copyright text or manual review.
+
+The legacy Node Worker lockfile has three MIT entries; native Go Worker is
+the supported default. Audit both when distributing either implementation.
 
 ## Go Worker
 
@@ -27,28 +52,22 @@ license texts when distributing dependencies.
 | golang.org/x/term | v0.36.0 | BSD-3-Clause |
 | golang.org/x/sys | v0.37.0 | BSD-3-Clause |
 
-The module source LICENSE files were reviewed; go mod verify passed.
-Go binaries incorporate Go runtime and module code: retain applicable notices
-when publishing binaries. Docker base images (Node, Alpine, Go builder, MySQL)
-also have their own terms and component notices; this lockfile inventory is not
-a full image SBOM or distribution-compliance determination.
+Module LICENSE files and `go mod verify` were checked in prior preparation.
+Final distributed Go binaries must include notices applicable to these
+modules and to incorporated Go runtime code.
 
-## Publication gates still outstanding
+## Images and database derivative
 
-- Owner review of copyright attribution and third-party
-  notice bundle (including binary/image distributions).
-- Independent secret scanner and review of the new source-only history.
-  The original development history is not imported.
-- Release-time dependency and image vulnerability scans and SBOM.
+Docker base images, Node/npm, Alpine and the Go builder have their own terms
+and components; the npm lockfile does **not** inventory the full image.
+The standalone database image retains MySQL Community Server 8.4 base and
+entrypoint, removes optional mysql-shell and builds gosu 1.19 from pinned
+upstream commit `6456aaa0f3c854d199d0f037f068eb97515b7513`. The gosu
+LICENSE is copied into the image. The Node npm CLI is upgraded to 11.21.2
+from an integrity-verified registry tarball.
 
-Dependency license terms are unchanged.
-
-## Bundled MySQL security derivative
-
-The standalone database image retains the pinned MySQL Community Server 8.4
-base and entrypoint. The optional mysql-shell RPM is removed. gosu 1.19 is
-built from upstream commit 6456aaa0f3c854d199d0f037f068eb97515b7513 with verified
-Go module checksums; its upstream LICENSE is copied into the database image.
-The Node runtime npm CLI is upgraded to 11.21.2 from an integrity-verified
-registry tarball. Image distribution and corresponding license/source notice
-obligations remain subject to the owner release review.
+**Unresolved release blockers:** owner/legal review of required attribution,
+the complete license/notice bundle for both images and eight Worker binaries,
+and any MySQL derivative distribution/corresponding-source obligations.
+Keep final artifact SBOM and vulnerability checks, independent source/history
+audit, signing, and distribution approval as separate mandatory gates.
