@@ -11,7 +11,7 @@ It does not change the current production installation or authorize publishing.
 | P1 | Deployment profile validation and runtime ports | P0 | Initial implementation |
 | P2 | Production SQLite local mode, migrations, backups | P1 | Pending |
 | P3 | Remote libSQL adapter and migrations | P1 | Adapter, 13 migrations, encrypted shared sessions and cross-instance OAuth tested locally; remote Turso / Vercel wiring pending |
-| P4 | Vercel Express entrypoint, persistent sessions and OAuth | P3 | Authenticated DB-only Preview probe and guarded disposable-schema CLI implemented; real Express/OAuth/MCP runtime pending |
+| P4 | Vercel Express entrypoint, persistent sessions and OAuth | P3 | Scoped libSQL OAuth/session runtime tested; real Express routes, claim-once bootstrap and HTTPS E2E pending |
 | P5 | SandboxExecutionBackend and workspace lifecycle | P4 | Pending |
 | P6 | Durable external Worker jobs, reconnect and streaming | P4 | Pending |
 | P7 | Deploy Button, safe owner claim, onboarding | P4/P5 | Pending |
