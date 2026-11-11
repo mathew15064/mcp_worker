@@ -1,28 +1,40 @@
-const crypto = require('crypto');
-const databaseManager = require('../db/databaseManager');
-const { SqliteAdapter } = require('../db/adapters/sqliteAdapter');
+type Strings = string | string[];
+interface ClientRow { id: string; client_id: string; redirect_uris_json: string; allowed_scopes_json: string; principal_id: string; profile_id: string | null; owner_user_id: string | null; status: string }
+interface TokenRow { id: string; scopes_json: string; client_id: string; principal_id: string; resource: string; expires_at: string; revoked_at?: string | null; client_status?: string; owner_user_id?: string | null; owner_user_status?: string | null; profile_id?: string | null; client_name?: string | null }
+interface TokenInput { id?: string | null; tokenHash: string; clientId: string; principalId: string; resource: string; scopes?: Strings; expiresAt: string }
+interface RefreshInput extends TokenInput {tokenFamilyId: string}
+interface ClientInput {id?: string | null; clientId: string; clientSecretHash: string; displayName: string; principalId: string; profileId: string | null; ownerUserId?: string | null; redirectUris?: Strings; allowedScopes?: Strings; status?: string}
+interface CodeInput {id?: string | null; codeHash: string; clientId: string; userId: string; principalId: string; redirectUri: string; resource: string; scopes?: Strings; codeChallenge: string; codeChallengeMethod?: string; expiresAt: string}
+interface AuditInput {id?: string | null; requestId: string; clientId?: string | null; principalId?: string | null; actorId?: string | null; mcpMethod: string; toolName?: string | null; result: string; httpStatus: number; durationMs: number; requestPayload?: string | null; responsePayload?: string | null; requestTruncated?: boolean; responseTruncated?: boolean}
+interface AuditFilter {clientId?: string; toolName?: string; result?: string; query?: string; limit?: number; offset?: number}
+import crypto from 'node:crypto';
+import type { DatabaseAdapter } from '../db/contracts';
+import type Database from 'better-sqlite3';
+const databaseManager: { requireAdapter(): DatabaseAdapter } = require('../db/databaseManager');
+import { SqliteAdapter } from '../db/adapters/sqliteAdapter';
 
-function hydrateScopes(row) {
+function hydrateScopes(row: TokenRow | null) {
   if (!row) return null;
-  let scopes = [];
+  let scopes: string[] = [];
   try { scopes = JSON.parse(row.scopes_json || '[]'); } catch (_) {}
   return { ...row, scopes };
 }
 
 class McpOAuthRepository {
-  constructor(db = null) { this._db = db && typeof db.prepare === 'function' ? new SqliteAdapter(db) : db; }
+  private _db: DatabaseAdapter | null;
+  constructor(db: DatabaseAdapter | Database.Database | null = null) { this._db = db && "prepare" in db ? new SqliteAdapter(db) : db; }
   get db() { return this._db || databaseManager.requireAdapter(); }
 
-  _hydrateClient(row) {
+  _hydrateClient(row: ClientRow | null) {
     if (!row) return null;
-    let redirectUris = [];
-    let allowedScopes = [];
+    let redirectUris: string[] = [];
+    let allowedScopes: string[] = [];
     try { redirectUris = JSON.parse(row.redirect_uris_json || '[]'); } catch (_) {}
     try { allowedScopes = JSON.parse(row.allowed_scopes_json || '[]'); } catch (_) {}
     return { ...row, redirect_uris: redirectUris, allowed_scopes: allowedScopes };
   }
 
-  async createClient({ id = null, clientId, clientSecretHash, displayName, principalId, profileId, ownerUserId = null, redirectUris = [], allowedScopes = [], status = 'active' }) {
+  async createClient({ id = null, clientId, clientSecretHash, displayName, principalId, profileId, ownerUserId = null, redirectUris = [], allowedScopes = [], status = 'active' }: ClientInput) {
     const recordId = id || `client_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
     await this.db.execute(`INSERT INTO mcp_oauth_clients
@@ -33,45 +45,45 @@ class McpOAuthRepository {
     return this.findClientById(recordId);
   }
 
-  async findClientByClientId(clientId) {
+  async findClientByClientId(clientId: string) {
     if (!clientId) return null;
-    return this._hydrateClient(await this.db.queryOne(`SELECT c.*, u.status AS owner_user_status
+    return this._hydrateClient(await this.db.queryOne<ClientRow>(`SELECT c.*, u.status AS owner_user_status
       FROM mcp_oauth_clients c LEFT JOIN users u ON u.id = c.owner_user_id WHERE c.client_id = ?`, [clientId]));
   }
 
-  async findClientById(id) {
+  async findClientById(id: string) {
     if (!id) return null;
-    return this._hydrateClient(await this.db.queryOne('SELECT * FROM mcp_oauth_clients WHERE id = ?', [id]));
+    return this._hydrateClient(await this.db.queryOne<ClientRow>('SELECT * FROM mcp_oauth_clients WHERE id = ?', [id]));
   }
 
-  async findClientByIdForOwner(id, ownerUserId) {
+  async findClientByIdForOwner(id: string, ownerUserId: string) {
     if (!id || !ownerUserId) return null;
-    return this._hydrateClient(await this.db.queryOne('SELECT * FROM mcp_oauth_clients WHERE id = ? AND owner_user_id = ?', [id, ownerUserId]));
+    return this._hydrateClient(await this.db.queryOne<ClientRow>('SELECT * FROM mcp_oauth_clients WHERE id = ? AND owner_user_id = ?', [id, ownerUserId]));
   }
 
   async listClients() {
-    return (await this.db.queryAll('SELECT * FROM mcp_oauth_clients ORDER BY created_at DESC')).map(row => this._hydrateClient(row));
+    return (await this.db.queryAll<ClientRow>('SELECT * FROM mcp_oauth_clients ORDER BY created_at DESC')).map(row => this._hydrateClient(row));
   }
 
-  async listClientsByOwner(ownerUserId) {
+  async listClientsByOwner(ownerUserId: string) {
     if (!ownerUserId) return [];
-    return (await this.db.queryAll('SELECT * FROM mcp_oauth_clients WHERE owner_user_id = ? ORDER BY created_at DESC', [ownerUserId])).map(row => this._hydrateClient(row));
+    return (await this.db.queryAll<ClientRow>('SELECT * FROM mcp_oauth_clients WHERE owner_user_id = ? ORDER BY created_at DESC', [ownerUserId])).map(row => this._hydrateClient(row));
   }
 
-  async updateClientStatus(id, status) {
+  async updateClientStatus(id: string, status: string) {
     return this.db.execute('UPDATE mcp_oauth_clients SET status = ?, updated_at = ? WHERE id = ?', [status, new Date().toISOString(), id]);
   }
 
-  async updateClientSecret(id, newSecretHash) {
+  async updateClientSecret(id: string, newSecretHash: string) {
     return this.db.execute('UPDATE mcp_oauth_clients SET client_secret_hash = ?, updated_at = ? WHERE id = ?', [newSecretHash, new Date().toISOString(), id]);
   }
 
-  async recordClientAuthorization(clientId) {
+  async recordClientAuthorization(clientId: string) {
     const now = new Date().toISOString();
     return this.db.execute('UPDATE mcp_oauth_clients SET last_authorized_at = ?, updated_at = ? WHERE client_id = ?', [now, now, clientId]);
   }
 
-  async deleteClient(id) {
+  async deleteClient(id: string) {
     const client = await this.findClientById(id);
     if (!client) return { changes: 0 };
     return this.db.transaction(async tx => {
@@ -82,7 +94,7 @@ class McpOAuthRepository {
     });
   }
 
-  async createAuthCode({ id = null, codeHash, clientId, userId, principalId, redirectUri, resource, scopes = [], codeChallenge, codeChallengeMethod = 'S256', expiresAt }) {
+  async createAuthCode({ id = null, codeHash, clientId, userId, principalId, redirectUri, resource, scopes = [], codeChallenge, codeChallengeMethod = 'S256', expiresAt }: CodeInput) {
     const recordId = id || `code_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
     await this.db.execute(`INSERT INTO mcp_oauth_authorization_codes
@@ -92,16 +104,16 @@ class McpOAuthRepository {
     return this.findAuthCodeByHash(codeHash);
   }
 
-  async findAuthCodeByHash(codeHash) {
+  async findAuthCodeByHash(codeHash: string) {
     if (!codeHash) return null;
-    return hydrateScopes(await this.db.queryOne('SELECT * FROM mcp_oauth_authorization_codes WHERE code_hash = ?', [codeHash]));
+    return hydrateScopes(await this.db.queryOne<TokenRow>('SELECT * FROM mcp_oauth_authorization_codes WHERE code_hash = ?', [codeHash]));
   }
 
-  async markAuthCodeUsed(id) {
+  async markAuthCodeUsed(id: string) {
     return this.db.execute('UPDATE mcp_oauth_authorization_codes SET used_at = ? WHERE id = ? AND used_at IS NULL', [new Date().toISOString(), id]);
   }
 
-  async consumeAuthCodeAndIssueTokens({ codeId, accessToken, refreshToken = null }) {
+  async consumeAuthCodeAndIssueTokens({ codeId, accessToken, refreshToken = null }: {codeId: string; accessToken: TokenInput; refreshToken?: RefreshInput | null}) {
     const now = new Date().toISOString();
     return this.db.transaction(async tx => {
       const codeUpdate = await tx.execute('UPDATE mcp_oauth_authorization_codes SET used_at = ? WHERE id = ? AND used_at IS NULL', [now, codeId]);
@@ -123,7 +135,7 @@ class McpOAuthRepository {
     });
   }
 
-  async createAccessToken({ id = null, tokenHash, clientId, principalId, resource, scopes = [], expiresAt }) {
+  async createAccessToken({ id = null, tokenHash, clientId, principalId, resource, scopes = [], expiresAt }: TokenInput) {
     const recordId = id || `at_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
     await this.db.execute(`INSERT INTO mcp_oauth_access_tokens
@@ -133,9 +145,9 @@ class McpOAuthRepository {
     return this.findAccessTokenByHash(tokenHash);
   }
 
-  async findAccessTokenByHash(tokenHash) {
+  async findAccessTokenByHash(tokenHash: string) {
     if (!tokenHash) return null;
-    return hydrateScopes(await this.db.queryOne(`SELECT t.*, c.status AS client_status, c.profile_id, c.display_name AS client_name,
+    return hydrateScopes(await this.db.queryOne<TokenRow>(`SELECT t.*, c.status AS client_status, c.profile_id, c.display_name AS client_name,
       c.owner_user_id, u.status AS owner_user_status
       FROM mcp_oauth_access_tokens t
       JOIN mcp_oauth_clients c ON t.client_id = c.client_id
@@ -143,15 +155,15 @@ class McpOAuthRepository {
       WHERE t.token_hash = ?`, [tokenHash]));
   }
 
-  async revokeAccessToken(tokenHash) {
+  async revokeAccessToken(tokenHash: string) {
     return this.db.execute('UPDATE mcp_oauth_access_tokens SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL', [new Date().toISOString(), tokenHash]);
   }
 
-  async revokeAccessTokensByClientId(clientId) {
+  async revokeAccessTokensByClientId(clientId: string) {
     return this.db.execute('UPDATE mcp_oauth_access_tokens SET revoked_at = ? WHERE client_id = ? AND revoked_at IS NULL', [new Date().toISOString(), clientId]);
   }
 
-  async revokeAllTokensByClientId(clientId) {
+  async revokeAllTokensByClientId(clientId: string) {
     return this.db.transaction(async tx => {
       const now = new Date().toISOString();
       const access = await tx.execute('UPDATE mcp_oauth_access_tokens SET revoked_at = ? WHERE client_id = ? AND revoked_at IS NULL', [now, clientId]);
@@ -160,7 +172,7 @@ class McpOAuthRepository {
     });
   }
 
-  async recordAccessTokenUsage(id) {
+  async recordAccessTokenUsage(id: string) {
     return this.db.execute('UPDATE mcp_oauth_access_tokens SET last_used_at = ? WHERE id = ?', [new Date().toISOString(), id]);
   }
 
@@ -170,7 +182,7 @@ class McpOAuthRepository {
     return Number(row?.count || 0);
   }
 
-  async createRefreshToken({ id = null, tokenHash, tokenFamilyId, clientId, principalId, resource, scopes = [], expiresAt }) {
+  async createRefreshToken({ id = null, tokenHash, tokenFamilyId, clientId, principalId, resource, scopes = [], expiresAt }: RefreshInput) {
     const recordId = id || `rt_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
     await this.db.execute(`INSERT INTO mcp_oauth_refresh_tokens
@@ -180,9 +192,9 @@ class McpOAuthRepository {
     return this.findRefreshTokenByHash(tokenHash);
   }
 
-  async findRefreshTokenByHash(tokenHash) {
+  async findRefreshTokenByHash(tokenHash: string) {
     if (!tokenHash) return null;
-    return hydrateScopes(await this.db.queryOne(`SELECT r.*, c.status AS client_status, c.profile_id, c.owner_user_id,
+    return hydrateScopes(await this.db.queryOne<TokenRow>(`SELECT r.*, c.status AS client_status, c.profile_id, c.owner_user_id,
       u.status AS owner_user_status
       FROM mcp_oauth_refresh_tokens r
       JOIN mcp_oauth_clients c ON r.client_id = c.client_id
@@ -190,20 +202,20 @@ class McpOAuthRepository {
       WHERE r.token_hash = ?`, [tokenHash]));
   }
 
-  async revokeRefreshToken(tokenHash, replacedByHash = null) {
+  async revokeRefreshToken(tokenHash: string, replacedByHash: string | null = null) {
     return this.db.execute(`UPDATE mcp_oauth_refresh_tokens SET revoked_at = ?, replaced_by_hash = ?
       WHERE token_hash = ? AND revoked_at IS NULL`, [new Date().toISOString(), replacedByHash, tokenHash]);
   }
 
-  async revokeRefreshTokensByClientId(clientId) {
+  async revokeRefreshTokensByClientId(clientId: string) {
     return this.db.execute('UPDATE mcp_oauth_refresh_tokens SET revoked_at = ? WHERE client_id = ? AND revoked_at IS NULL', [new Date().toISOString(), clientId]);
   }
 
-  async revokeTokenFamily(tokenFamilyId) {
+  async revokeTokenFamily(tokenFamilyId: string) {
     return this.db.execute('UPDATE mcp_oauth_refresh_tokens SET revoked_at = ? WHERE token_family_id = ? AND revoked_at IS NULL', [new Date().toISOString(), tokenFamilyId]);
   }
 
-  async rotateRefreshTokenAndIssueAccess({ currentTokenHash, replacementRefreshToken, accessToken }) {
+  async rotateRefreshTokenAndIssueAccess({ currentTokenHash, replacementRefreshToken, accessToken }: {currentTokenHash: string; replacementRefreshToken: RefreshInput; accessToken: TokenInput}) {
     const now = new Date().toISOString();
     return this.db.transaction(async tx => {
       const rotated = await tx.execute(`UPDATE mcp_oauth_refresh_tokens SET revoked_at = ?, replaced_by_hash = ?
@@ -224,12 +236,12 @@ class McpOAuthRepository {
     });
   }
 
-  async recordRefreshTokenUsage(id) {
+  async recordRefreshTokenUsage(id: string) {
     return this.db.execute('UPDATE mcp_oauth_refresh_tokens SET last_used_at = ? WHERE id = ?', [new Date().toISOString(), id]);
   }
 
   async recordAudit({ id = null, requestId, clientId = null, principalId = null, actorId = null, mcpMethod, toolName = null, result, httpStatus, durationMs,
-    requestPayload = null, responsePayload = null, requestTruncated = false, responseTruncated = false }) {
+    requestPayload = null, responsePayload = null, requestTruncated = false, responseTruncated = false }: AuditInput) {
     const recordId = id || `aud_${crypto.randomUUID()}`;
     return this.db.execute(`INSERT INTO mcp_request_audit
       (id, request_id, client_id, principal_id, actor_id, mcp_method, tool_name, result, http_status, duration_ms,
@@ -238,7 +250,7 @@ class McpOAuthRepository {
       result, httpStatus, durationMs, requestPayload, responsePayload, requestTruncated ? 1 : 0, responseTruncated ? 1 : 0, new Date().toISOString()]);
   }
 
-  buildAuditFilter({ clientId = '', toolName = '', result = '', query = '' } = {}) {
+  buildAuditFilter({ clientId = '', toolName = '', result = '', query = '' }: AuditFilter = {}) {
     const clauses = [];
     const params = [];
     if (clientId) { clauses.push('a.client_id = ?'); params.push(clientId); }
@@ -253,7 +265,7 @@ class McpOAuthRepository {
     return { where: clauses.length ? `WHERE ${clauses.join(' AND ')}` : '', params };
   }
 
-  async listAuditLogs({ limit = 50, offset = 0, clientId = '', toolName = '', result = '', query = '' } = {}) {
+  async listAuditLogs({ limit = 50, offset = 0, clientId = '', toolName = '', result = '', query = '' }: AuditFilter = {}) {
     const filter = this.buildAuditFilter({ clientId, toolName, result, query });
     const safeLimit = Math.min(500, Math.max(1, Number(limit) || 50));
     const safeOffset = Math.max(0, Number(offset) || 0);
@@ -264,13 +276,13 @@ class McpOAuthRepository {
       ${filter.where} ORDER BY a.created_at DESC LIMIT ${safeLimit} OFFSET ${safeOffset}`, filter.params);
   }
 
-  async findAuditLogById(id) {
+  async findAuditLogById(id: string) {
     return this.db.queryOne(`SELECT a.*, c.display_name AS client_display_name
       FROM mcp_request_audit a LEFT JOIN mcp_oauth_clients c ON c.client_id = a.client_id
       WHERE a.id = ? LIMIT 1`, [id]);
   }
 
-  async countAuditLogs({ clientId = '', toolName = '', result = '', query = '' } = {}) {
+  async countAuditLogs({ clientId = '', toolName = '', result = '', query = '' }: AuditFilter = {}) {
     const filter = this.buildAuditFilter({ clientId, toolName, result, query });
     const row = await this.db.queryOne(`SELECT COUNT(*) AS total FROM mcp_request_audit a
       LEFT JOIN mcp_oauth_clients c ON c.client_id = a.client_id ${filter.where}`, filter.params);
@@ -298,5 +310,5 @@ class McpOAuthRepository {
   }
 }
 
-module.exports = new McpOAuthRepository();
-module.exports.McpOAuthRepository = McpOAuthRepository;
+const instance = Object.assign(new McpOAuthRepository(), {McpOAuthRepository});
+export = instance;
