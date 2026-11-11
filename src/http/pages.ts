@@ -1,4 +1,19 @@
-function escapeHtml(value) {
+/* Typed HTML rendering contract. Every dynamic value is escaped at the output boundary. */
+type HtmlValue = unknown;
+interface PageUser { id?: string; username: string; display_name?: string | null; email?: string | null; principal_id?: string | null; profile_id?: string | null; status?: string; last_login_at?: string | null }
+interface PageClient {id: string; client_id: string; display_name: string; principal_id: string; status: string; allowed_scopes: string[]; redirect_uris: string[]; last_authorized_at?: string | null; owner_user_id?: string | null; profile_id?: string | null}
+interface PageProfile {id: string; name: string; worker_id: string; enabled: number | boolean; description?: string | null; worker_name?: string | null; worker_enabled?: number | boolean; worker_status?: string | null}
+interface PageWorker {id: string; name: string; enabled: number | boolean; status?: string; last_seen_at?: string | null; capabilities?: string[]; owner_user_id?: string | null; owner_display_name?: string | null; owner_username?: string | null}
+interface PageSecret {clientId: string; clientSecret: string}
+interface PageTelegram {enabled: boolean; hasToken: boolean; chatId: string}
+interface PageRuntime {version: string; gitSha?: string | null; buildTime?: string | null; startedAt?: string | null; nodeEnv?: string; toolCount: number}
+interface PageStorage {state: string; operational?: boolean; mysql?: {version?: string; host?: string; port?: number; database?: string; username?: string; hasPassword?: boolean; ssl?: boolean} | null; source?: {initialized?: boolean; pending?: unknown[]} | null; lastError?: {message?: string} | null}
+interface PageAudit {id: string; request_id?: string; result: string; client_display_name?: string | null; client_id?: string | null; created_at?: string | null; request_truncated?: boolean; response_truncated?: boolean; mcp_method?: string | null; tool_name?: string | null; http_status?: number; duration_ms?: number}
+interface PageFilters {query: string; clientId: string; toolName: string; result: string}
+interface PageMcp {enabled: boolean; publicBaseUrl: string; accessTokenTtlSeconds: number; refreshTokenTtlSeconds: number; authCodeTtlSeconds: number; rateLimitPerMinute: number}
+interface PageShell {admin?: boolean; accountUser?: PageUser | null; active?: string; settingsSection?: string; csrfToken?: string; breadcrumb?: string; extraHead?: string; extraScripts?: string}
+interface PageFlash {csrfToken: string; success?: string; error?: string}
+function escapeHtml(value: HtmlValue) {
   return String(value ?? '')
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
@@ -7,8 +22,8 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
-function icon(name) {
-  const paths = {
+function icon(name: string) {
+  const paths: Record<string, string> = {
     dashboard: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
     key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m12 12 9-9m-3 3 3 3m-6 0 3 3"/>',
     terminal: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>',
@@ -37,11 +52,11 @@ function icon(name) {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.server}</svg>`;
 }
 
-function navLink(active, key, href, label, iconName) {
+function navLink(active: string, key: string, href: string, label: string, iconName: string) {
   return `<a class="nav-link ${active === key ? 'active' : ''}" href="${href}" aria-current="${active === key ? 'page' : 'false'}" title="${escapeHtml(label)}">${icon(iconName)}<span>${escapeHtml(label)}</span></a>`;
 }
 
-function settingsSubnav(activeSection = '') {
+function settingsSubnav(activeSection: string = '') {
   const items = [
     ['database', 'Database', 'database'],
     ['mcp', 'MCP', 'server'],
@@ -55,16 +70,16 @@ function confirmModal() {
   return `<div id="confirm-modal" class="modal-backdrop" aria-hidden="true"><div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message"><div class="modal-header"><h2 id="confirm-title">Confirm action</h2><p id="confirm-message">Are you sure?</p></div><div class="modal-footer"><button type="button" class="btn" data-modal-close>Cancel</button><button id="confirm-action" type="button" class="btn btn-primary">Continue</button></div></div></div>`;
 }
 
-function flashData(success = '', error = '') {
+function flashData(success: string = '', error: string = '') {
   return `<div id="flash-data" hidden data-success="${escapeHtml(success)}" data-error="${escapeHtml(error)}"></div>`;
 }
 
-function accountProfileModal(user, csrfToken) {
+function accountProfileModal(user: PageUser | null, csrfToken: string) {
   if (!user) return '';
   return `<div id="account-profile-modal" class="modal-backdrop" aria-hidden="true"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="account-profile-title" aria-describedby="account-profile-description"><div class="modal-header"><h2 id="account-profile-title">My Profile</h2><p id="account-profile-description">Manage your mcp_worker account and password without leaving the current workspace.</p></div><div class="modal-body"><div class="stack"><form method="post" action="/account/profile" class="stack" data-disable-on-submit><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><input type="hidden" name="return_to" value="" data-account-return-to><div class="form-grid"><div class="field"><label for="account-profile-username">Username</label><input id="account-profile-username" value="${escapeHtml(user.username)}" disabled></div><div class="field"><label for="account-profile-display-name">Display name</label><input id="account-profile-display-name" name="display_name" value="${escapeHtml(user.display_name || user.username)}" required maxlength="120"></div><div class="field full"><label for="account-profile-email">Email</label><input id="account-profile-email" name="email" type="email" value="${escapeHtml(user.email || '')}" maxlength="254"></div></div><div class="modal-inline-actions"><button class="btn btn-primary" type="submit">Save Profile</button></div></form><div class="modal-section-divider"></div><form method="post" action="/account/password" class="stack" data-disable-on-submit><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><input type="hidden" name="return_to" value="" data-account-return-to><div><strong>Security</strong><div class="hint">Changing your password revokes all existing login sessions.</div></div><div class="field"><label for="account-profile-new-password">New password</label><input id="account-profile-new-password" name="password" type="password" minlength="10" maxlength="256" autocomplete="new-password" required></div><div class="modal-inline-actions"><button class="btn" type="submit">Change Password</button></div></form><div class="migration-note"><strong>Client identity</strong><span class="mono">${escapeHtml(user.principal_id)} · ${escapeHtml(user.profile_id)}</span></div></div></div><div class="modal-footer"><button class="btn" type="button" data-modal-close>Close</button></div></div></div>`;
 }
 
-function shell(title, body, { admin = false, accountUser = null, active = '', settingsSection = '', csrfToken = '', breadcrumb = '', extraHead = '', extraScripts = '' } = {}) {
+function shell(title: string, body: string, { admin = false, accountUser = null, active = '', settingsSection = '', csrfToken = '', breadcrumb = '', extraHead = '', extraScripts = '' }: PageShell = {}) {
   const head = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light"><title>${escapeHtml(title)}</title><link rel="stylesheet" href="/assets/admin.css">${extraHead}</head><body>`;
   if (!admin) return `${head}${body}<div id="toast-stack" class="toast-stack"></div><script src="/assets/admin.js" defer></script>${extraScripts}</body></html>`;
   const nav = accountUser
@@ -74,25 +89,25 @@ function shell(title, body, { admin = false, accountUser = null, active = '', se
   return `${head}<div class="app-shell">${nav}<div class="main">${top}<main class="content">${body}</main></div></div>${accountUser ? accountProfileModal(accountUser, csrfToken) : ''}${confirmModal()}<div id="toast-stack" class="toast-stack" aria-live="polite" aria-atomic="true"></div><script src="/assets/admin.js" defer></script>${extraScripts}</body></html>`;
 }
 
-function pageHeader(title, description, action = '') {
+function pageHeader(title: string, description: string, action: string = '') {
   return `<div class="page-header"><div><h1 class="page-title">${escapeHtml(title)}</h1><p class="page-description">${escapeHtml(description)}</p></div>${action}</div>`;
 }
 
-function loginPage({ csrfToken = '', error = '', username = '', returnTo = '' } = {}) {
+function loginPage({ csrfToken = '', error = '', username = '', returnTo = '' }: {csrfToken?: string; error?: string; username?: string; returnTo?: string} = {}) {
   return shell('mcp_worker Login', `<div class="login-shell"><div class="login-card"><div class="login-brand"><div class="brand-mark">MW</div><div><strong>mcp_worker</strong><div class="hint">Secure MCP Access</div></div></div><h1>Welcome back</h1><p>Sign in with your mcp_worker account.</p>${error ? `<div class="alert alert-error" role="alert">${escapeHtml(error)}</div>` : ''}<form method="post" action="/login" class="stack" data-disable-on-submit><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><input type="hidden" name="returnTo" value="${escapeHtml(returnTo)}"><div class="field"><label for="login-username">Username</label><input id="login-username" name="username" autocomplete="username" value="${escapeHtml(username)}" required autofocus></div><div class="field"><label for="login-password">Password</label><input id="login-password" type="password" name="password" autocomplete="current-password" required></div><button class="btn btn-primary" type="submit">Sign in</button></form></div></div>`);
 }
 
-function oauthConsentPage({ client, redirectUri, resource, scopes, state, codeChallenge, codeChallengeMethod, csrfToken = '' }) {
+function oauthConsentPage({ client, redirectUri, resource, scopes, state, codeChallenge, codeChallengeMethod, csrfToken = '' }: {client: Pick<PageClient,'client_id'|'display_name'>; redirectUri: string; resource: string; scopes: string[]; state?: string; codeChallenge: string; codeChallengeMethod: string; csrfToken?: string}) {
   const hidden = { client_id: client.client_id, redirect_uri: redirectUri, scope: scopes.join(' '), state: state || '', code_challenge: codeChallenge, code_challenge_method: codeChallengeMethod, resource };
   const fields = Object.entries(hidden).map(([name, value]) => `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`).join('');
   return shell('Authorize MCP Access', `<div class="login-shell"><div class="login-card"><div class="login-brand"><div class="brand-mark">MW</div><div><strong>mcp_worker</strong><div class="hint">OAuth authorization</div></div></div><h1>Authorize access</h1><p><strong>${escapeHtml(client.display_name)}</strong> wants to access mcp_worker.</p><div class="section" style="margin:18px 0"><div class="section-body"><div class="definition-label">Resource</div><div class="definition-value mono">${escapeHtml(resource)}</div><div class="definition-label" style="margin-top:14px">Scopes</div><div>${scopes.map(scope => `<span class="code-chip">${escapeHtml(scope)}</span>`).join('')}</div></div></div><form method="post" action="/oauth/authorize">${fields}<input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" type="submit" name="action" value="deny">Deny</button><button class="btn btn-primary" type="submit" name="action" value="allow">Allow access</button></div></form></div></div>`);
 }
 
-function statCard(label, value, foot, iconName) {
+function statCard(label: string, value: HtmlValue, foot: string, iconName: string) {
   return `<div class="card"><div class="stat-head"><span>${escapeHtml(label)}</span>${icon(iconName)}</div><div class="stat-value">${escapeHtml(value)}</div><div class="stat-foot">${escapeHtml(foot)}</div></div>`;
 }
 
-function adminOverviewPage({ runtime, clients, terminals, telegram, endpoint, storage = {}, csrfToken, success = '', error = '' }) {
+function adminOverviewPage({ runtime, clients, terminals, telegram, endpoint, storage, csrfToken, success = '', error = '' }: {runtime: PageRuntime; clients: PageClient[]; terminals: PageProfile[]; telegram: PageTelegram; endpoint: string; storage: PageStorage; csrfToken: string; success?: string; error?: string}) {
   const activeClients = clients.filter(c => c.status === 'active').length;
   const enabledTerminals = terminals.filter(t => t.enabled).length;
   const startedAt = runtime.startedAt || 'unknown';
@@ -114,7 +129,7 @@ function adminOverviewPage({ runtime, clients, terminals, telegram, endpoint, st
   return shell('Overview — mcp_worker', body, { admin:true, active:'overview', csrfToken, breadcrumb:'Overview' });
 }
 
-function onboardingPage({ storage, ready, workerReady, clientReady, firstCall, enabled, baseUrl, csrfToken }) {
+function onboardingPage({ storage, ready, workerReady, clientReady, firstCall, enabled, baseUrl, csrfToken }: {storage: PageStorage; ready: boolean; workerReady: boolean; clientReady: boolean; firstCall: boolean; enabled: boolean; baseUrl: string; csrfToken: string}) {
   let mode = 'unsafe';
   try {
     const url = new URL(baseUrl);
@@ -141,12 +156,12 @@ function onboardingPage({ storage, ready, workerReady, clientReady, firstCall, e
   return shell('Getting Started — mcp_worker', body, { admin:true, active:'onboarding', csrfToken, breadcrumb:'Getting Started' });
 }
 
-function secretModal(secret) {
+function secretModal(secret: PageSecret | null) {
   if (!secret) return '';
   return `<div id="secret-modal" class="modal-backdrop" data-auto-open="true" data-static="true" aria-hidden="true"><div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="secret-modal-title" aria-describedby="secret-modal-description"><div class="modal-header"><h2 id="secret-modal-title">Client secret created</h2><p id="secret-modal-description">Copy this secret now. It will not be shown again.</p></div><div class="modal-body"><div class="secret-warning">${icon('shield')}<div>Only the SHA-256 hash is persisted. Store the secret in your client configuration before closing.</div></div><div class="field"><span class="field-label">Client ID</span><div class="copy-row"><div id="new-client-id" class="secret-box" style="flex:1">${escapeHtml(secret.clientId)}</div><button class="btn btn-icon" type="button" data-copy-target="new-client-id" aria-label="Copy Client ID">${icon('copy')}</button></div></div><div class="field" style="margin-top:14px"><span class="field-label">Client Secret</span><div class="copy-row"><div id="new-client-secret" class="secret-box" style="flex:1">${escapeHtml(secret.clientSecret)}</div><button class="btn btn-icon" type="button" data-copy-target="new-client-secret" aria-label="Copy Client Secret">${icon('copy')}</button></div></div></div><div class="modal-footer"><button class="btn btn-primary" type="button" data-modal-close>I've saved the secret</button></div></div></div>`;
 }
 
-function oauthClientCreateModal({ id, action, csrfToken, mcpUrl, personal = false, firstCall = '' }) {
+function oauthClientCreateModal({ id, action, csrfToken, mcpUrl, personal = false, firstCall = '' }: {id: string; action: string; csrfToken: string; mcpUrl: string; personal?: boolean; firstCall?: string}) {
   const titleId = `${id}-title`;
   const descriptionId = `${id}-description`;
   const nameId = `${id}-name`;
@@ -161,17 +176,17 @@ function oauthClientCreateModal({ id, action, csrfToken, mcpUrl, personal = fals
   return `<div id="${escapeHtml(id)}" class="modal-backdrop" aria-hidden="true"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="${escapeHtml(titleId)}" aria-describedby="${escapeHtml(descriptionId)}"><div class="modal-header"><h2 id="${escapeHtml(titleId)}">New OAuth Client</h2><p id="${escapeHtml(descriptionId)}">${personal ? 'Create a client bound to your personal mcp_worker identity.' : 'Create an application identity allowed to connect to mcp_worker.'}</p></div><form method="post" action="${escapeHtml(action)}" data-disable-on-submit><div class="modal-body"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><div class="form-grid"><div class="field full"><label for="${escapeHtml(nameId)}">Display name</label><input id="${escapeHtml(nameId)}" name="display_name" required maxlength="120" placeholder="ChatGPT"></div><div class="field full"><label for="${escapeHtml(redirectId)}">Redirect URI(s)</label><textarea id="${escapeHtml(redirectId)}" name="redirect_uris" required placeholder="https://chatgpt.com/connector_platform_oauth_redirect">${firstCall === 'local' ? 'http://127.0.0.1:43871/callback' : ''}</textarea><div class="hint">One HTTPS URI per line. localhost is allowed for local development.</div></div><div class="field full"><span class="field-label">MCP URL</span><div class="copy-row"><code id="${escapeHtml(mcpId)}" style="flex:1">${escapeHtml(mcpUrl)}</code><button class="btn btn-icon" type="button" data-copy-target="${escapeHtml(mcpId)}" aria-label="Copy MCP URL">${icon('copy')}</button></div><div class="hint">Use this URL when adding mcp_worker as an MCP connector.</div></div>${access}<div class="field full">${identity}</div></div></div><div class="modal-footer"><button class="btn" type="button" data-modal-close>Cancel</button><button class="btn btn-primary" type="submit">Create Client</button></div></form></div></div>`;
 }
 
-function telegramConfigurationModal({ id, action, csrfToken, config, description }) {
+function telegramConfigurationModal({ id, action, csrfToken, config, description }: {id: string; action: string; csrfToken: string; config: PageTelegram; description: string}) {
   const titleId = `${id}-title`;
   return `<div id="${escapeHtml(id)}" class="modal-backdrop" aria-hidden="true"><div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="${escapeHtml(titleId)}"><div class="modal-header"><h2 id="${escapeHtml(titleId)}">Edit Telegram Configuration</h2><p>${escapeHtml(description)}</p></div><form method="post" action="${escapeHtml(action)}" data-disable-on-submit><div class="modal-body"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><div class="stack"><div class="field"><span class="field-label">Status</span><label class="switch-row" for="${escapeHtml(id)}-enabled"><span><strong>Enabled</strong><span class="hint">Allow this mcp_worker context to send Telegram messages.</span></span><input id="${escapeHtml(id)}-enabled" name="enabled" type="checkbox" value="true" ${config.enabled ? 'checked' : ''}><span class="switch-control" aria-hidden="true"></span></label></div><div class="field"><label for="${escapeHtml(id)}-token">Bot Token</label><input id="${escapeHtml(id)}-token" type="password" name="bot_token" autocomplete="new-password" placeholder="${config.hasToken ? 'Stored securely — leave blank to keep current token' : 'Enter Telegram Bot Token'}"><div class="hint">Existing tokens are never rendered back to the browser.</div></div><div class="field"><label for="${escapeHtml(id)}-chat">Chat ID</label><input id="${escapeHtml(id)}-chat" name="chat_id" value="${escapeHtml(config.chatId || '')}" maxlength="128" placeholder="123456789"></div></div></div><div class="modal-footer"><button class="btn" type="button" data-modal-close>Cancel</button><button class="btn btn-primary" type="submit">Save Changes</button></div></form></div></div>`;
 }
 
-function telegramSummary({ title, subtitle, config, csrfToken, editModalId, testAction, secondaryTitle, secondarySubtitle, secondaryRows, editDisabled = '' }) {
+function telegramSummary({ title, subtitle, config, csrfToken, editModalId, testAction, secondaryTitle, secondarySubtitle, secondaryRows, editDisabled = '' }: {title: string; subtitle: string; config: PageTelegram; csrfToken: string; editModalId: string; testAction: string; secondaryTitle: string; secondarySubtitle: string; secondaryRows: string; editDisabled?: string}) {
   const configured = Boolean(config?.hasToken && config?.chatId);
   return `<div class="grid-2"><section class="section"><div class="section-header"><div><h2 class="section-title">${escapeHtml(title)}</h2><p class="section-subtitle">${escapeHtml(subtitle)}</p></div><span class="badge ${configured && config.enabled ? 'badge-ok' : 'badge-off'}">${configured && config.enabled ? 'Configured' : configured ? 'Disabled' : 'Not configured'}</span></div><div class="section-body"><div class="status-list"><div class="status-row"><div><div class="status-row-title">Status</div><div class="status-row-sub">Whether Telegram delivery is enabled</div></div><strong>${config.enabled ? 'Enabled' : 'Disabled'}</strong></div><div class="status-row"><div><div class="status-row-title">Bot Token</div><div class="status-row-sub">AES-256-GCM encrypted at rest</div></div><strong>${config.hasToken ? 'Stored securely' : 'Not configured'}</strong></div><div class="status-row"><div><div class="status-row-title">Chat ID</div><div class="status-row-sub">Target Telegram conversation</div></div><span class="mono">${escapeHtml(config.chatId || 'Not configured')}</span></div></div><div class="settings-actions"><button class="btn" type="button" data-modal-open="${escapeHtml(editModalId)}"${editDisabled}>${icon('pencil')} Edit Configuration</button><form method="post" action="${escapeHtml(testAction)}"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><button class="btn" type="submit" ${!configured ? 'disabled' : ''}>${icon('send')} Send Test Message</button></form></div></div></section><section class="section"><div class="section-header"><div><h2 class="section-title">${escapeHtml(secondaryTitle)}</h2><p class="section-subtitle">${escapeHtml(secondarySubtitle)}</p></div>${icon('shield')}</div><div class="section-body"><div class="status-list">${secondaryRows}</div></div></section></div>`;
 }
 
-function clientsPage({ clients, mcpUrl = '/mcp', csrfToken, secret = null, success = '', error = '', firstCall = '' }) {
+function clientsPage({ clients, mcpUrl = '/mcp', csrfToken, secret = null, success = '', error = '', firstCall = '' }: {clients: PageClient[]; mcpUrl?: string; csrfToken: string; secret?: PageSecret | null; success?: string; error?: string; firstCall?: string}) {
   const rows = clients.map(c => {
     const statusClass = c.status === 'active' ? 'badge-ok' : c.status === 'revoked' ? 'badge-danger' : 'badge-off';
     const last = c.last_authorized_at ? new Date(c.last_authorized_at).toLocaleString('en-GB') : 'Never';
@@ -183,8 +198,8 @@ function clientsPage({ clients, mcpUrl = '/mcp', csrfToken, secret = null, succe
   return shell('OAuth Clients — mcp_worker', body, { admin:true, active:'clients', csrfToken, breadcrumb:'OAuth Clients' });
 }
 
-function auditPage({ logs, clients, toolNames, filters, page, perPage, total, totalPages, csrfToken }) {
-  const selected = (value, expected) => value === expected ? ' selected' : '';
+function auditPage({ logs, clients, toolNames, filters, page, perPage, total, totalPages, csrfToken }: {logs: PageAudit[]; clients: PageClient[]; toolNames: string[]; filters: PageFilters; page: number; perPage: number; total: number; totalPages: number; csrfToken: string}) {
+  const selected = (value: string, expected: string) => value === expected ? ' selected' : '';
   const rows = logs.map(log => {
     const resultClass = log.result === 'SUCCESS' ? 'badge-ok' : 'badge-danger';
     const clientName = log.client_display_name || log.client_id || 'Unknown client';
@@ -194,7 +209,7 @@ function auditPage({ logs, clients, toolNames, filters, page, perPage, total, to
     return `<tr><td data-label="Time"><div class="cell-title">${escapeHtml(createdAt)}</div><div class="cell-sub mono">${escapeHtml(log.request_id)}</div></td><td data-label="Client"><div class="cell-title">${escapeHtml(clientName)}</div><div class="cell-sub mono">${escapeHtml(clientId)}</div></td><td data-label="MCP Method"><span class="code-chip">${escapeHtml(log.mcp_method)}</span></td><td data-label="Tool">${log.tool_name ? `<span class="mono">${escapeHtml(log.tool_name)}</span>` : '<span class="muted">—</span>'}</td><td data-label="Result"><span class="badge ${resultClass}">${escapeHtml(log.result)}</span></td><td data-label="HTTP">${escapeHtml(log.http_status)}</td><td data-label="Duration"><span class="mono">${escapeHtml(log.duration_ms)} ms</span></td><td data-label="Details"><button class="btn btn-sm" type="button" data-audit-detail="${escapeHtml(log.id)}" data-modal-open="audit-detail-modal">View${truncated ? ' · preview' : ''}</button></td></tr>`;
   }).join('');
 
-  const pageHref = targetPage => {
+  const pageHref = (targetPage: number) => {
     const params = new URLSearchParams();
     if (filters.query) params.set('q', filters.query);
     if (filters.clientId) params.set('client_id', filters.clientId);
@@ -205,7 +220,7 @@ function auditPage({ logs, clients, toolNames, filters, page, perPage, total, to
     return `/admin/audit?${params.toString()}`;
   };
 
-  const pageItems = [];
+  const pageItems: Array<number | '…'> = [];
   if (totalPages <= 7) {
     for (let value = 1; value <= totalPages; value += 1) pageItems.push(value);
   } else {
@@ -233,7 +248,7 @@ function auditPage({ logs, clients, toolNames, filters, page, perPage, total, to
   return shell('Audit Log — mcp_worker', body, { admin:true, active:'audit', csrfToken, breadcrumb:'Audit Log' });
 }
 
-function terminalsPage({ profiles = [], workers = [], accountUser = null, routeBase = accountUser ? '/account/ssh-profiles' : '/admin/terminals', csrfToken, success = '', error = '' }) {
+function terminalsPage({ profiles = [], workers = [], accountUser = null, routeBase = accountUser ? '/account/ssh-profiles' : '/admin/terminals', csrfToken, success = '', error = '' }: {profiles?: PageProfile[]; workers?: PageWorker[]; accountUser?: PageUser | null; routeBase?: string; csrfToken: string; success?: string; error?: string}) {
   const onlineWorkers = workers.filter(worker => worker.enabled && worker.status === 'online');
   const workerOptions = onlineWorkers.map(worker => `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.name)} · online</option>`).join('');
   const rows = profiles.map(profile => {
@@ -250,7 +265,7 @@ function terminalsPage({ profiles = [], workers = [], accountUser = null, routeB
   return shell('SSH Profiles — mcp_worker', body, { admin:true, accountUser, active: accountUser ? 'account-ssh' : 'terminals', csrfToken, breadcrumb:'SSH Profiles' });
 }
 
-function terminalConsolePage({ profile, accountUser = null, routeBase = accountUser ? '/account/ssh-profiles' : '/admin/terminals', csrfToken }) {
+function terminalConsolePage({ profile, accountUser = null, routeBase = accountUser ? '/account/ssh-profiles' : '/admin/terminals', csrfToken }: {profile: PageProfile; accountUser?: PageUser | null; routeBase?: string; csrfToken: string}) {
   const back = routeBase;
   const body = `${pageHeader(`Shell · ${profile.name}`,'Interactive PTY attached directly to the Worker OS shell.',`<a class="btn" href="${escapeHtml(back)}">Back to Profiles</a>`)}<section class="section terminal-console-card"><div class="terminal-console-head"><div class="terminal-target"><strong>${escapeHtml(profile.worker_name || profile.worker_id)}</strong><span class="code-chip">direct shell</span></div><div class="terminal-console-actions"><span id="terminal-connection-status" class="badge badge-off">Connecting…</span><button class="btn btn-sm" type="button" data-terminal-reconnect>Reconnect</button><button class="btn btn-sm" type="button" data-terminal-disconnect>Disconnect</button></div></div><div id="terminal-console-root" data-profile-id="${escapeHtml(profile.id)}" data-session-url="${escapeHtml(routeBase)}/${escapeHtml(profile.id)}/session" data-csrf="${escapeHtml(csrfToken)}"><div id="terminal-console-error" class="terminal-console-error" role="alert" hidden></div><div id="terminal-screen" class="terminal-screen" aria-label="Interactive Worker shell"></div></div><div class="terminal-console-foot"><span>Runs as the local OS user that started mcp_worker Worker.</span><span>No tmux, SSH password, or inbound SSH port is used.</span></div></section>`;
   return shell(`Shell ${profile.name} — mcp_worker`, body, {
@@ -264,18 +279,18 @@ function terminalConsolePage({ profile, accountUser = null, routeBase = accountU
   });
 }
 
-function telegramPage({ config, csrfToken, success = '', error = '' }) {
+function telegramPage({ config, csrfToken, success = '', error = '' }: {config: PageTelegram; csrfToken: string; success?: string; error?: string}) {
   const configured = config.hasToken && Boolean(config.chatId);
   const modal = `<div id="telegram-modal" class="modal-backdrop" aria-hidden="true"><div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="telegram-modal-title" aria-describedby="telegram-modal-description"><div class="modal-header"><h2 id="telegram-modal-title">Edit Telegram Configuration</h2><p id="telegram-modal-description">Configure the optional Telegram support channel for mcp_worker.</p></div><form method="post" action="/admin/telegram" data-disable-on-submit><div class="modal-body"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><div class="stack"><div class="field"><span class="field-label">Status</span><label class="switch-row" for="telegram-enabled"><span><strong>Enabled</strong><span class="hint">Allow mcp_worker to send Telegram messages.</span></span><input id="telegram-enabled" name="enabled" type="checkbox" value="true" ${config.enabled ? 'checked' : ''}><span class="switch-control" aria-hidden="true"></span></label></div><div class="field"><label for="telegram-bot-token">Bot Token</label><input id="telegram-bot-token" type="password" name="bot_token" autocomplete="new-password" placeholder="${config.hasToken ? 'Stored securely — leave blank to keep current token' : 'Enter Telegram Bot Token'}"><div class="hint">Existing tokens are never rendered back to the browser.</div></div><div class="field"><label for="telegram-chat-id">Chat ID</label><input id="telegram-chat-id" name="chat_id" value="${escapeHtml(config.chatId || '')}" maxlength="128" placeholder="123456789"></div></div></div><div class="modal-footer"><button class="btn" type="button" data-modal-close>Cancel</button><button class="btn btn-primary" type="submit">Save Changes</button></div></form></div></div>`;
   const body = `${flashData(success,error)}${pageHeader('Telegram','Configure optional Telegram notifications for mcp_worker.',`<button class="btn btn-primary" type="button" data-modal-open="telegram-modal">${icon('pencil')} Edit Configuration</button>`)}<div class="grid-2"><section class="section"><div class="section-header"><div><h2 class="section-title">Telegram MCP</h2><p class="section-subtitle">Support notification channel</p></div><span class="badge ${configured && config.enabled ? 'badge-ok' : 'badge-off'}">${configured && config.enabled ? 'Configured' : configured ? 'Disabled' : 'Not configured'}</span></div><div class="section-body"><div class="status-list"><div class="status-row"><div><div class="status-row-title">Status</div><div class="status-row-sub">Whether Telegram delivery is enabled</div></div><strong>${config.enabled ? 'Enabled' : 'Disabled'}</strong></div><div class="status-row"><div><div class="status-row-title">Bot Token</div><div class="status-row-sub">Encrypted with AES-256-GCM at rest</div></div><strong>${config.hasToken ? 'Stored securely' : 'Not configured'}</strong></div><div class="status-row"><div><div class="status-row-title">Chat ID</div><div class="status-row-sub">Target conversation for test/support messages</div></div><span class="mono">${escapeHtml(config.chatId || 'Not configured')}</span></div></div><div style="display:flex;gap:8px;margin-top:18px"><button class="btn" type="button" data-modal-open="telegram-modal">${icon('pencil')} Edit Configuration</button><form method="post" action="/admin/telegram/test"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><button class="btn" type="submit" ${!configured ? 'disabled' : ''}>${icon('send')} Send Test Message</button></form></div></div></section><section class="section"><div class="section-header"><div><h2 class="section-title">Security</h2><p class="section-subtitle">How mcp_worker handles Telegram credentials.</p></div>${icon('shield')}</div><div class="section-body"><p class="muted">Telegram operational settings are stored in the database. Bot tokens are encrypted before storage and are never displayed again after save.</p><div class="status-list"><div class="status-row"><div><div class="status-row-title">Configuration source</div><div class="status-row-sub">Enabled state, Chat ID, and encrypted Bot Token</div></div><span class="badge badge-ok">Database</span></div><div class="status-row"><div><div class="status-row-title">Encryption</div><div class="status-row-sub">AES-256-GCM using the application credential key</div></div><span class="badge badge-ok">Enabled</span></div><div class="status-row"><div><div class="status-row-title">Runtime role</div><div class="status-row-sub">Optional support only; no Control Plane or worker runtime</div></div><span class="badge badge-off">Support only</span></div></div></div></section></div>${modal}`;
   return shell('Telegram — mcp_worker', body, { admin:true, active:'telegram', csrfToken, breadcrumb:'Telegram' });
 }
 
-function workersPage({ workers = [], profiles = [], enrollment = null, workerInstallUrl = '/worker/install.sh', routeBase = '/admin/workers', accountUser = null, csrfToken, success = '', error = '', checkingWorkerId = '' }) {
+function workersPage({ workers = [], profiles = [], enrollment = null, workerInstallUrl = '/worker/install.sh', routeBase = '/admin/workers', accountUser = null, csrfToken, success = '', error = '', checkingWorkerId = '' }: {workers?: PageWorker[]; profiles?: PageProfile[]; enrollment?: {expires_at: string; token: string} | null; workerInstallUrl?: string; routeBase?: string; accountUser?: PageUser | null; csrfToken: string; success?: string; error?: string; checkingWorkerId?: string}) {
   const onlineCount = workers.filter(worker => worker.enabled && worker.status === 'online').length;
   const disabledCount = workers.filter(worker => !worker.enabled).length;
   const offlineCount = Math.max(0, workers.length - onlineCount - disabledCount);
-  const profileCountByWorker = new Map();
+  const profileCountByWorker = new Map<string, number>();
   for (const profile of profiles) profileCountByWorker.set(profile.worker_id, (profileCountByWorker.get(profile.worker_id) || 0) + 1);
 
   const workerRows = workers.map(worker => {
@@ -321,7 +336,7 @@ function workersPage({ workers = [], profiles = [], enrollment = null, workerIns
   return shell('Workers — mcp_worker', body, { admin:true, accountUser, active: accountUser ? 'account-workers' : 'workers', csrfToken, breadcrumb:'Workers' });
 }
 
-function usersPage({ users = [], clientCounts = {}, csrfToken, success = '', error = '' }) {
+function usersPage({ users = [], clientCounts = {}, csrfToken, success = '', error = '' }: {users?: PageUser[]; clientCounts?: Record<string,number>; csrfToken: string; success?: string; error?: string}) {
   const rows = users.map(user => {
     const active = user.status === 'active';
     const count = Number(clientCounts[user.id] || 0);
@@ -334,7 +349,7 @@ function usersPage({ users = [], clientCounts = {}, csrfToken, success = '', err
   return shell('Users — mcp_worker', body, { admin:true, active:'users', csrfToken, breadcrumb:'Users' });
 }
 
-function accountClientsPage({ user, clients = [], mcpUrl = '/mcp', csrfToken, secret = null, success = '', error = '' }) {
+function accountClientsPage({ user, clients = [], mcpUrl = '/mcp', csrfToken, secret = null, success = '', error = '' }: {user: PageUser; clients?: PageClient[]; mcpUrl?: string; csrfToken: string; secret?: PageSecret | null; success?: string; error?: string}) {
   const rows = clients.map(c => {
     const statusClass = c.status === 'active' ? 'badge-ok' : c.status === 'revoked' ? 'badge-danger' : 'badge-off';
     const last = c.last_authorized_at ? new Date(c.last_authorized_at).toLocaleString('en-GB') : 'Never';
@@ -346,11 +361,11 @@ function accountClientsPage({ user, clients = [], mcpUrl = '/mcp', csrfToken, se
   return shell('My Clients — mcp_worker', body, { admin:true, accountUser:user, active:'account-clients', csrfToken, breadcrumb:'My Clients' });
 }
 
-function accountSshProfilesPage({ user, profiles = [], workers = [], csrfToken, success = '', error = '' }) {
+function accountSshProfilesPage({ user, profiles = [], workers = [], csrfToken, success = '', error = '' }: {user: PageUser; profiles?: PageProfile[]; workers?: PageWorker[]; csrfToken: string; success?: string; error?: string}) {
   return terminalsPage({ profiles, workers, accountUser: user, routeBase: '/account/ssh-profiles', csrfToken, success, error });
 }
 
-function accountTelegramPage({ user, config, csrfToken, success = '', error = '' }) {
+function accountTelegramPage({ user, config, csrfToken, success = '', error = '' }: {user: PageUser; config: PageTelegram; csrfToken: string; success?: string; error?: string}) {
   const modalId = 'account-telegram-modal';
   const modal = telegramConfigurationModal({ id:modalId, action:'/account/telegram', csrfToken, config, description:'Configure the Telegram destination owned only by your account.' });
   const actions = `<button class="btn btn-primary" type="button" data-modal-open="${modalId}">${icon('pencil')} Edit Configuration</button>`;
@@ -360,7 +375,7 @@ function accountTelegramPage({ user, config, csrfToken, success = '', error = ''
   return shell('Telegram — mcp_worker', body, { admin:true, accountUser:user, active:'account-telegram', csrfToken, breadcrumb:'Telegram' });
 }
 
-function settingsPage({ activeSection = 'database', storage, legacy, mcp, telegram, runtime, csrfToken, success = '', error = '' }) {
+function settingsPage({ activeSection = 'database', storage, legacy, mcp, telegram, runtime, csrfToken, success = '', error = '' }: {activeSection?: string; storage: PageStorage; legacy: {counts?: Record<string,number>}; mcp: PageMcp; telegram: PageTelegram; runtime: PageRuntime; csrfToken: string; success?: string; error?: string}) {
   const sections = ['database', 'mcp', 'telegram', 'runtime'];
   const active = sections.includes(activeSection) ? activeSection : 'database';
   const db = storage.mysql || {};
@@ -417,13 +432,13 @@ function settingsPage({ activeSection = 'database', storage, legacy, mcp, telegr
 
   const runtimeSection = `<section class="section settings-detail"><div class="section-header"><div><h2 class="section-title">Runtime</h2><p class="section-subtitle">Read-only bootstrap values that remain outside application settings.</p></div></div><div class="section-body"><div class="definition-grid"><div class="definition"><div class="definition-label">Version</div><div class="definition-value">v${escapeHtml(runtime.version)}</div></div><div class="definition"><div class="definition-label">Git SHA</div><div class="definition-value mono">${escapeHtml(runtime.gitSha || 'unknown')}</div></div><div class="definition"><div class="definition-label">Environment</div><div class="definition-value">${escapeHtml(runtime.nodeEnv)}</div></div><div class="definition"><div class="definition-label">MCP tools</div><div class="definition-value">${escapeHtml(runtime.toolCount)}</div></div></div><div class="migration-note"><strong>Bootstrap-only ENV</strong><span>ADMIN_USERNAME, ADMIN_PASSWORD, SESSION_SECRET, APP_ENCRYPTION_KEY (or legacy TERMINAL_CREDENTIAL_KEY), HOST/PORT, TRUST_PROXY and COOKIE_SECURE remain environment-level security/runtime configuration.</span></div></div></section>`;
 
-  const content = { database: databaseSection, mcp: mcpSection, telegram: telegramSection, runtime: runtimeSection }[active];
+  const content = { database: databaseSection, mcp: mcpSection, telegram: telegramSection, runtime: runtimeSection }[active as 'database' | 'mcp' | 'telegram' | 'runtime'];
   const pageAction = active === 'database' ? `<span class="badge ${stateClass}">${escapeHtml(storage.state)}</span>` : active === 'telegram' ? telegramActions : '';
-  const body = `${flashData(success,error)}${pageHeader(labels[active], subtitles[active], pageAction)}<div class="settings-content">${content}</div>`;
-  return shell(`${labels[active]} Settings — mcp_worker`, body, { admin:true, active:'settings', settingsSection:active, csrfToken, breadcrumb:`Settings / ${labels[active]}` });
+  const body = `${flashData(success,error)}${pageHeader(labels[active as keyof typeof labels], subtitles[active as keyof typeof subtitles], pageAction)}<div class="settings-content">${content}</div>`;
+  return shell(`${labels[active as keyof typeof labels]} Settings — mcp_worker`, body, { admin:true, active:'settings', settingsSection:active, csrfToken, breadcrumb:`Settings / ${labels[active as keyof typeof labels]}` });
 }
 
-function setupRequiredPage({ status, csrfToken }) {
+function setupRequiredPage({ status, csrfToken }: {status: PageStorage; csrfToken: string}) {
   const degraded = status.state === 'DEGRADED';
   const configured = status.state === 'CONFIGURED';
   const body = `${pageHeader('Database setup required','Application data features remain unavailable until the saved MySQL source is initialized.')}
@@ -431,8 +446,8 @@ function setupRequiredPage({ status, csrfToken }) {
   return shell('Database setup required — mcp_worker', body, { admin:true, active:'settings', csrfToken, breadcrumb:'Setup Required' });
 }
 
-function errorPage(status, message) {
+function errorPage(status: number, message: string) {
   return shell(`${status} Error`, `<div class="login-shell"><div class="login-card"><h1>${escapeHtml(status)} Error</h1><p>${escapeHtml(message)}</p><a class="btn" href="/admin">Return to Admin</a></div></div>`);
 }
 
-module.exports = { onboardingPage, escapeHtml, loginPage, oauthConsentPage, adminOverviewPage, clientsPage, auditPage, terminalsPage, terminalConsolePage, telegramPage, workersPage, usersPage, accountClientsPage, accountSshProfilesPage, accountTelegramPage, settingsPage, setupRequiredPage, errorPage };
+export = { onboardingPage, escapeHtml, loginPage, oauthConsentPage, adminOverviewPage, clientsPage, auditPage, terminalsPage, terminalConsolePage, telegramPage, workersPage, usersPage, accountClientsPage, accountSshProfilesPage, accountTelegramPage, settingsPage, setupRequiredPage, errorPage };
