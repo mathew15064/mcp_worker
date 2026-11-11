@@ -169,12 +169,12 @@ router.post('/account/workers/:id/:action', async (req, res) => {
     if (!worker) return res.status(404).type('html').send(errorPage(404, 'Worker not found.'));
     if (action === 'remove') {
       await workerLifecycle.decommission(worker, { actorId: req.currentUser.principal_id, ownerUserId: req.currentUser.id });
-      setFlash(req, 'success', 'Worker removed remotely. Bot Report Worker was uninstalled from the target machine and its server record was deleted.');
+      setFlash(req, 'success', 'Worker removed remotely. mcp_worker Worker was uninstalled from the target machine and its server record was deleted.');
       return res.redirect('/account/workers');
     }
     if (action === 'force-remove') {
       await workerLifecycle.forceRemove(worker, { actorId: req.currentUser.principal_id, ownerUserId: req.currentUser.id });
-      setFlash(req, 'success', 'Worker force deleted from Bot Report. Local Worker files may still remain on the target machine.');
+      setFlash(req, 'success', 'Worker force deleted from mcp_worker. Local Worker files may still remain on the target machine.');
       return res.redirect('/account/workers');
     }
     if (action === 'edit') {

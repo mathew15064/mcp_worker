@@ -21,7 +21,7 @@ CI uses Node 26.13.0 and Go 1.26.10; production Node, Go builder and the
 upstream MySQL base references pin registry manifest digests. The runtime
 image upgrades npm to 11.21.2 using a verified tarball. Dockerfile.mysql
 retains upstream MySQL 8.4.13 and its entrypoint, removes optional mysql-shell
-(not required for Bot Report), and rebuilds gosu 1.19 from an exact upstream
+(not required for mcp_worker), and rebuilds gosu 1.19 from an exact upstream
 commit with Go 1.26.10. The standalone installer builds both images locally;
 advanced external database configurations remain unchanged. Scan the actual
 built app and database images, not just their upstream bases. Refresh pins deliberately

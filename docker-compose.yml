@@ -5,7 +5,7 @@ services:
       args:
         BOT_REPORT_GIT_SHA: ${BOT_REPORT_GIT_SHA:-unknown}
         BOT_REPORT_BUILD_TIME: ${BOT_REPORT_BUILD_TIME:-unknown}
-    image: ${COMPOSE_PROJECT_NAME:-bot-report}-app:local
+    image: ${COMPOSE_PROJECT_NAME:-mcp_worker}-app:local
     restart: unless-stopped
     init: true
     sysctls:
@@ -34,7 +34,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.mysql
-    image: ${COMPOSE_PROJECT_NAME:-bot-report}-mysql:local
+    image: ${COMPOSE_PROJECT_NAME:-mcp_worker}-mysql:local
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?run setup.sh}

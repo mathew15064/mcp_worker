@@ -85,7 +85,7 @@ async function handleRuntimeInfo() {
 
 module.exports = {
   name: 'runtime_info',
-  description: 'Return sanitized Bot Report runtime/build identity, tool schema hash, and a fingerprint over package.json plus the complete MCP-only src tree. Use first after deploy, rebuild, or MCP refresh when you need to verify which version is actually running.',
+  description: 'Return sanitized mcp_worker runtime/build identity, tool schema hash, and a fingerprint over package.json plus the complete MCP-only src tree. Use first after deploy, rebuild, or MCP refresh when you need to verify which version is actually running.',
   schema: {},
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
   handler: handleRuntimeInfo,

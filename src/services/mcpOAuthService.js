@@ -135,7 +135,7 @@ class McpOAuthService {
       throw new OAuthError('invalid_client', `Client '${clientId}' is ${client.status}.`, 401);
     }
     if (client.owner_user_id && client.owner_user_status !== 'active') {
-      throw new OAuthError('invalid_client', 'The Bot Report user that owns this client is disabled.', 401);
+      throw new OAuthError('invalid_client', 'The mcp_worker user that owns this client is disabled.', 401);
     }
 
     const candidateHash = this.hash(clientSecret);
@@ -171,7 +171,7 @@ class McpOAuthService {
       throw new OAuthError('unauthorized_client', `Client '${clientId}' is disabled or revoked.`);
     }
     if (client.owner_user_id && client.owner_user_status !== 'active') {
-      throw new OAuthError('unauthorized_client', 'The Bot Report user that owns this client is disabled.');
+      throw new OAuthError('unauthorized_client', 'The mcp_worker user that owns this client is disabled.');
     }
 
     if (!redirectUri) {

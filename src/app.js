@@ -18,7 +18,7 @@ app.use(csrfProtection);
 
 app.get('/healthz', (req, res) => {
   const database = databaseManager.status();
-  res.json({ ok: true, service: 'bot-report-mcp', mode: 'mcp-admin', database: database.state });
+  res.json({ ok: true, service: 'mcp_worker', mode: 'mcp-admin', database: database.state });
 });
 app.get('/readyz', (req, res) => {
   const database = databaseManager.status();

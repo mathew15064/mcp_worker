@@ -17,21 +17,21 @@ and restore procedure; the legacy npm backup-db command only backs up SQLite.
 
 ## Backup (default project)
 
-From the same checkout, after confirming the saved project is bot-report:
+From the same checkout, after confirming the saved project is mcp_worker:
 
     set -e
     umask 077
-    backup="$HOME/bot-report-backup-$(date +%Y%m%d-%H%M%S)"
+    backup="$HOME/mcp_worker-backup-$(date +%Y%m%d-%H%M%S)"
     mkdir -m 700 "$backup"
     ./setup.sh --down
     cp -p .env.setup "$backup/installer.env"
     git rev-parse HEAD > "$backup/commit.txt"
-    docker image inspect bot-report-app:local --format '{{.Id}}' > "$backup/app-image.txt"
-    docker image inspect bot-report-mysql:local --format '{{.Id}}' > "$backup/mysql-image.txt"
+    docker image inspect mcp_worker-app:local --format '{{.Id}}' > "$backup/app-image.txt"
+    docker image inspect mcp_worker-mysql:local --format '{{.Id}}' > "$backup/mysql-image.txt"
     for volume in app-data mysql-data; do
-      docker volume inspect "bot-report_${volume}" >/dev/null
+      docker volume inspect "mcp_worker_${volume}" >/dev/null
       docker run --rm --network none --user 0 --entrypoint sh \
-        -v "bot-report_${volume}:/source:ro" bot-report-app:local \
+        -v "mcp_worker_${volume}:/source:ro" mcp_worker-app:local \
         -c 'tar -C /source -cpf - .' > "$backup/$volume.tar"
     done
     (cd "$backup" && sha256sum installer.env commit.txt app-image.txt mysql-image.txt app-data.tar mysql-data.tar > SHA256SUMS)
@@ -56,19 +56,19 @@ MCP URL. Never run two copies with the same identity/endpoint concurrently.
     ./setup.sh --down
     test ! -e .env.setup-restore
     for v in app-data mysql-data; do
-      if docker volume inspect "bot-report-restore_$v" >/dev/null 2>&1; then
+      if docker volume inspect "mcp_worker-restore_$v" >/dev/null 2>&1; then
         echo "Restore destination exists; refusing" >&2
         exit 1
       fi
     done
-    sed 's/^COMPOSE_PROJECT_NAME=.*/COMPOSE_PROJECT_NAME=bot-report-restore/' "$backup/installer.env" > .env.setup-restore
+    sed 's/^COMPOSE_PROJECT_NAME=.*/COMPOSE_PROJECT_NAME=mcp_worker-restore/' "$backup/installer.env" > .env.setup-restore
     chmod 600 .env.setup-restore
     export BOT_REPORT_GIT_SHA="$(git rev-parse HEAD)"
     export BOT_REPORT_BUILD_TIME="$(git show -s --format=%cI HEAD)"
-    docker compose --env-file .env.setup-restore -p bot-report-restore create --build
+    docker compose --env-file .env.setup-restore -p mcp_worker-restore create --build
     for v in app-data mysql-data; do
       docker run --rm -i --network none --user 0 --entrypoint sh \
-        -v "bot-report-restore_$v:/target" bot-report-restore-app:local \
+        -v "mcp_worker-restore_$v:/target" mcp_worker-restore-app:local \
         -c 'tar -C /target -xpf -' < "$backup/$v.tar"
     done
     BOT_REPORT_SETUP_ENV=.env.setup-restore ./setup.sh --init

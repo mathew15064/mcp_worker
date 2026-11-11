@@ -33,7 +33,7 @@ function installStaticToolListCache(server) {
 
 function createMcpServer(options = {}) {
   const server = new McpServer({
-    name: options.name || 'bot-report-mcp',
+    name: options.name || 'mcp_worker',
     version: options.version || '1.0.0'
   }, {
     instructions: options.instructions || SERVER_INSTRUCTIONS

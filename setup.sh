@@ -25,7 +25,7 @@ exec 9>"$envfile.lock"
 flock -n 9 || fail "Another setup is running."
 # Compose shell variables take precedence over env-file; refuse implicit secret overrides.
 unset ADMIN_PASSWORD SESSION_SECRET APP_ENCRYPTION_KEY MYSQL_PASSWORD MYSQL_ROOT_PASSWORD COMPOSE_PROJECT_NAME
-project="${BOT_REPORT_SETUP_PROJECT:-bot-report}"
+project="${BOT_REPORT_SETUP_PROJECT:-mcp_worker}"
 port="${BOT_REPORT_SETUP_PORT:-3333}"
 case "$project" in ''|*[!a-z0-9_-]*|[-_]*) fail "Invalid Compose project name." ;; esac
 case "$port" in ''|*[!0-9]*) fail "Invalid port." ;; esac
@@ -33,6 +33,14 @@ case "$port" in ''|*[!0-9]*) fail "Invalid port." ;; esac
 unset BOT_REPORT_PORT
 if [ ! -e "$envfile" ]; then
   [ "$mode" != down ] || fail "No installation configuration."
+  # Prevent a renamed default installation from silently bypassing old data.
+  if [ "$project" = mcp_worker ]; then
+    for suffix in app-data mysql-data; do
+      if docker volume inspect "bot-report_$suffix" >/dev/null 2>&1; then
+        fail "Legacy bot-report volumes found; restore original installer env or choose an explicit new project."
+      fi
+    done
+  fi
   # Lost credentials must never be regenerated over existing volumes.
   for suffix in app-data mysql-data; do
     if docker volume inspect "${project}_$suffix" >/dev/null 2>&1; then fail "Existing volume found; restore original installer env."; fi

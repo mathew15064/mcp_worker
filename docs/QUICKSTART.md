@@ -1,6 +1,6 @@
 # Local quickstart
 
-Bot Report V2 is a self-hosted MCP execution gateway, not an autonomous
+mcp_worker V2 is a self-hosted MCP execution gateway, not an autonomous
 coding model. Start with the local-only configuration. No domain, public
 port, SSH server or ChatGPT subscription is required for the local smoke call.
 

@@ -99,7 +99,7 @@ router.get('/.well-known/oauth-protected-resource/mcp', (req, res) => {
     bearer_methods_supported: [
       'header'
     ],
-    resource_name: 'Bot Report MCP Gateway'
+    resource_name: 'mcp_worker Gateway'
   });
 });
 
@@ -116,7 +116,7 @@ router.get('/.well-known/oauth-protected-resource', (req, res) => {
     bearer_methods_supported: [
       'header'
     ],
-    resource_name: 'Bot Report MCP Gateway'
+    resource_name: 'mcp_worker Gateway'
   });
 });
 
@@ -174,7 +174,7 @@ router.get('/oauth/authorize', authorizeRateLimiter, async (req, res) => {
       return res.redirect('/login');
     }
     if (!canAuthorizeClient(user, validated.client)) {
-      return res.status(403).type('html').send(errorPage(403, 'This OAuth client belongs to a different Bot Report identity.'));
+      return res.status(403).type('html').send(errorPage(403, 'This OAuth client belongs to a different mcp_worker identity.'));
     }
 
     return res.type('html').send(oauthConsentPage({
@@ -209,7 +209,7 @@ router.get('/oauth/authorize', authorizeRateLimiter, async (req, res) => {
 router.post('/oauth/authorize', authorizeRateLimiter, async (req, res) => {
   const user = await currentIdentity(req);
   if (!user) {
-    return res.status(403).type('html').send(errorPage(403, 'Authenticated Bot Report session required to authorize MCP client.'));
+    return res.status(403).type('html').send(errorPage(403, 'Authenticated mcp_worker session required to authorize MCP client.'));
   }
 
   const {
@@ -236,7 +236,7 @@ router.post('/oauth/authorize', authorizeRateLimiter, async (req, res) => {
     });
 
     if (!canAuthorizeClient(user, validated.client)) {
-      return res.status(403).type('html').send(errorPage(403, 'This OAuth client belongs to a different Bot Report identity.'));
+      return res.status(403).type('html').send(errorPage(403, 'This OAuth client belongs to a different mcp_worker identity.'));
     }
 
     const targetUrl = new URL(validated.redirectUri);
@@ -290,7 +290,7 @@ router.post('/oauth/token', tokenRateLimiter, async (req, res) => {
 
   const credentials = extractClientCredentials(req);
   if (!credentials) {
-    res.setHeader('WWW-Authenticate', 'Basic realm="Bot Report MCP Gateway"');
+    res.setHeader('WWW-Authenticate', 'Basic realm="mcp_worker Gateway"');
     return res.status(401).json({
       error: 'invalid_client',
       error_description: 'Client authentication required.'
@@ -331,7 +331,7 @@ router.post('/oauth/token', tokenRateLimiter, async (req, res) => {
   } catch (err) {
     const status = err.status || 400;
     if (err.error === 'invalid_client') {
-      res.setHeader('WWW-Authenticate', 'Basic realm="Bot Report MCP Gateway"');
+      res.setHeader('WWW-Authenticate', 'Basic realm="mcp_worker Gateway"');
     }
     return res.status(status).json({
       error: err.error || 'invalid_request',
@@ -347,7 +347,7 @@ router.post('/oauth/token', tokenRateLimiter, async (req, res) => {
 router.post('/oauth/revoke', async (req, res) => {
   const credentials = extractClientCredentials(req);
   if (!credentials) {
-    res.setHeader('WWW-Authenticate', 'Basic realm="Bot Report MCP Gateway"');
+    res.setHeader('WWW-Authenticate', 'Basic realm="mcp_worker Gateway"');
     return res.status(401).json({
       error: 'invalid_client',
       error_description: 'Client authentication required.'

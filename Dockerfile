@@ -1,5 +1,5 @@
 # ==============================================================================
-# Multi-Stage Production Dockerfile for Bot Report
+# Multi-Stage Production Dockerfile for mcp_worker
 # Runtime: configurable Node.js Alpine (musl libc); default Node 26.13.0
 # Architecture: Single non-root container listening on 0.0.0.0:80
 # ==============================================================================

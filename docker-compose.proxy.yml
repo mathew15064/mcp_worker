@@ -1,5 +1,5 @@
 # ==============================================================================
-# Bot Report Production Docker Compose Configuration
+# mcp_worker Production Docker Compose Configuration
 # Topology: Single application container attached to existing external Nginx network
 # Internal Listening Port: 0.0.0.0:80 (zero published host ports)
 # ==============================================================================

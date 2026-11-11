@@ -1,22 +1,26 @@
-# Bot Report MCP
+# mcp_worker
 
-Bot Report is a deterministic MCP coding execution harness. ChatGPT performs reasoning; Bot Report exposes bounded MCP primitives and routes execution through an explicit execution profile.
+mcp_worker is a deterministic MCP coding execution harness. ChatGPT performs reasoning; mcp_worker exposes bounded MCP primitives and routes execution through an explicit execution profile.
 
-Version 2 adds an **outbound Worker transport** so managed machines no longer need an inbound SSH port or an SSH password stored on the Bot Report server. Existing SSH profiles remain as a compatibility transport while machines are migrated.
+Version 2 adds an **outbound Worker transport** so managed machines no longer need an inbound SSH port or an SSH password stored on the mcp_worker server. Existing SSH profiles remain as a compatibility transport while machines are migrated.
 
 ```text
 Worker transport (preferred in v2)
-Owner -> ChatGPT -> Bot Report MCP -> authenticated WSS job/event -> Worker -> local machine
+Owner -> ChatGPT -> mcp_worker -> authenticated WSS job/event -> Worker -> local machine
 
 SSH compatibility transport
-Owner -> ChatGPT -> Bot Report MCP -> SSH Profile -> SSH -> machine
+Owner -> ChatGPT -> mcp_worker -> SSH Profile -> SSH -> machine
 ```
 
 The project keeps a small Admin UI for configuration and observability. V2 focuses on the coding execution gateway, not business workflows.
 
 ## Version and release policy
 
-The main branch is the Bot Report V2 line, with the 19-tool MCP catalog and outbound Go Worker transport. Stable releases will use versioned Git tags. This repository contains the V2 source release candidate. Public source access does not imply a stable signed release. See [the public release roadmap](docs/PUBLIC_RELEASE_ROADMAP.md).
+The main branch is the mcp_worker V2 line, with the 19-tool MCP catalog and outbound Go Worker transport. Stable releases will use versioned Git tags. This repository contains the V2 source release candidate. Public source access does not imply a stable signed release. See [the public release roadmap](docs/PUBLIC_RELEASE_ROADMAP.md).
+
+## Compatibility identifiers
+
+The product is mcp_worker. The V2 OAuth scopes (bot_report.read and bot_report.terminal), BOT_REPORT_* configuration variables, Worker binary filenames, systemtd CLI, existing Worker state directories and database schema retain their historical identifiers for compatibility. Existing installer env files keep their project name; fresh standalone installs default to mcp_worker. Do not rename or copy live Worker identities.
 
 ## License
 
@@ -54,7 +58,7 @@ If initialization fails or an existing database is not ready, inspect the
 state and use the Admin recovery workflow; the script does not reset it.
 `./setup.sh --down` stops the stack and retains volumes and credentials.
 For isolated testing, set BOT_REPORT_SETUP_ENV=.env.setup-test,
-BOT_REPORT_SETUP_PROJECT=bot-report-test and BOT_REPORT_SETUP_PORT=13333
+BOT_REPORT_SETUP_PROJECT=mcp_worker-test and BOT_REPORT_SETUP_PORT=13333
 on first run, and reuse the same env file thereafter.
 
 ## Getting Started — first authenticated call

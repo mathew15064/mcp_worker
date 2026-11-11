@@ -5,7 +5,7 @@
 # Task: BOT-REPORT-DOCKER-DEPLOY-SCRIPT-007
 # Checkpoint: CP001-r2
 # Description: Automated, repeatable, non-destructive Docker deployment script
-#              for the Bot Report application.
+#              for the mcp_worker application.
 #
 # Usage:
 #   ./deploy.sh --dry-run
@@ -173,7 +173,7 @@ usage() {
   cat << 'EOF'
 Usage: ./deploy.sh [OPTIONS]
 
-Automated, safe Docker deployment script for Bot Report.
+Automated, safe Docker deployment script for mcp_worker.
 
 Options:
   --dry-run   Validate bootstrap ENV, deployment topology, persistent data/network,
@@ -622,7 +622,7 @@ main() {
   esac
 
   MODE="${mode}"
-  log "Starting Bot Report deployment script in '${MODE}' mode..."
+  log "Starting mcp_worker deployment script in '${MODE}' mode..."
 
   # Concurrency protection
   acquire_lock

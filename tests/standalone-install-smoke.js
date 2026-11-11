@@ -85,7 +85,7 @@ async function main() {
   assert.equal(catalog.tools.length, 19);
   const runtime = await request(fixture.token, 'tools/call', { name: 'runtime_info', arguments: {} });
   assert.equal(runtime.structuredContent.tool_count, 19);
-  assert.equal(runtime.structuredContent.tool_schema_hash, '55e4a1ae7b26dccffcbcf6e3fa9846dec7ff7ad1fb76e47d2635a389dff4b928');
+  assert.equal(runtime.structuredContent.tool_schema_hash, '77fec371229586b76437ab2dd0b8bff3101c89d13baa5a223795a8a68d11fdb6');
   await request(fixture.token, 'tools/call', { name: 'terminal_list', arguments: {} });
   if (mode === 'verify') fs.unlinkSync(file);
   console.log('PASS ' + mode + ': actual local admin login, MySQL 13 migrations, user/Worker identity, OAuth token, 19 tools, runtime_info, terminal_list, unauthenticated rejection');

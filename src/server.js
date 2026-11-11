@@ -21,7 +21,7 @@ async function bootstrap() {
   if (!validation.valid) console.warn(`[MCP_CONFIG] ${validation.errors.join('; ')}`);
 
   server = app.listen(config.PORT, config.HOST, () => {
-    console.log(`[BOOT] Bot Report listening on http://${config.HOST}:${config.PORT}`);
+    console.log(`[BOOT] mcp_worker listening on http://${config.HOST}:${config.PORT}`);
     console.log(`[BOOT] Storage state: ${storage.state}`);
     if (databaseManager.isOperational()) console.log(`[BOOT] MCP resource: ${mcpConfig.resourceUrl}`);
   });

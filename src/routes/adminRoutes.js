@@ -225,7 +225,7 @@ router.post('/admin/settings/database/save', async (req, res) => {
     const status = await databaseManager.saveMysqlConfig(input);
     await runtimeSettings.load(status.operational ? databaseManager.getAdapter() : null);
     setFlash(req, 'success', status.source?.initialized
-      ? 'MySQL connection saved. Existing Bot Report source detected and activated without schema changes.'
+      ? 'MySQL connection saved. Existing mcp_worker source detected and activated without schema changes.'
       : 'MySQL connection saved. No schema changes were applied. Initialize Source when you are ready.');
   } catch (error) {
     setFlash(req, 'error', `Database configuration could not be saved: ${error.message}`);
@@ -243,7 +243,7 @@ router.post('/admin/settings/database/initialize', async (req, res) => {
     const current = databaseManager.status();
     if (!current.mysql) throw new Error('Save the MySQL connection before initializing the source.');
     if (current.source?.initialized) {
-      setFlash(req, 'success', 'Bot Report source is already initialized.');
+      setFlash(req, 'success', 'mcp_worker source is already initialized.');
       return res.redirect('/admin/settings/database');
     }
 
@@ -258,8 +258,8 @@ router.post('/admin/settings/database/initialize', async (req, res) => {
     prepared = null;
     await runtimeSettings.load(databaseManager.getAdapter());
     setFlash(req, 'success', imported?.imported
-      ? `Bot Report source initialized and legacy data imported successfully (${Object.values(imported.counts).reduce((a, b) => a + b, 0)} records).`
-      : 'Bot Report source initialized successfully.');
+      ? `mcp_worker source initialized and legacy data imported successfully (${Object.values(imported.counts).reduce((a, b) => a + b, 0)} records).`
+      : 'mcp_worker source initialized successfully.');
   } catch (error) {
     if (prepared?.adapter) try { await prepared.adapter.close(); } catch (_) {}
     setFlash(req, 'error', `Source initialization failed: ${error.message}`);
@@ -396,12 +396,12 @@ router.post('/admin/workers/:id/:action', requireDataStore, async (req, res) => 
     if (!worker) throw new Error('Worker not found.');
     if (req.params.action === 'remove') {
       await workerLifecycleService.decommission(worker, { actorId: `admin:${req.session?.username || 'admin'}` });
-      setFlash(req, 'success', 'Worker removed remotely. Bot Report Worker was uninstalled from the target machine and its server record was deleted.');
+      setFlash(req, 'success', 'Worker removed remotely. mcp_worker Worker was uninstalled from the target machine and its server record was deleted.');
       return res.redirect('/admin/workers');
     }
     if (req.params.action === 'force-remove') {
       await workerLifecycleService.forceRemove(worker, { actorId: `admin:${req.session?.username || 'admin'}` });
-      setFlash(req, 'success', 'Worker force deleted from Bot Report. Local Worker files may still remain on the target machine.');
+      setFlash(req, 'success', 'Worker force deleted from mcp_worker. Local Worker files may still remain on the target machine.');
       return res.redirect('/admin/workers');
     }
     if (req.params.action === 'edit') {

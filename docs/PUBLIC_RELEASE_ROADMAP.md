@@ -1,4 +1,4 @@
-# Bot Report V2 — public self-hosted release roadmap
+# mcp_worker V2 — public self-hosted release roadmap
 
 ## Scope
 

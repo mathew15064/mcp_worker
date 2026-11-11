@@ -299,7 +299,7 @@ async function login(options) {
   if (existing?.worker_id) throw fail('WORKER_ALREADY_LOGGED_IN', `This machine is already enrolled as worker ${existing.worker_id}.`);
 
   const insecure = Boolean(options['insecure-http'] || process.env.BOT_REPORT_WORKER_ALLOW_INSECURE_HTTP === 'true');
-  const serverInput = options.server || process.env.BOT_REPORT_WORKER_SERVER_URL || readDefaultServer() || await ask('Bot Report server URL');
+  const serverInput = options.server || process.env.BOT_REPORT_WORKER_SERVER_URL || readDefaultServer() || await ask('mcp_worker server URL');
   const serverUrl = validateServerUrl(serverInput, insecure);
   const token = options.token || process.env.BOT_REPORT_WORKER_ENROLLMENT_TOKEN || await askHidden('One-time enrollment token');
   if (!token.startsWith('br_enroll_')) throw fail('WORKER_ENROLLMENT_INVALID', 'Enrollment token must start with br_enroll_.');
@@ -309,7 +309,7 @@ async function login(options) {
   const profileName = validateName(options.profile || workerName, 'Profile name');
   const tmuxSession = validateTmuxSession(options.tmux || 'main');
   const allowShell = options['allow-shell'] === true || process.env.BOT_REPORT_WORKER_ALLOW_SHELL === 'true' ||
-    (!options['allow-shell'] && !process.env.BOT_REPORT_WORKER_ALLOW_SHELL && await askYesNo('Allow Bot Report to execute shell commands as this OS user?', false));
+    (!options['allow-shell'] && !process.env.BOT_REPORT_WORKER_ALLOW_SHELL && await askYesNo('Allow mcp_worker to execute shell commands as this OS user?', false));
 
   ensureHome();
   const tmux = ensureTmuxSession(tmuxSession, roots[0]);
@@ -395,7 +395,7 @@ function printStatus() {
 }
 
 function printHelp() {
-  console.log(`Bot Report Worker 2.x\n\nUsage:\n  bot-report-worker login [options]\n  bot-report-worker start\n  bot-report-worker stop\n  bot-report-worker status\n  bot-report-worker logs\n  bot-report-worker run\n  bot-report-worker uninstall\n\nLogin options:\n  --server <url>       Bot Report base URL (installer provides a default)\n  --token <token>      One-time enrollment token; omitted = hidden prompt\n  --roots <paths>      Comma-separated allowed workspace roots\n  --name <name>        Worker display name; default = hostname\n  --profile <name>     Execution alias; default = worker name\n  --tmux <session>     tmux session; default = main\n  --allow-shell        Allow workspace/git/check/process shell execution\n  --insecure-http      Permit HTTP only for trusted local development\n  --no-start           Enroll only; do not connect the worker\n\nAfter successful login the worker starts in the background and the returned profile alias is immediately available to Bot Report MCP.`);
+  console.log(`mcp_worker Worker 2.x\n\nUsage:\n  bot-report-worker login [options]\n  bot-report-worker start\n  bot-report-worker stop\n  bot-report-worker status\n  bot-report-worker logs\n  bot-report-worker run\n  bot-report-worker uninstall\n\nLogin options:\n  --server <url>       mcp_worker base URL (installer provides a default)\n  --token <token>      One-time enrollment token; omitted = hidden prompt\n  --roots <paths>      Comma-separated allowed workspace roots\n  --name <name>        Worker display name; default = hostname\n  --profile <name>     Execution alias; default = worker name\n  --tmux <session>     tmux session; default = main\n  --allow-shell        Allow workspace/git/check/process shell execution\n  --insecure-http      Permit HTTP only for trusted local development\n  --no-start           Enroll only; do not connect the worker\n\nAfter successful login the worker starts in the background and the returned profile alias is immediately available to mcp_worker.`);
 }
 
 async function main() {

@@ -40,13 +40,13 @@ class OwnerNotificationService {
     const total = mb(alert.memoryTotalBytes);
     const limit = number(alert.thresholdPercent, 90).toFixed(0);
     if (alert.code === 'WORKER_MEMORY_RECOVERED') {
-      return `✅ Bot Report Worker memory recovered\nWorker: ${name}\nRAM used: ${used}%\nAvailable: ${available} MiB / ${total} MiB\nLegacy Worker recovery event received.`;
+      return `✅ mcp_worker Worker memory recovered\nWorker: ${name}\nRAM used: ${used}%\nAvailable: ${available} MiB / ${total} MiB\nLegacy Worker recovery event received.`;
     }
     if (alert.phase === 'task_start') {
-      return `🚨 Bot Report Worker task rejected by RAM guard\nWorker: ${name}\nRAM used: ${used}% (hard limit ${limit}%)\nAvailable: ${available} MiB / ${total} MiB\nThe requested Worker task was not started. Idle host memory is otherwise left untouched.`;
+      return `🚨 mcp_worker Worker task rejected by RAM guard\nWorker: ${name}\nRAM used: ${used}% (hard limit ${limit}%)\nAvailable: ${available} MiB / ${total} MiB\nThe requested Worker task was not started. Idle host memory is otherwise left untouched.`;
     }
     const stopped = alert.stopped || {};
-    return `🚨 Bot Report Worker task stopped by RAM guard\nWorker: ${name}\nRAM used: ${used}% (hard limit ${limit}%)\nAvailable: ${available} MiB / ${total} MiB\nStopped active Worker workloads: workspace=${number(stopped.workspace_commands)}, process=${number(stopped.managed_processes)}\nThe guard is task-scoped; idle host memory is not managed.`;
+    return `🚨 mcp_worker Worker task stopped by RAM guard\nWorker: ${name}\nRAM used: ${used}% (hard limit ${limit}%)\nAvailable: ${available} MiB / ${total} MiB\nStopped active Worker workloads: workspace=${number(stopped.workspace_commands)}, process=${number(stopped.managed_processes)}\nThe guard is task-scoped; idle host memory is not managed.`;
   }
 
   async sendWorkerResourceAlert(alert) {

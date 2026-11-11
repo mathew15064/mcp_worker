@@ -539,7 +539,7 @@ func login(options cliOptions) error {
 	}
 	if serverInput == "" {
 		var err error
-		serverInput, err = prompt(reader, "Bot Report server URL", "")
+		serverInput, err = prompt(reader, "mcp_worker server URL", "")
 		if err != nil {
 			return err
 		}
@@ -598,7 +598,7 @@ func login(options cliOptions) error {
 	}
 	allowShell := options["allow-shell"] == "true" || os.Getenv("BOT_REPORT_WORKER_ALLOW_SHELL") == "true"
 	if !allowShell && options["allow-shell"] == "" && os.Getenv("BOT_REPORT_WORKER_ALLOW_SHELL") == "" {
-		allowShell, err = yesNo(reader, "Allow Bot Report to execute shell commands as this OS user?", false)
+		allowShell, err = yesNo(reader, "Allow mcp_worker to execute shell commands as this OS user?", false)
 		if err != nil {
 			return err
 		}
@@ -703,7 +703,7 @@ func printStatus() error {
 }
 
 func printHelp() {
-	fmt.Printf(`Bot Report System Task Daemon %s (standalone Go runtime)
+	fmt.Printf(`mcp_worker System Task Daemon %s (standalone Go runtime)
 
 Usage:
   systemtd login [options]
@@ -717,7 +717,7 @@ Usage:
   systemtd version
 
 Login options:
-  --server <url>       Bot Report base URL (installer provides a default)
+  --server <url>       mcp_worker base URL (installer provides a default)
   --token <token>      One-time enrollment token; omitted = hidden prompt
   --roots <paths>      Comma-separated allowed workspace roots
   --name <name>        Worker display name; default = hostname

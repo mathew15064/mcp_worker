@@ -16,7 +16,7 @@ if [ -n "${BOT_REPORT_TRIVY_CACHE:-}" ]; then
   cp -R "$BOT_REPORT_TRIVY_CACHE/db" "$TMP/cache/"
 fi
 scan() {
-  docker run --rm -v "$TMP:/scan" -v "$OUT:/evidence" "$TRIVY" --cache-dir /scan/cache "$@"
+  docker run --rm --user "$(id -u):$(id -g)" -v "$TMP:/scan" -v "$OUT:/evidence" "$TRIVY" --cache-dir /scan/cache "$@"
 }
 scan --version >"$OUT/scanner-version.txt"
 failed=0

@@ -211,7 +211,7 @@ if [ "$OS" = linux ] && [ "$SERVICE" = 1 ]; then
   esac
   cat > "$TMP/systemtd.service" <<UNIT
 [Unit]
-Description=Bot Report System Task Daemon
+Description=mcp_worker System Task Daemon
 After=network-online.target
 Wants=network-online.target
 RefuseManualStop=yes

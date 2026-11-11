@@ -1,6 +1,6 @@
 # Security model and operating boundaries
 
-Bot Report exposes execution authority, not a general security sandbox.
+mcp_worker exposes execution authority, not a general security sandbox.
 Keep the MCP gateway, OAuth client credentials, Admin account and enrolled
 Worker identities within a trust boundary you control.
 

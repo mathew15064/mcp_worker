@@ -41,14 +41,14 @@ test('HTTP surface is MCP-only', async () => {
   assert.equal(health.status, 200);
   const healthBody = await health.json();
   assert.equal(healthBody.ok, true);
-  assert.equal(healthBody.service, 'bot-report-mcp');
+  assert.equal(healthBody.service, 'mcp_worker');
   assert.equal(healthBody.mode, 'mcp-admin');
   assert.equal(healthBody.database, 'LEGACY_SQLITE');
 
   const login = await fetch(`${baseUrl}/login`);
   assert.equal(login.status, 200);
   const html = await login.text();
-  assert.match(html, /Bot Report MCP/);
+  assert.match(html, /mcp_worker/);
   assert.doesNotMatch(html, /Dashboard|Antigravity|Telegram|Bot Inbox/);
 
   for (const path of ['/antigravity', '/bots', '/reports', '/control-plane']) {

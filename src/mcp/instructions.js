@@ -1,4 +1,4 @@
-const SERVER_INSTRUCTIONS = `Bot Report is a deterministic MCP-only local development execution harness.
+const SERVER_INSTRUCTIONS = `mcp_worker is a deterministic MCP-only local development execution harness.
 
 Preferred workflow:
 1. Use runtime_info first after deploy/rebuild/refresh when runtime identity matters.

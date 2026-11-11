@@ -281,7 +281,7 @@ test('real outbound worker executes MCP workspace, file and persistent direct-sh
   }
   const runtime = await call('runtime_info');
   assert.equal(runtime.tool_count, 19);
-  assert.equal(runtime.tool_schema_hash, '55e4a1ae7b26dccffcbcf6e3fa9846dec7ff7ad1fb76e47d2635a389dff4b928');
+  assert.equal(runtime.tool_schema_hash, '77fec371229586b76437ab2dd0b8bff3101c89d13baa5a223795a8a68d11fdb6');
   await call('terminal_list');
   assert.equal((await call('terminal_status', { profile })).status, 'READY');
   await call('terminal_send', { profile, text: 'echo mcp-live-terminal' });

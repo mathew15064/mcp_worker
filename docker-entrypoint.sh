@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-# Bot Report must be able to start even when MySQL has not been configured yet.
+# mcp_worker must be able to start even when MySQL has not been configured yet.
 # The persistent data directory stores the encrypted bootstrap connection file
 # and, during transition, the read-only legacy SQLite source used for import.
 DATA_DIR="${BOT_REPORT_DATA_DIR:-/app/data}"

@@ -1,7 +1,7 @@
 # Troubleshooting
 
 Use the saved installer environment and project. The examples below use
-the default .env.setup and bot-report project; substitute the exact values
+the default .env.setup and mcp_worker project; substitute the exact values
 for an isolated/custom installation.
 
 | Symptom | Check / safe action |
@@ -21,8 +21,8 @@ for an isolated/custom installation.
 
 Useful local diagnostics (review/redact output before sharing):
 
-    docker compose --env-file .env.setup -p bot-report ps
-    docker compose --env-file .env.setup -p bot-report logs --tail=100 bot-report mysql
+    docker compose --env-file .env.setup -p mcp_worker ps
+    docker compose --env-file .env.setup -p mcp_worker logs --tail=100 bot-report mysql
     curl -fsS http://127.0.0.1:3333/healthz
     curl -fsS http://127.0.0.1:3333/readyz
     systemtd version

@@ -10,7 +10,7 @@ assignees: ""
 Describe the expected and actual behavior.
 
 ## Environment
-Bot Report commit/version, OS, Docker/Node/Worker version, storage state
+mcp_worker commit/version, OS, Docker/Node/Worker version, storage state
 and local or remote deployment. Use placeholders for private hostnames.
 
 ## Reproduction

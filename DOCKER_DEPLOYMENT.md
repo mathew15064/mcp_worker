@@ -2,9 +2,9 @@
 
 For a new standalone installation use `./setup.sh --init`. The instructions below are for the existing external-proxy topology. Use `docker-compose.proxy.yml` (not the standalone default).
 
-# Bot Report — Docker Deployment
+# mcp_worker — Docker Deployment
 
-Bot Report runs as one non-root Node.js container on an existing reverse-proxy Docker network. Source and production dependencies are baked into the image; `/app/data` is persistent bootstrap/migration state.
+mcp_worker runs as one non-root Node.js container on an existing reverse-proxy Docker network. Source and production dependencies are baked into the image; `/app/data` is persistent bootstrap/migration state.
 
 ## Required host state
 
@@ -15,7 +15,7 @@ Bot Report runs as one non-root Node.js container on an existing reverse-proxy D
 
 The application no longer requires a SQLite database in order to start. A fresh deployment can boot with no application DB, authenticate the administrator from ENV, and configure MySQL through `/admin/settings`.
 
-Existing installations may keep `data/bot_report.sqlite` temporarily. Bot Report detects it as `MIGRATION_REQUIRED`; SQLite is preserved only as a read-only import source and data/MCP surfaces stay disabled until MySQL activation succeeds.
+Existing installations may keep `data/bot_report.sqlite` temporarily. mcp_worker detects it as `MIGRATION_REQUIRED`; SQLite is preserved only as a read-only import source and data/MCP surfaces stay disabled until MySQL activation succeeds.
 
 ## Bootstrap configuration
 
@@ -71,10 +71,10 @@ returns HTTP 200 only when application storage is operational. It returns 503 in
 2. Open **Settings -> Database**.
 3. Enter MySQL connection fields.
 4. Use **Test Connection**. This is read-only.
-5. Use **Save Connection**. This only encrypts/stores the connection and inspects whether a Bot Report source already exists; it does not create or upgrade schema objects.
+5. Use **Save Connection**. This only encrypts/stores the connection and inspects whether a mcp_worker source already exists; it does not create or upgrade schema objects.
 6. If the UI reports that the source is not initialized, use **Initialize Source** explicitly.
 
-`Save Connection` is intentionally non-destructive with respect to the MySQL schema, and restarting Bot Report does not auto-initialize a saved source. `Initialize Source` is the only Admin UI action that creates/upgrades Bot Report tables. On first initialization from `MIGRATION_REQUIRED`, legacy SQLite application data is imported transactionally into the newly initialized source and verified before MySQL becomes active.
+`Save Connection` is intentionally non-destructive with respect to the MySQL schema, and restarting mcp_worker does not auto-initialize a saved source. `Initialize Source` is the only Admin UI action that creates/upgrades mcp_worker tables. On first initialization from `MIGRATION_REQUIRED`, legacy SQLite application data is imported transactionally into the newly initialized source and verified before MySQL becomes active.
 
 MySQL password is AES-256-GCM encrypted in:
 

@@ -23,7 +23,7 @@ class TelegramService {
     } finally { clearTimeout(timer); }
   }
   async sendTest(botToken, chatId) {
-    return this.sendMessage(botToken, chatId, `Bot Report MCP configuration test\n${new Date().toISOString()}`);
+    return this.sendMessage(botToken, chatId, `mcp_worker configuration test\n${new Date().toISOString()}`);
   }
 }
 module.exports = new TelegramService();

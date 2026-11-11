@@ -1,8 +1,8 @@
 {
-  "name": "bot-report-worker",
+  "name": "mcp-worker-agent",
   "version": "2.0.0",
   "private": true,
-  "description": "Outbound-only Bot Report v2 execution worker",
+  "description": "Outbound-only mcp_worker v2 execution worker",
   "main": "agent.js",
   "scripts": {
     "start": "node agent.js"

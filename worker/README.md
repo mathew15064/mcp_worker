@@ -1,10 +1,10 @@
-# System Task Daemon (systemtd) — Bot Report Worker runtime
+# System Task Daemon (systemtd) — mcp_worker Worker runtime
 
-Bot Report Worker now ships as a statically linked Go executable. The target machine does **not** need Node.js, npm, nvm, Python, Docker, or another language runtime. The Worker still initiates the outbound WebSocket connection to Bot Report, so no inbound SSH port and no server-side SSH password are required.
+mcp_worker Worker now ships as a statically linked Go executable. The target machine does **not** need Node.js, npm, nvm, Python, Docker, or another language runtime. The Worker still initiates the outbound WebSocket connection to mcp_worker, so no inbound SSH port and no server-side SSH password are required.
 
 ## Supported standalone builds
 
-Bot Report ships standalone binaries for:
+mcp_worker ships standalone binaries for:
 
 - Linux: `amd64`, `arm64`, `386`, `armv7`
 - macOS: Intel `amd64`, Apple Silicon `arm64`
@@ -97,7 +97,7 @@ systemtd login
 Interactive login asks for the one-time enrollment token and allowed workspace roots. The token input is hidden. It then:
 
 1. generates an Ed25519 key pair locally,
-2. sends only the public key to Bot Report,
+2. sends only the public key to mcp_worker,
 3. creates a Worker Profile alias automatically,
 4. stores identity/config under `~/.bot-report-worker/` with restrictive permissions,
 5. starts the standalone Worker in the background,
@@ -130,7 +130,7 @@ systemtd uninstall
 
 Terminal operations use persistent local PTYs managed directly by the Worker. MCP terminal send/read/interrupt and browser **Attach Shell** share the same profile shell session without requiring tmux.
 
-`uninstall` stops the local Worker and removes only the verified installer-managed runtime, local identity/config, and verified CLI symlink. Removing an online Worker from the Bot Report web UI uses the same typed `worker.self_uninstall` control flow before deleting the server-side identity.
+`uninstall` stops the local Worker and removes only the verified installer-managed runtime, local identity/config, and verified CLI symlink. Removing an online Worker from the mcp_worker web UI uses the same typed `worker.self_uninstall` control flow before deleting the server-side identity.
 
 ## Diagnose connectivity
 
@@ -170,7 +170,7 @@ Artifacts are written to `worker/bin/` for Linux (`amd64`, `arm64`, `386`, `armv
 The Worker keeps these settings in `~/.bot-report-worker/config.json` and its Ed25519 private key in `~/.bot-report-worker/state.json` (mode `0600` where supported):
 
 ```text
-server_url             required Bot Report HTTPS base URL
+server_url             required mcp_worker HTTPS base URL
 worker_name            worker identity display name
 profile_name           MCP execution alias created during enrollment
 tmux_session           terminal session used by terminal_* operations
@@ -180,4 +180,4 @@ allow_insecure_http    local/dev only; production should remain HTTPS/WSS
 max_job_ms             local job timeout ceiling, max 300000
 ```
 
-The server cannot remotely expand allowed roots, enable shell execution, or obtain the Worker private key. `allow_shell=true` grants Bot Report the same shell authority as the OS account running the Worker, so use a dedicated low-privilege account or OS/container sandbox when stronger isolation is required.
+The server cannot remotely expand allowed roots, enable shell execution, or obtain the Worker private key. `allow_shell=true` grants mcp_worker the same shell authority as the OS account running the Worker, so use a dedicated low-privilege account or OS/container sandbox when stronger isolation is required.

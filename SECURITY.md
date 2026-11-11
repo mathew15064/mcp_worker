@@ -1,6 +1,6 @@
 # Security reporting
 
-Bot Report V2 is a source release candidate. A public security contact
+mcp_worker V2 is a source release candidate. A public security contact
 and supported-release policy have not yet been approved. Until a private
 reporting channel is established, report suspected vulnerabilities directly
 to the repository owner/maintainer through an existing trusted private

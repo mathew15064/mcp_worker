@@ -40,7 +40,7 @@ test('exact 19 technical tools remain advertised and runtime_info agrees',async(
   assert.deepEqual(list.result.tools.map(t=>t.name),expected);
   const info=await rpc('tools/call',{name:'runtime_info',arguments:{}});
   assert.equal(info.result.structuredContent.tool_count,19);
-  assert.equal(info.result.structuredContent.tool_schema_hash,'55e4a1ae7b26dccffcbcf6e3fa9846dec7ff7ad1fb76e47d2635a389dff4b928');
+  assert.equal(info.result.structuredContent.tool_schema_hash,'77fec371229586b76437ab2dd0b8bff3101c89d13baa5a223795a8a68d11fdb6');
 });
 
 test('all 11 retired game tools reject direct authenticated MCP calls',async()=>{

@@ -5,7 +5,7 @@ For a new installation, start with the [local quickstart](QUICKSTART.md). This r
 ## Outbound Worker
 
 1. In Admin, open **Workers** and generate a short-lived one-time enrollment token.
-2. On the target machine install the Worker CLI directly from that Bot Report deployment:
+2. On the target machine install the Worker CLI directly from that mcp_worker deployment:
 
 Linux:
 
@@ -49,7 +49,7 @@ For automation, `bot-report-worker login` also accepts `--token`, `--roots`, `--
 
 The private key stays in `~/.bot-report-worker/state.json` with restrictive permissions. Subsequent outbound WSS connections use signed timestamp + nonce authentication and replay protection. Administrators can disable an enrolled worker, which rejects future handshakes and terminates its active connection.
 
-Enabling shell execution grants the Bot Report MCP execution surface the same command authority as the OS user running the worker. Allowed roots protect path-bearing APIs and select the execution working tree; they are **not a shell sandbox**. For strong isolation, run the worker as a dedicated low-privilege OS account or inside an OS/container sandbox you control.
+Enabling shell execution grants the mcp_worker execution surface the same command authority as the OS user running the worker. Allowed roots protect path-bearing APIs and select the execution working tree; they are **not a shell sandbox**. For strong isolation, run the worker as a dedicated low-privilege OS account or inside an OS/container sandbox you control.
 
 See [Worker lifecycle](../worker/README.md) and [Worker architecture](V2_WORKER_ARCHITECTURE.md) for CLI, protocol and trust boundaries.
 
@@ -62,19 +62,19 @@ The production runtime has five storage states:
 ```text
 UNCONFIGURED        no MySQL configuration and no legacy database
 MIGRATION_REQUIRED  legacy SQLite exists only as a read-only import source
-CONFIGURED          MySQL connection is saved but Bot Report source is not initialized
-READY               MySQL is connected and the Bot Report source is active
+CONFIGURED          MySQL connection is saved but mcp_worker source is not initialized
+READY               MySQL is connected and the mcp_worker source is active
 DEGRADED            MySQL configuration is saved but currently unavailable
 ```
 
 An app started without explicit bundled initialization or saved database configuration starts in `UNCONFIGURED`. Administrator login and Settings remain available so MySQL can be configured entirely from the UI. Data-dependent pages and MCP/OAuth endpoints return `503` until MySQL is `READY`.
 
-Database actions are intentionally separated. **Test Connection** is read-only. **Save Connection** only encrypts/stores the MySQL connection and inspects existing source state; it never creates or upgrades tables, and restart does not auto-initialize the source. If the saved database does not contain the current Bot Report source, the UI exposes **Initialize Source** as the explicit schema-changing action.
+Database actions are intentionally separated. **Test Connection** is read-only. **Save Connection** only encrypts/stores the MySQL connection and inspects existing source state; it never creates or upgrades tables, and restart does not auto-initialize the source. If the saved database does not contain the current mcp_worker source, the UI exposes **Initialize Source** as the explicit schema-changing action.
 
-Existing SQLite installations enter `MIGRATION_REQUIRED`. SQLite application data is not served in this state; it is preserved only for the one-time import. On the first **Initialize Source**, Bot Report:
+Existing SQLite installations enter `MIGRATION_REQUIRED`. SQLite application data is not served in this state; it is preserved only for the one-time import. On the first **Initialize Source**, mcp_worker:
 
 1. connects using the already-saved MySQL configuration,
-2. creates or upgrades the Bot Report MySQL schema,
+2. creates or upgrades the mcp_worker MySQL schema,
 3. imports legacy application data transactionally into an empty first-time source when applicable,
 4. verifies imported row counts before commit,
 5. switches the running application to MySQL only after initialization succeeds.
@@ -241,7 +241,7 @@ The optional MySQL integration test is activated by `MYSQL_TEST_HOST` and relate
 
 SSH Profiles are Worker-backed aliases, not stored SSH connection credentials. Enroll a Worker first, then create an SSH Profile from the Admin or User workspace and select an online Worker. A profile can be tested with **Test Shell** or opened interactively with **Attach Shell**.
 
-The attached terminal is a persistent PTY owned by that profile and runs as the local OS account that started Bot Report Worker. No host, SSH port, SSH username, SSH password, or tmux session is configured in the profile. Admin profiles may bind only global/admin-owned Workers; User profiles may bind only Workers owned by that user.
+The attached terminal is a persistent PTY owned by that profile and runs as the local OS account that started mcp_worker Worker. No host, SSH port, SSH username, SSH password, or tmux session is configured in the profile. Admin profiles may bind only global/admin-owned Workers; User profiles may bind only Workers owned by that user.
 
 ## OAuth client management
 
@@ -263,7 +263,7 @@ Replace the example callback with the exact URI supplied by your MCP client. Cli
 
 ## Administrator password
 
-Administrator credentials are ENV-backed. Update `ADMIN_USERNAME` / `ADMIN_PASSWORD` in the runtime environment and restart Bot Report. The old database password-rotation behavior has been removed.
+Administrator credentials are ENV-backed. Update `ADMIN_USERNAME` / `ADMIN_PASSWORD` in the runtime environment and restart mcp_worker. The old database password-rotation behavior has been removed.
 
 A strong candidate can be generated with:
 

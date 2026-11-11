@@ -107,7 +107,7 @@ class DatabaseManager {
     if (!this.adapter || ![STATES.READY, STATES.LEGACY_SQLITE].includes(this.state)) {
       const messages = {
         [STATES.DEGRADED]: 'MySQL is configured but unavailable.',
-        [STATES.CONFIGURED]: 'MySQL connection is saved but the Bot Report source has not been initialized.',
+        [STATES.CONFIGURED]: 'MySQL connection is saved but the mcp_worker source has not been initialized.',
         [STATES.MIGRATION_REQUIRED]: 'MySQL is not configured.',
         [STATES.UNCONFIGURED]: 'MySQL is not configured.'
       };
@@ -168,7 +168,7 @@ class DatabaseManager {
       const migration = await runner.migrate();
       const source = await runner.inspectSource();
       if (!source.initialized) {
-        const error = new Error('Bot Report source initialization did not complete.');
+        const error = new Error('mcp_worker source initialization did not complete.');
         error.code = 'DATABASE_SOURCE_UNINITIALIZED';
         throw error;
       }

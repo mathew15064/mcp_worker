@@ -1,6 +1,6 @@
 # Third-party dependency review — V2 public preparation
 
-This is an inventory and provenance review, not a license grant for Bot Report.
+This is an inventory and provenance review, not a license grant for mcp_worker.
 The new source repository uses its owner-provided MIT LICENSE; package
 metadata is aligned. Third-party distribution notices still require review.
 
