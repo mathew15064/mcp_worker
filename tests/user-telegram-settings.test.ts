@@ -1,16 +1,18 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { UserTelegramSettingsService, keys } = require('../src/services/userTelegramSettingsService');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import settingsService = require('../src/services/userTelegramSettingsService');
+const {UserTelegramSettingsService, keys} = settingsService;
 
 class MemorySettings {
-  constructor() { this.values = new Map(); }
-  async get(key, fallback = null) { return this.values.has(key) ? this.values.get(key) : fallback; }
-  async set(key, value) { this.values.set(key, String(value ?? '')); }
+  values: Map<string, string>;
+  constructor() { this.values = new Map<string, string>(); }
+  async get<T = null>(key: string, fallback: T | null = null): Promise<string | T | null> { return this.values.get(key) ?? fallback; }
+  async set(key: string, value: unknown) { this.values.set(key, String(value ?? '')); }
 }
 
 const secrets = {
-  encrypt(value) { return `encrypted:${value}`; },
-  decrypt(value) { return String(value).replace(/^encrypted:/, ''); }
+  encrypt(value: string) { return `encrypted:${value}`; },
+  decrypt(value: unknown) { return String(value).replace(/^encrypted:/, ''); }
 };
 
 test('user Telegram settings are namespaced per user and never fall back to Admin Telegram keys', async () => {
