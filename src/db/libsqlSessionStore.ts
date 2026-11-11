@@ -85,9 +85,23 @@ export class LibsqlSessionStore extends session.Store {
     this.initialized = true;
   }
 
+  /**
+   * Open an already-provisioned session table without running DDL.
+   * Serverless HTTP cold starts must not initialize schemas on requests.
+   * The explicit preview provisioning CLI is the only schema writer.
+   */
+  async verifyExisting(): Promise<void> {
+    await this.adapter.queryAll(
+      'SELECT sid_hash, ciphertext, expires_at, created_at, updated_at FROM admin_sessions LIMIT 0',
+    );
+    this.initialized = true;
+  }
+
   private ready(): void {
     if (!this.initialized)
-      throw new Error('LibsqlSessionStore.initialize must complete before use.');
+      throw new Error(
+        'LibsqlSessionStore.initialize must complete before use; or verifyExisting must complete.',
+      );
   }
 
   private sidHash(sid: string): string {
