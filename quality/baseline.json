@@ -222,13 +222,6 @@
       "@typescript-eslint/no-require-imports": 6,
       "@typescript-eslint/no-unsafe-return": 2
     },
-    "tests/http-mcp-core.test.ts": {
-      "@typescript-eslint/no-require-imports": 6,
-      "@typescript-eslint/no-unsafe-argument": 5,
-      "@typescript-eslint/no-unsafe-assignment": 16,
-      "@typescript-eslint/no-unsafe-call": 10,
-      "@typescript-eslint/no-unsafe-member-access": 25
-    },
     "tests/mysql-integration.test.ts": {
       "@typescript-eslint/no-unused-vars": 1
     },

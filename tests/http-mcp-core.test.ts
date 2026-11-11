@@ -2,6 +2,7 @@ import test from 'node:test';
 import type OAuthServiceModule from '../src/services/mcpOAuthService';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import crypto from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -15,11 +16,11 @@ function runProcess(command: string, args: string[], options: SpawnOptionsWithou
     const child = spawn(command, args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
-    child.stdout.on('data', (chunk) => {
-      stdout += chunk.toString('utf8');
+    child.stdout.on('data', (chunk: Buffer | string) => {
+      stdout += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
     });
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString('utf8');
+    child.stderr.on('data', (chunk: Buffer | string) => {
+      stderr += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
     });
     child.once('error', reject);
     child.once('close', (code) =>
@@ -30,11 +31,11 @@ function runProcess(command: string, args: string[], options: SpawnOptionsWithou
 
 const env = setupEnv('http');
 initDb();
-const app = require('../src/app');
 let server: http.Server;
 let baseUrl = '';
 
 test.before(async () => {
+  const app = (await import('../src/app.js')).default;
   server = http.createServer(app);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -138,7 +139,9 @@ void test('worker curl installer uses verified standalone binaries without Node.
     assert.ok((await binary.arrayBuffer()).byteLength > 1024 * 1024);
   } else {
     assert.equal(sums.status, 503);
-    assert.equal((await sums.json()).code, 'WORKER_BINARY_DIST_UNAVAILABLE');
+    const unavailable: unknown = await sums.json();
+    assert.ok(unavailable && typeof unavailable === 'object' && 'code' in unavailable);
+    assert.equal(unavailable.code, 'WORKER_BINARY_DIST_UNAVAILABLE');
   }
 
   // Legacy Node files remain downloadable only as a rollback/compatibility surface.
@@ -198,7 +201,10 @@ void test(
 void test('OAuth discovery and unauthenticated MCP challenge remain available', async () => {
   const metadata = await fetch(`${baseUrl}/.well-known/oauth-authorization-server`);
   assert.equal(metadata.status, 200);
-  const body = await metadata.json();
+  const body: unknown = await metadata.json();
+  assert.ok(body && typeof body === 'object');
+  assert.ok('authorization_endpoint' in body && typeof body.authorization_endpoint === 'string');
+  assert.ok('token_endpoint' in body && typeof body.token_endpoint === 'string');
   assert.equal(body.authorization_endpoint.endsWith('/oauth/authorize'), true);
   assert.equal(body.token_endpoint.endsWith('/oauth/token'), true);
 
@@ -235,16 +241,17 @@ void test('administrator login can authorize an OAuth client through the minimal
   const authenticatedCookie = (signedIn.headers.get('set-cookie') || '').split(';')[0];
   assert.ok(authenticatedCookie);
 
-  const service = require('../src/services/mcpOAuthService');
-  const config = require('../src/config/mcpConfig');
+  const service = (await import('../src/services/mcpOAuthService.js')).default;
+  const config = (await import('../src/config/mcpConfig.js')).default;
   const registered = await service.registerClient({
     displayName: 'Consent Test Client',
     principalId: 'principal:consent_test',
     redirectUris: ['https://chatgpt.com/connector_platform_oauth_redirect'],
     allowedScopes: ['bot_report.read', 'bot_report.terminal'],
   });
+  assert.ok(registered.client);
   const verifier = 'consent-test-verifier-abcdefghijklmnopqrstuvwxyz-0123456789';
-  const challenge = require('crypto').createHash('sha256').update(verifier).digest('base64url');
+  const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
   const query = new URLSearchParams({
     client_id: registered.client.client_id,
     redirect_uri: 'https://chatgpt.com/connector_platform_oauth_redirect',
@@ -308,7 +315,10 @@ void test('administrator login can authorize an OAuth client through the minimal
     body: tokenForm.toString(),
   });
   assert.equal(token.status, 200);
-  const tokenBody = await token.json();
+  const tokenBody: unknown = await token.json();
+  assert.ok(tokenBody && typeof tokenBody === 'object');
+  assert.ok('access_token' in tokenBody && typeof tokenBody.access_token === 'string');
+  assert.ok('scope' in tokenBody && typeof tokenBody.scope === 'string');
   assert.match(tokenBody.access_token, /^br_at_/);
   assert.equal(tokenBody.scope, 'bot_report.read bot_report.terminal');
 });
@@ -394,12 +404,11 @@ void test('authenticated MCP initialize returns instructions and exactly 19 tool
   assert.ok(!names.some((name) => /notification|inbox|control|antigravity/i.test(name)));
 
   await new Promise((resolve) => setImmediate(resolve));
-  type AuditRow = { id: string; client_id: string; mcp_method: string; result: string };
-  const auditRows: AuditRow[] =
-    await require('../src/repositories/mcpOAuthRepository').listAuditLogs({
-      clientId: issued.client.client_id,
-      limit: 10,
-    });
+  const oauthRepo = (await import('../src/repositories/mcpOAuthRepository.js')).default;
+  const auditRows = await oauthRepo.listAuditLogs({
+    clientId: issued.client.client_id,
+    limit: 10,
+  });
   const initializeAudit = auditRows.find(
     (row) => row.mcp_method === 'initialize' && row.result === 'SUCCESS',
   );
@@ -407,12 +416,14 @@ void test('authenticated MCP initialize returns instructions and exactly 19 tool
     (row) => row.mcp_method === 'tools/list' && row.result === 'SUCCESS',
   );
   assert.ok(initializeAudit);
+  assert.ok(typeof initializeAudit.id === 'string');
   assert.ok(toolsListAudit);
   assert.ok(auditRows.every((row) => row.client_id === issued.client.client_id));
 
-  const initializeDetail = await require('../src/repositories/mcpOAuthRepository').findAuditLogById(
-    initializeAudit.id,
-  );
+  const initializeDetail = await oauthRepo.findAuditLogById(initializeAudit.id);
+  assert.ok(initializeDetail);
+  assert.ok(typeof initializeDetail.request_payload === 'string');
+  assert.ok(typeof initializeDetail.response_payload === 'string');
   assert.match(initializeDetail.request_payload, /"method":"initialize"/);
   assert.match(initializeDetail.response_payload, /"jsonrpc":"2\.0"/);
   assert.match(initializeDetail.response_payload, /MCP-only/);
