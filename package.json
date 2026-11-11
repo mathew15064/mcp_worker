@@ -28,7 +28,8 @@
     "format:write": "prettier --write \"src/**/*.ts\" \"worker/**/*.ts\" \"scripts/**/*.ts\" \"tests/**/*.ts\" playwright.config.ts",
     "quality:check": "node scripts/quality-gate.mjs check",
     "quality:baseline": "node scripts/quality-gate.mjs record",
-    "libsql:verify:remote": "npm run build && node dist/scripts/verify-libsql-remote.js"
+    "libsql:verify:remote": "npm run build && node dist/scripts/verify-libsql-remote.js",
+    "libsql:provision:preview": "npm run build && node dist/scripts/provision-libsql-preview.js"
   },
   "keywords": [
     "mcp",
