@@ -26,7 +26,7 @@ test('tool schemas never accept raw SSH connection credentials and scopes stay m
     assert.equal((tool.schema as Record<string, unknown>)?.password, undefined, `${tool.name} must not accept password`);
     assert.ok(tool.description && tool.description.length > 20, `${tool.name} needs usage guidance`);
     if (tool.name === 'runtime_info') assert.equal((tool as {requiredScope?: string}).requiredScope, 'bot_report.read');
-    else assert.equal(tool.requiredScope, 'bot_report.terminal');
+    else assert.equal((tool as {requiredScope?: string}).requiredScope, 'bot_report.terminal');
   }
 });
 
