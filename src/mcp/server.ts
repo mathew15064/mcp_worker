@@ -1,20 +1,26 @@
-const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
-const { ListToolsRequestSchema } = require('@modelcontextprotocol/sdk/types.js');
-const { TOOLS, registerAllTools } = require('./toolRegistry');
-const { SERVER_INSTRUCTIONS } = require('./instructions');
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ListToolsResult } from '@modelcontextprotocol/sdk/types.js';
+import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { TOOLS, registerAllTools } from './toolRegistry';
+import { SERVER_INSTRUCTIONS } from './instructions';
 
 // The V2 tool catalog is fixed. Only its JSON Schema representation is shared;
 // MCP servers, transports, authorization and tool handlers remain request-scoped.
-let cachedStaticToolList = null;
+let cachedStaticToolList: Promise<ListToolsResult> | null = null;
+interface CreateMcpServerOptions {name?: string; version?: string; instructions?: string; toolListCache?: boolean}
+interface InternalTool {enabled: boolean}
 
-function installStaticToolListCache(server) {
+function installStaticToolListCache(server: McpServer): void {
   // SDK 1.32.2 exposes this request handler map. Fail open to the SDK's regular
   // tools/list implementation if a future SDK version changes that interface.
-  const original = server.server?._requestHandlers?.get('tools/list');
+  const internals = server.server as unknown as {
+    _requestHandlers?: Map<string, (request: unknown, extra: unknown) => Promise<ListToolsResult>>
+  };
+  const original = internals._requestHandlers?.get('tools/list');
   if (typeof original !== 'function') return;
 
   server.server.setRequestHandler(ListToolsRequestSchema, (request, extra) => {
-    const registered = server._registeredTools;
+    const registered = (server as unknown as {_registeredTools?: Record<string, InternalTool>})._registeredTools;
     // Preserve any per-server disabled or dynamically changed tool list.
     if (!registered || Object.keys(registered).length !== TOOLS.length ||
       TOOLS.some(tool => !registered[tool.name]?.enabled)) {
@@ -31,7 +37,7 @@ function installStaticToolListCache(server) {
   });
 }
 
-function createMcpServer(options = {}) {
+export function createMcpServer(options: CreateMcpServerOptions = {}) {
   const server = new McpServer({
     name: options.name || 'mcp_worker',
     version: options.version || '1.0.0'
@@ -44,5 +50,3 @@ function createMcpServer(options = {}) {
   }
   return server;
 }
-
-module.exports = { createMcpServer };

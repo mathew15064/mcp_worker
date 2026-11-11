@@ -1,22 +1,23 @@
-const crypto = require('crypto');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-const { assertPrincipal } = require('../context');
-const { SCOPES } = require('../../auth/principal');
-const packageJson = require('../../../package.json');
+import { assertPrincipal } from '../context';
+import type { ToolMetadata, ToolResponse } from '../toolTypes';
+import { SCOPES } from '../../auth/principal';
+const packageJson: { name: string; version: string } = require('../../../package.json');
 
 const PROCESS_STARTED_AT = new Date(Date.now() - Math.floor(process.uptime() * 1000)).toISOString();
 const PROJECT_ROOT = path.resolve(__dirname, '../../..');
 
-function sha256(value) {
+function sha256(value: string) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
 
-function collectSourceFiles(root) {
-  const files = [];
-  function walk(directory) {
+function collectSourceFiles(root: string) {
+  const files: string[] = [];
+  function walk(directory: string) {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const full = path.join(directory, entry.name);
       if (entry.isDirectory()) walk(full);
@@ -39,7 +40,7 @@ function sourceFingerprint() {
   return hash.digest('hex');
 }
 
-function schemaFingerprint(tools) {
+function schemaFingerprint(tools: ReadonlyArray<ToolMetadata & { schema: Record<string, { constructor?: { name?: string }; description?: string }> }>) {
   const normalized = tools
     .map(tool => ({
       name: tool.name,
@@ -59,7 +60,7 @@ function schemaFingerprint(tools) {
   return sha256(JSON.stringify(normalized));
 }
 
-async function handleRuntimeInfo() {
+async function handleRuntimeInfo(): Promise<ToolResponse> {
   const principal = assertPrincipal();
   principal.assertScope(SCOPES.READ);
   const { TOOLS } = require('../toolRegistry');
@@ -83,7 +84,7 @@ async function handleRuntimeInfo() {
   };
 }
 
-module.exports = {
+const runtimeInfo = {
   name: 'runtime_info',
   description: 'Return sanitized mcp_worker runtime/build identity, tool schema hash, and a fingerprint over package.json plus the complete MCP-only src tree. Use first after deploy, rebuild, or MCP refresh when you need to verify which version is actually running.',
   schema: {},
@@ -91,3 +92,4 @@ module.exports = {
   handler: handleRuntimeInfo,
   _test: { sourceFingerprint, schemaFingerprint, collectSourceFiles }
 };
+export = runtimeInfo;

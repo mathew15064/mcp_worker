@@ -1,13 +1,15 @@
-const { z } = require('zod');
-const { assertPrincipal } = require('../context');
-const { SCOPES } = require('../../auth/principal');
-const terminalMcpService = require('../../services/terminalMcpService');
+import { z } from 'zod';
+import { defineTool, type ToolResponse } from '../toolTypes';
+import type { TerminalToolService } from '../terminalServiceContract';
+import { assertPrincipal } from '../context';
+import { SCOPES } from '../../auth/principal';
+const terminalMcpService: TerminalToolService = require('../../services/terminalMcpService');
 
 const profileSchema = z.string().trim().min(1).max(100).describe('Configured Terminal Profile name');
 const pathSchema = z.string().min(1).max(2000).describe('Path on the configured remote host');
 const processIdSchema = z.string().regex(/^brproc-[a-f0-9]{16}$/).describe('Managed process identifier returned by process_start');
 
-function textResult(value) {
+function textResult(value: Record<string, unknown>): ToolResponse {
   return {
     structuredContent: value,
     content: [{ type: 'text', text: JSON.stringify(value, null, 2) }]
@@ -20,7 +22,7 @@ function terminalPrincipal() {
   return principal;
 }
 
-const fileRead = {
+export const fileRead = defineTool({
   name: 'file_read',
   description: 'Read UTF-8 text with SHA-256 metadata, optionally by line range. Use after code_search or when a file is known, and before editing existing files; prefer bounded ranges over broad reads.',
   schema: {
@@ -44,9 +46,9 @@ const fileRead = {
       actorId: principal.actor_id
     }));
   }
-};
+});
 
-const fileWrite = {
+export const fileWrite = defineTool({
   name: 'file_write',
   description: 'Atomically create or fully replace a UTF-8 text file. Use for new files or intentional full-file replacement; prefer file_patch for localized edits. Use expected_sha256 when replacing an existing file from a prior read.',
   schema: {
@@ -69,9 +71,9 @@ const fileWrite = {
       actorId: principal.actor_id
     })) });
   }
-};
+});
 
-const filePatch = {
+export const filePatch = defineTool({
   name: 'file_patch',
   description: 'Apply a deterministic exact-text replacement to a UTF-8 file. Use for localized edits after file_read; pass file_read.sha256 as expected_sha256 whenever available so stale edits fail closed.',
   schema: {
@@ -97,9 +99,9 @@ const filePatch = {
       actorId: principal.actor_id
     })) });
   }
-};
+});
 
-const processStart = {
+export const processStart = defineTool({
   name: 'process_start',
   description: 'Start a long-running command in a managed detached tmux session. Use for servers, watchers, workers, or E2E support processes that outlive one call; use check_run or workspace_exec for finite commands.',
   schema: {
@@ -119,9 +121,9 @@ const processStart = {
       actorId: principal.actor_id
     })) });
   }
-};
+});
 
-const processStatus = {
+export const processStatus = defineTool({
   name: 'process_status',
   description: 'Inspect state, exit code, PID, and recent output for a process_start process. Use for lifecycle/state checks; use process_logs with a cursor for repeated incremental output reads.',
   schema: {
@@ -139,9 +141,9 @@ const processStatus = {
       actorId: principal.actor_id
     }));
   }
-};
+});
 
-const processStop = {
+export const processStop = defineTool({
   name: 'process_stop',
   description: 'Stop and clean up a managed process. Use when a process_start workload is finished or must be cancelled; sends Ctrl-C first and force-cleans after the grace period when requested.',
   schema: {
@@ -163,10 +165,10 @@ const processStop = {
       actorId: principal.actor_id
     })) });
   }
-};
+});
 
 
-const repoSnapshot = {
+export const repoSnapshot = defineTool({
   name: 'repo_snapshot',
   description: 'Return branch, HEAD, upstream, dirty state, ahead/behind counts, changed files, and optional merge-base in one structured call. Use near the start of a repository task before modifying source.',
   schema: {
@@ -186,9 +188,9 @@ const repoSnapshot = {
       actorId: principal.actor_id
     }));
   }
-};
+});
 
-const gitDiff = {
+export const gitDiff = defineTool({
   name: 'git_diff',
   description: 'Return a bounded structured Git diff with changed-file status, additions/deletions, and unified diff text. Prefer this for pre/post-change review instead of workspace_exec with raw git diff.',
   schema: {
@@ -214,9 +216,9 @@ const gitDiff = {
       actorId: principal.actor_id
     }));
   }
-};
+});
 
-const codeSearch = {
+export const codeSearch = defineTool({
   name: 'code_search',
   description: 'Search source code with ripgrep and return bounded structured file/line/column matches. Use when the relevant file or location is unknown, preferably before broad file_read calls; this is exact/regex search, not semantic similarity search.',
   schema: {
@@ -245,9 +247,9 @@ const codeSearch = {
       actorId: principal.actor_id
     }));
   }
-};
+});
 
-const checkRun = {
+export const checkRun = defineTool({
   name: 'check_run',
   description: 'Run a finite test, lint, typecheck, formatter-check, or build command and return compact structured results. Prefer this over workspace_exec for checks where pass/fail and bounded failure context matter.',
   schema: {
@@ -271,9 +273,9 @@ const checkRun = {
       actorId: principal.actor_id
     }));
   }
-};
+});
 
-const processLogs = {
+export const processLogs = defineTool({
   name: 'process_logs',
   description: 'Read only new output from a process_start process using a byte cursor. Prefer this for repeated polling so prior log output is not resent; use process_status for lifecycle/state checks.',
   schema: {
@@ -293,10 +295,4 @@ const processLogs = {
       actorId: principal.actor_id
     }));
   }
-};
-
-module.exports = {
-  fileRead, fileWrite, filePatch,
-  processStart, processStatus, processStop, processLogs,
-  repoSnapshot, gitDiff, codeSearch, checkRun
-};
+});

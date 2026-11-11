@@ -1,13 +1,31 @@
-const express = require('express');
-const crypto = require('crypto');
-const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
-const oauthResourceServer = require('../auth/oauthResourceServer');
-const mcpOAuthRepository = require('../repositories/mcpOAuthRepository');
-const databaseManager = require('../db/databaseManager');
-const mcpConfig = require('../config/mcpConfig');
-const { runWithPrincipal } = require('./context');
-const { createMcpServer } = require('./server');
-const { createResponseCapture, captureRequestPayload, captureResponsePayload } = require('../services/auditPayloadService');
+import express, {type Response} from 'express';
+import crypto from 'node:crypto';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import oauthResourceServer = require('../auth/oauthResourceServer');
+import type { AuthenticatedPrincipal } from '../auth/principal';
+import mcpOAuthRepository = require('../repositories/mcpOAuthRepository');
+import databaseManager = require('../db/databaseManager');
+import mcpConfig = require('../config/mcpConfig');
+import { runWithPrincipal } from './context';
+import { createMcpServer } from './server';
+interface PayloadCapture {payload: string | null; truncated: boolean}
+interface ResponseCapture {snapshot(): {body: string; truncated: boolean}}
+const {createResponseCapture, captureRequestPayload, captureResponsePayload}: {
+  createResponseCapture(res: Response): ResponseCapture;
+  captureRequestPayload(body: unknown): PayloadCapture;
+  captureResponsePayload(capture: ResponseCapture, res: Response): PayloadCapture;
+} = require('../services/auditPayloadService');
+interface AuditArgs {
+  requestId: string;
+  principal: AuthenticatedPrincipal | null | undefined;
+  method: string;
+  toolName: string | null;
+  res: Response;
+  startMs: number;
+  requestCapture: PayloadCapture;
+  responseCapture: ResponseCapture;
+}
+
 
 async function recordSafeAudit({
   requestId,
@@ -18,7 +36,7 @@ async function recordSafeAudit({
   startMs,
   requestCapture,
   responseCapture
-}) {
+}: AuditArgs) {
   try {
     const durationMs = Math.max(0, Date.now() - startMs);
     const httpStatus = res.statusCode || 200;
@@ -50,7 +68,7 @@ async function recordSafeAudit({
   }
 }
 
-function createMcpRouter({ resourceServer = oauthResourceServer } = {}) {
+export function createMcpRouter({ resourceServer = oauthResourceServer }: { resourceServer?: Pick<typeof oauthResourceServer, 'createMiddleware'> } = {}) {
   const router = express.Router();
   const authMiddleware = resourceServer.createMiddleware();
   router.use('/mcp', (req, res, next) => {
@@ -83,7 +101,7 @@ function createMcpRouter({ resourceServer = oauthResourceServer } = {}) {
     });
 
     try {
-      await runWithPrincipal(req.principal, async () => {
+      await runWithPrincipal(req.principal ?? null, async () => {
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: undefined
         });
@@ -126,7 +144,7 @@ function createMcpRouter({ resourceServer = oauthResourceServer } = {}) {
     });
 
     try {
-      await runWithPrincipal(req.principal, async () => {
+      await runWithPrincipal(req.principal ?? null, async () => {
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: undefined
         });
@@ -149,7 +167,3 @@ function createMcpRouter({ resourceServer = oauthResourceServer } = {}) {
 
   return { router };
 }
-
-module.exports = {
-  createMcpRouter
-};

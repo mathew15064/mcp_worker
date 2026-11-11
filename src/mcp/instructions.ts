@@ -1,4 +1,4 @@
-const SERVER_INSTRUCTIONS = `mcp_worker is a deterministic MCP-only local development execution harness.
+export const SERVER_INSTRUCTIONS = `mcp_worker is a deterministic MCP-only local development execution harness.
 
 Preferred workflow:
 1. Use runtime_info first after deploy/rebuild/refresh when runtime identity matters.
@@ -17,5 +17,3 @@ Verification rules:
 - Tool success proves only that an operation completed; it does not prove task correctness.
 - Review the resulting diff and run relevant checks before claiming implementation is complete.
 - Keep execution deterministic and bounded. Do not invent file references, credentials, deployment state, or test results.`;
-
-module.exports = { SERVER_INSTRUCTIONS };

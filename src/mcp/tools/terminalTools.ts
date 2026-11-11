@@ -1,11 +1,13 @@
-const { z } = require('zod');
-const { assertPrincipal } = require('../context');
-const { SCOPES } = require('../../auth/principal');
-const terminalMcpService = require('../../services/terminalMcpService');
+import { z } from 'zod';
+import { defineTool, type ToolResponse } from '../toolTypes';
+import type { TerminalToolService } from '../terminalServiceContract';
+import { assertPrincipal } from '../context';
+import { SCOPES } from '../../auth/principal';
+const terminalMcpService: TerminalToolService = require('../../services/terminalMcpService');
 
 const profileSchema = z.string().trim().min(1).max(100).describe('Configured Terminal Profile name, for example dev2');
 
-function textResult(value) {
+function textResult(value: Record<string, unknown>): ToolResponse {
   return {
     structuredContent: value,
     content: [{ type: 'text', text: JSON.stringify(value, null, 2) }]
@@ -18,7 +20,7 @@ function terminalPrincipal() {
   return principal;
 }
 
-const listTerminals = {
+export const listTerminals = defineTool({
   name: 'terminal_list',
   description: 'List configured Terminal Profiles available for remote coordination. Returns aliases only; never exposes SSH credentials or hosts.',
   schema: {},
@@ -29,9 +31,9 @@ const listTerminals = {
     const principal = terminalPrincipal();
     return textResult({ terminals: await service.list({ actorId: principal.actor_id }) });
   }
-};
+});
 
-const terminalStatus = {
+export const terminalStatus = defineTool({
   name: 'terminal_status',
   description: 'Verify the SSH connection and configured tmux session for a Terminal Profile. Also reports the single target pane and its current command.',
   schema: { profile: profileSchema },
@@ -42,9 +44,9 @@ const terminalStatus = {
     const principal = terminalPrincipal();
     return textResult(await service.status(args.profile, { actorId: principal.actor_id }));
   }
-};
+});
 
-const terminalRead = {
+export const terminalRead = defineTool({
   name: 'terminal_read',
   description: 'Read recent sanitized text from an existing tmux session. Use for interactive coordination or secondary-agent progress; do not use as the default source-code or process-log reader when structured tools are available.',
   schema: {
@@ -58,9 +60,9 @@ const terminalRead = {
     const principal = terminalPrincipal();
     return textResult(await service.read(args.profile, args.lines || 200, { actorId: principal.actor_id }));
   }
-};
+});
 
-const terminalSend = {
+export const terminalSend = defineTool({
   name: 'terminal_send',
   description: 'Send text to the single tmux pane behind a configured Terminal Profile. Use only for interactive coordination with an already-running shell or secondary agent; this is not the default coding path and does not accept raw SSH credentials.',
   schema: {
@@ -79,10 +81,10 @@ const terminalSend = {
     });
     return textResult({ success: true, ...result });
   }
-};
+});
 
 
-const workspaceExec = {
+export const workspaceExec = defineTool({
   name: 'workspace_exec',
   description: 'Execute a deterministic one-shot shell command over SSH. Use as the generic fallback when no specialized structured tool fits; prefer repo_snapshot, git_diff, code_search, file_*, check_run, and process_* when they cover the task.',
   schema: {
@@ -103,9 +105,9 @@ const workspaceExec = {
     });
     return textResult({ success: true, ...result });
   }
-};
+});
 
-const terminalInterrupt = {
+export const terminalInterrupt = defineTool({
   name: 'terminal_interrupt',
   description: 'Send a SIGINT (Ctrl-C) to the single tmux pane behind a configured Terminal Profile to cancel or interrupt a running process.',
   schema: {
@@ -121,9 +123,9 @@ const terminalInterrupt = {
     });
     return textResult({ success: true, ...result });
   }
-};
+});
 
-const artifactCollect = {
+export const artifactCollect = defineTool({
   name: 'artifact_collect',
   description: 'Collect a read-only verification artifact with size, MIME type, SHA-256, and text when applicable. Use after tests/UI/runtime checks for evidence; do not assume binary upload to another connector unless a real file reference is returned.',
   schema: {
@@ -142,6 +144,4 @@ const artifactCollect = {
     });
     return textResult({ success: true, ...result });
   }
-};
-
-module.exports = { listTerminals, terminalStatus, terminalRead, terminalSend, workspaceExec, terminalInterrupt, artifactCollect };
+});

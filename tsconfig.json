@@ -9,7 +9,7 @@
     "noEmitOnError": true,
     "forceConsistentCasingInFileNames": true,
     "types": ["node"],
-    "skipLibCheck": false
+    "skipLibCheck": true
   },
   "include": ["src/**/*.ts", "worker/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts"],
   "exclude": ["node_modules", "dist", "worker/node_modules", "worker/bin"]
