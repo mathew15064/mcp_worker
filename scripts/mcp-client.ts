@@ -1,22 +1,24 @@
 #!/usr/bin/env node
-const databaseManager = require('../src/db/databaseManager');
-const runtimeSettings = require('../src/services/runtimeSettingsService');
-const { closeDb } = require('../src/db/connection');
-const service = require('../src/services/mcpOAuthService');
-const repo = require('../src/repositories/mcpOAuthRepository');
+import databaseManager = require('../src/db/databaseManager');
+import runtimeSettings = require('../src/services/runtimeSettingsService');
+import {closeDb} from '../src/db/connection';
+import service = require('../src/services/mcpOAuthService');
+import repo = require('../src/repositories/mcpOAuthRepository');
 
-function parse(argv) {
-  const out = { _: [], redirect: [] };
+interface Args {_: string[]; redirect: string[]; name?: string; principal?: string; scopes?: string}
+function parse(argv: string[]): Args {
+  const out: Args = { _: [], redirect: [] };
   for (let i = 0; i < argv.length; i++) {
     const value = argv[i];
     if (!value.startsWith('--')) { out._.push(value); continue; }
     const key = value.slice(2);
     const next = argv[++i];
-    if (key === 'redirect') out.redirect.push(next); else out[key] = next;
+    if (key === 'redirect' && next) out.redirect.push(next);
+    else if (key === 'name' || key === 'principal' || key === 'scopes') out[key] = next;
   }
   return out;
 }
-function scopes(value) {
+function scopes(value: unknown) {
   return String(value || 'bot_report.read bot_report.terminal offline_access').split(/[\s,]+/).filter(Boolean);
 }
 function usage() {
@@ -29,12 +31,13 @@ function usage() {
   npm run mcp-client -- revoke CLIENT_ID
   npm run mcp-client -- delete CLIENT_ID`);
 }
-async function byClientId(clientId) {
+async function byClientId(clientId: string) {
   const client = await repo.findClientByClientId(clientId);
   if (!client) throw new Error(`OAuth client '${clientId}' not found.`);
   return client;
 }
-function printSecret(result) {
+function printSecret(result: {client: {client_id: string} | null; rawSecret: string}) {
+  if (!result.client) throw new Error('Client was not returned by OAuth service');
   console.log(`client_id=${result.client.client_id}`);
   console.log(`client_secret=${result.rawSecret}`);
   console.log('Store the secret now; only its hash is persisted.');
@@ -50,7 +53,7 @@ async function main() {
   const cmd = args._[0];
   if (!cmd || ['help', '-h'].includes(cmd)) return usage();
   if (cmd === 'list') {
-    console.table((await repo.listClients()).map(({ client_id, display_name, principal_id, status, allowed_scopes, redirect_uris }) => ({ client_id, display_name, principal_id, status, scopes: allowed_scopes.join(' '), redirects: redirect_uris.join(', ') })));
+    console.table((await repo.listClients()).filter((v): v is NonNullable<typeof v> => v !== null).map(({ client_id, display_name, principal_id, status, allowed_scopes, redirect_uris }) => ({ client_id, display_name, principal_id, status, scopes: allowed_scopes.join(' '), redirects: redirect_uris.join(', ') })));
     return;
   }
   if (cmd === 'add') {
@@ -68,7 +71,7 @@ async function main() {
   else throw new Error(`Unknown command '${cmd}'.`);
   console.log(`${cmd} completed for '${clientId}'.`);
 }
-main().catch(error => { console.error(`ERROR: ${error.message}`); process.exitCode = 1; }).finally(async () => {
+main().catch((error: unknown) => { console.error(`ERROR: ${(error instanceof Error ? error.message : String(error))}`); process.exitCode = 1; }).finally(async () => {
   try { await databaseManager.close(); } catch (_) {}
   closeDb();
 });

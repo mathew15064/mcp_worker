@@ -1,16 +1,23 @@
 #!/usr/bin/env node
 'use strict';
 
-const crypto = require('crypto');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const readline = require('readline/promises');
-const { spawn, spawnSync } = require('child_process');
-const { stdin, stdout } = require('process');
-const { DEFAULT_CAPABILITIES } = require('./agent');
-const { buildCleanupPlan, applyCleanupPlan } = require('./lifecycle');
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import readline from 'node:readline/promises';
+import {spawn, spawnSync} from 'node:child_process';
+import {stdin, stdout} from 'node:process';
+import agent = require('./agent');
+const {DEFAULT_CAPABILITIES} = agent;
+import lifecycle = require('./lifecycle');
+const {buildCleanupPlan, applyCleanupPlan} = lifecycle;
 
+interface WorkerConfig {server_url: string; worker_name: string; profile_name: string; tmux_session: string; tmux_created_by_worker: boolean; allowed_roots: string[]; allow_shell: boolean; allow_insecure_http: boolean; max_job_ms: number; updated_at: string}
+interface WorkerState {worker_id?: string; private_key?: string; public_key?: string; name?: string; server_url?: string; enrolled_at?: string}
+interface CliOptions { [key: string]: string | boolean | undefined; server?: string; token?: string; roots?: string; name?: string; profile?: string; tmux?: string}
+function errorCode(error: unknown): string | undefined {return error !== null && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : undefined}
+function errorMessage(error: unknown): string {return error instanceof Error ? error.message : String(error)}
 const WORKER_HOME = path.resolve(process.env.BOT_REPORT_WORKER_HOME || path.join(os.homedir(), '.bot-report-worker'));
 const CONFIG_PATH = path.join(WORKER_HOME, 'config.json');
 const STATE_PATH = path.join(WORKER_HOME, 'state.json');
@@ -19,18 +26,14 @@ const LOG_PATH = path.join(WORKER_HOME, 'worker.log');
 const DEFAULT_SERVER_PATH = path.join(WORKER_HOME, 'default-server');
 const AGENT_PATH = path.join(__dirname, 'agent.js');
 
-function fail(code, message) {
-  const error = new Error(message);
-  error.code = code;
-  return error;
-}
+function fail(code: string, message: string) {return Object.assign(new Error(message), {code});}
 
 function ensureHome() {
   fs.mkdirSync(WORKER_HOME, { recursive: true, mode: 0o700 });
   try { fs.chmodSync(WORKER_HOME, 0o700); } catch (_) {}
 }
 
-function writeJsonAtomic(filePath, value) {
+function writeJsonAtomic(filePath: string, value: WorkerConfig | WorkerState) {
   ensureHome();
   const temp = `${filePath}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
   fs.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
@@ -38,10 +41,10 @@ function writeJsonAtomic(filePath, value) {
   try { fs.chmodSync(filePath, 0o600); } catch (_) {}
 }
 
-function readJson(filePath) {
+function readJson<T extends object>(filePath: string): T | null {
   try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); }
   catch (error) {
-    if (error.code === 'ENOENT') return null;
+    if (errorCode(error) === 'ENOENT') return null;
     throw error;
   }
 }
@@ -51,12 +54,12 @@ function readDefaultServer() {
   catch (_) { return ''; }
 }
 
-function parseArgs(argv) {
+function parseArgs(argv: string[]): {command: string; options: CliOptions} {
   if (!argv.length || ['help', '--help', '-h'].includes(argv[0])) return { command: 'help', options: {} };
   const command = argv[0];
   if (command.startsWith('-')) throw fail('CLI_COMMAND_UNKNOWN', `Unknown command '${command}'. Run bot-report-worker help.`);
   const args = argv.slice(1);
-  const options = {};
+  const options: CliOptions = {};
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (!arg.startsWith('--')) throw fail('CLI_ARGUMENT_INVALID', `Unexpected argument '${arg}'.`);
@@ -73,7 +76,7 @@ function parseArgs(argv) {
   return { command, options };
 }
 
-function validateServerUrl(value, allowInsecure) {
+function validateServerUrl(value: unknown, allowInsecure: boolean) {
   let parsed;
   try { parsed = new URL(String(value || '').trim()); }
   catch (_) { throw fail('WORKER_SERVER_URL_INVALID', 'Server URL must be a valid HTTP(S) URL.'); }
@@ -87,19 +90,19 @@ function validateServerUrl(value, allowInsecure) {
   return parsed.origin;
 }
 
-function validateTmuxSession(value) {
+function validateTmuxSession(value: unknown) {
   const session = String(value || '').trim();
   if (!/^[A-Za-z0-9_.-]{1,80}$/.test(session)) throw fail('INVALID_TMUX_SESSION', 'tmux session may contain only letters, numbers, underscore, dot, and hyphen.');
   return session;
 }
 
-function validateName(value, label = 'Worker name') {
+function validateName(value: unknown, label = 'Worker name') {
   const name = String(value || '').trim();
   if (!/^[A-Za-z0-9][A-Za-z0-9_. -]{0,99}$/.test(name)) throw fail('WORKER_NAME_INVALID', `${label} must be 1-100 safe characters.`);
   return name;
 }
 
-function normalizeRoots(value) {
+function normalizeRoots(value: unknown) {
   const roots = (Array.isArray(value) ? value : String(value || '').split(','))
     .map(item => path.resolve(String(item).trim())).filter(Boolean);
   if (!roots.length) throw fail('WORKER_ALLOWED_ROOTS_REQUIRED', 'At least one allowed workspace root is required.');
@@ -111,7 +114,7 @@ function normalizeRoots(value) {
   return [...new Set(roots)];
 }
 
-async function ask(question, defaultValue = '') {
+async function ask(question: string, defaultValue = '') {
   if (!stdin.isTTY) throw fail('CLI_INPUT_REQUIRED', `${question} must be supplied as a command option in non-interactive mode.`);
   const rl = readline.createInterface({ input: stdin, output: stdout });
   try {
@@ -121,19 +124,19 @@ async function ask(question, defaultValue = '') {
   } finally { rl.close(); }
 }
 
-async function askYesNo(question, defaultYes = false) {
+async function askYesNo(question: string, defaultYes = false) {
   const answer = (await ask(`${question} ${defaultYes ? '[Y/n]' : '[y/N]'}`)).trim().toLowerCase();
   if (!answer) return defaultYes;
   return ['y', 'yes'].includes(answer);
 }
 
-async function askHidden(question) {
+async function askHidden(question: string) {
   if (!stdin.isTTY || typeof stdin.setRawMode !== 'function') return ask(question);
   stdout.write(`${question}: `);
   stdin.setRawMode(true);
   stdin.resume();
   stdin.setEncoding('utf8');
-  return new Promise((resolve, reject) => {
+  return new Promise<string>((resolve, reject) => {
     let value = '';
     const cleanup = () => {
       stdin.off('data', onData);
@@ -141,7 +144,7 @@ async function askHidden(question) {
       stdin.pause();
       stdout.write('\n');
     };
-    const onData = chunk => {
+    const onData = (chunk: string) => {
       for (const char of chunk) {
         if (char === '\r' || char === '\n') {
           cleanup();
@@ -170,11 +173,11 @@ function generateIdentity() {
   };
 }
 
-function commandExists(command) {
+function commandExists(command: string) {
   return spawnSync('sh', ['-lc', `command -v ${command} >/dev/null 2>&1`], { stdio: 'ignore' }).status === 0;
 }
 
-function ensureTmuxSession(session, cwd) {
+function ensureTmuxSession(session: string, cwd: string) {
   if (!commandExists('tmux')) return { available: false, created: false };
   const exists = spawnSync('tmux', ['has-session', '-t', `=${session}`], { stdio: 'ignore' });
   if (exists.status === 0) return { available: true, created: false };
@@ -183,7 +186,7 @@ function ensureTmuxSession(session, cwd) {
   return { available: true, created: true };
 }
 
-function workerEnv(config) {
+function workerEnv(config: WorkerConfig) {
   return {
     ...process.env,
     BOT_REPORT_WORKER_SERVER_URL: config.server_url,
@@ -204,7 +207,7 @@ function readPid() {
   } catch (_) { return null; }
 }
 
-function pidAlive(pid) {
+function pidAlive(pid: number | null) {
   if (!pid) return false;
   try { process.kill(pid, 0); return true; } catch (_) { return false; }
 }
@@ -229,7 +232,7 @@ function logTail(maxBytes = 12 * 1024) {
   } catch (_) { return ''; }
 }
 
-async function waitForConnected(pid, timeoutMs = 8000) {
+async function waitForConnected(pid: number, timeoutMs = 8000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     if (!pidAlive(pid)) throw fail('WORKER_START_FAILED', `Worker exited during startup.\n${logTail()}`);
@@ -240,9 +243,9 @@ async function waitForConnected(pid, timeoutMs = 8000) {
   throw fail('WORKER_CONNECT_TIMEOUT', `Worker started but did not confirm connection within ${timeoutMs} ms.\n${logTail()}`);
 }
 
-async function startDetached({ wait = true } = {}) {
-  const config = readJson(CONFIG_PATH);
-  const state = readJson(STATE_PATH);
+async function startDetached({ wait = true }: {wait?: boolean} = {}) {
+  const config = readJson<WorkerConfig>(CONFIG_PATH);
+  const state = readJson<WorkerState>(STATE_PATH);
   if (!config || !state?.worker_id) throw fail('WORKER_NOT_LOGGED_IN', 'Run bot-report-worker login first.');
   const existing = clearStalePid();
   if (existing) {
@@ -261,14 +264,14 @@ async function startDetached({ wait = true } = {}) {
   child.unref();
   fs.writeFileSync(PID_PATH, `${child.pid}\n`, { mode: 0o600 });
   try {
-    if (wait) await waitForConnected(child.pid);
+    if (wait && child.pid) await waitForConnected(child.pid);
   } catch (error) {
-    try { process.kill(child.pid, 'SIGTERM'); } catch (_) {}
+    try { if (child.pid) process.kill(child.pid, 'SIGTERM'); } catch (_) {}
     try { fs.unlinkSync(PID_PATH); } catch (_) {}
     throw error;
   }
   console.log(`[bot-report-worker] connected profile=${config.profile_name} pid=${child.pid}`);
-  return child.pid;
+  return child.pid || 0;
 }
 
 async function stopWorker() {
@@ -294,8 +297,8 @@ async function uninstallLocal() {
   console.log(`[bot-report-worker] uninstalled local_state=${result.local_state_removed ? 'removed' : 'kept'} installation=${result.installation_removed ? 'removed' : 'kept'}`);
 }
 
-async function login(options) {
-  const existing = readJson(STATE_PATH);
+async function login(options: CliOptions) {
+  const existing = readJson<WorkerState>(STATE_PATH);
   if (existing?.worker_id) throw fail('WORKER_ALREADY_LOGGED_IN', `This machine is already enrolled as worker ${existing.worker_id}.`);
 
   const insecure = Boolean(options['insecure-http'] || process.env.BOT_REPORT_WORKER_ALLOW_INSECURE_HTTP === 'true');
@@ -327,7 +330,7 @@ async function login(options) {
       tmux_session: tmuxSession
     })
   });
-  const payload = await response.json().catch(() => ({}));
+  const payload = await response.json().catch(() => ({})) as {code?: string; message?: string; worker_id?: string; name?: string; profile?: {name?: string; tmux_session?: string}};
   if (!response.ok) throw fail(payload.code || 'WORKER_ENROLLMENT_FAILED', payload.message || `Enrollment failed with HTTP ${response.status}.`);
   if (!payload.worker_id || !payload.profile?.name) throw fail('WORKER_ENROLLMENT_INCOMPLETE', 'Server did not return a Worker Profile.');
 
@@ -364,20 +367,20 @@ async function login(options) {
 }
 
 async function runForeground() {
-  const config = readJson(CONFIG_PATH);
-  const state = readJson(STATE_PATH);
+  const config = readJson<WorkerConfig>(CONFIG_PATH);
+  const state = readJson<WorkerState>(STATE_PATH);
   if (!config || !state?.worker_id) throw fail('WORKER_NOT_LOGGED_IN', 'Run bot-report-worker login first.');
   const child = spawn(process.execPath, [AGENT_PATH], { cwd: config.allowed_roots[0], env: workerEnv(config), stdio: 'inherit' });
-  const forward = signal => { try { child.kill(signal); } catch (_) {} };
+  const forward = (signal: NodeJS.Signals) => { try { child.kill(signal); } catch (_) {} };
   process.once('SIGINT', () => forward('SIGINT'));
   process.once('SIGTERM', () => forward('SIGTERM'));
-  const code = await new Promise(resolve => child.once('close', value => resolve(Number.isInteger(value) ? value : 1)));
+  const code = await new Promise<number>(resolve => child.once('close', value => resolve(Number.isInteger(value) ? Number(value) : 1)));
   process.exitCode = code;
 }
 
 function printStatus() {
-  const config = readJson(CONFIG_PATH);
-  const state = readJson(STATE_PATH);
+  const config = readJson<WorkerConfig>(CONFIG_PATH);
+  const state = readJson<WorkerState>(STATE_PATH);
   const pid = clearStalePid();
   if (!config || !state?.worker_id) {
     console.log('status: NOT_LOGGED_IN');
@@ -416,10 +419,10 @@ async function main() {
 }
 
 if (require.main === module) {
-  main().catch(error => {
-    console.error(`[bot-report-worker] ${error.code || 'ERROR'}: ${error.message}`);
+  main().catch((error: unknown) => {
+    console.error(`[bot-report-worker] ${errorCode(error) || 'ERROR'}: ${errorMessage(error)}`);
     process.exit(1);
   });
 }
 
-module.exports = { parseArgs, validateServerUrl, normalizeRoots, workerEnv, login, startDetached, stopWorker, uninstallLocal };
+export = {parseArgs, validateServerUrl, normalizeRoots, workerEnv, login, startDetached, stopWorker, uninstallLocal};

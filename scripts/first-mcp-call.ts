@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // Local-only first call. Browser consent + PKCE; no credentials in argv or files.
-const http = require('node:http');
-const crypto = require('node:crypto');
-const assert = require('node:assert/strict');
-const readline = require('node:readline/promises');
-const { Writable } = require('node:stream');
+import http from 'node:http';
+import crypto from 'node:crypto';
+import assert from 'node:assert/strict';
+import readline from 'node:readline/promises';
+import {Writable} from 'node:stream';
 const CALLBACK = 'http://127.0.0.1:43871/callback';
 const SCOPE = 'bot_report.read';
 
@@ -19,7 +19,8 @@ async function main() {
   let secret = process.env.BOT_REPORT_FIRST_CLIENT_SECRET;
   if (!clientId || !secret) {
     assert.ok(process.stdin.isTTY, 'Interactive terminal required (or supply credentials through a private process environment).');
-    const output = new Writable({ write(chunk, encoding, done) { if (!output.muted) process.stdout.write(chunk); done(); } });
+    const output = new Writable({ write(chunk, _encoding, done) { if (!output.muted) process.stdout.write(chunk); done(); } }) as Writable & {muted: boolean};
+    output.muted = false;
     const rl = readline.createInterface({ input: process.stdin, output, terminal: true });
     try {
       clientId = (await rl.question('Client ID: ')).trim();
@@ -34,11 +35,11 @@ async function main() {
   const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
   const authorization = new URL(origin + '/oauth/authorize');
   authorization.search = new URLSearchParams({ client_id: clientId, redirect_uri: CALLBACK, response_type: 'code',
-    scope: SCOPE, state, code_challenge: challenge, code_challenge_method: 'S256', resource });
-  let finish;
-  const codePromise = new Promise(resolve => { finish = resolve; });
+    scope: SCOPE, state, code_challenge: challenge, code_challenge_method: 'S256', resource }).toString();
+  let finish: (code: string | null) => void = () => {};
+  const codePromise = new Promise<string | null>(resolve => { finish = resolve; });
   const server = http.createServer((req, res) => {
-    const url = new URL(req.url, CALLBACK);
+    const url = new URL(req.url || '', CALLBACK);
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -50,13 +51,13 @@ async function main() {
     }
     res.end('Authorization received. Return to your terminal.'); finish(url.searchParams.get('code'));
   });
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(43871, '127.0.0.1', resolve); });
-  let timer;
-  let token;
+  await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(43871, '127.0.0.1', resolve); });
+  let timer: NodeJS.Timeout | undefined;
+  let token: string | undefined;
   const auth = 'Basic ' + Buffer.from(clientId + ':' + secret).toString('base64');
   try {
     console.log('Open this URL in your local browser, sign in and approve Read access:\n' + authorization.href);
-    const code = await Promise.race([codePromise, new Promise(resolve => { timer = setTimeout(() => resolve(null), 300000); })]);
+    const code = await Promise.race([codePromise, new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), 300000); })]);
     assert.ok(code, 'Authorization denied or timed out.');
     const response = await fetch(origin + '/oauth/token', {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15000),
@@ -64,7 +65,7 @@ async function main() {
       body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: CALLBACK, resource, code_verifier: verifier })
     });
     assert.equal(response.status, 200, 'Token exchange failed.');
-    token = (await response.json()).access_token;
+    token = ((await response.json()) as {access_token?: string}).access_token;
     assert.ok(token, 'No access token returned.');
     const mcp = await fetch(resource, {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15000),
@@ -81,7 +82,7 @@ async function main() {
   } finally {
     clearTimeout(timer);
     server.closeAllConnections();
-    await new Promise(resolve => server.close(resolve));
+    await new Promise<void>(resolve => server.close(() => resolve()));
     if (token) {
       try {
         const revoked = await fetch(origin + '/oauth/revoke', { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15000),
@@ -92,4 +93,4 @@ async function main() {
     }
   }
 }
-main().catch(error => { console.error('First MCP call failed:', error.message); process.exitCode = 1; });
+main().catch((error: unknown) => { console.error('First MCP call failed:', error instanceof Error ? error.message : String(error)); process.exitCode = 1; });

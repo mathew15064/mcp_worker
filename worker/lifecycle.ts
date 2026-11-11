@@ -1,27 +1,23 @@
 'use strict';
 
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { spawnSync } = require('child_process');
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {spawnSync} from 'node:child_process';
 
-function fail(code, message) {
-  const error = new Error(message);
-  error.code = code;
-  return error;
-}
+function fail(code: string, message: string) { return Object.assign(new Error(message), {code}); }
 
-function readText(filePath) {
+function readText(filePath: string) {
   try { return fs.readFileSync(filePath, 'utf8').trim(); }
-  catch (error) { if (error.code === 'ENOENT') return ''; throw error; }
+  catch (error) { if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') return ''; throw error; }
 }
 
-function readJson(filePath) {
+function readJson(filePath: string): Record<string, unknown> | null {
   try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); }
-  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  catch (error) { if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') return null; throw error; }
 }
 
-function isUnsafeDirectory(target) {
+function isUnsafeDirectory(target: string) {
   if (!target) return true;
   const resolved = path.resolve(target);
   const root = path.parse(resolved).root;
@@ -29,7 +25,7 @@ function isUnsafeDirectory(target) {
   return resolved === root || resolved === home || resolved === path.dirname(home);
 }
 
-function buildCleanupPlan({ runtimeDir, workerHome }) {
+function buildCleanupPlan({ runtimeDir, workerHome }: {runtimeDir: string; workerHome: string}) {
   const resolvedRuntime = path.resolve(runtimeDir);
   if (path.basename(resolvedRuntime) !== 'current') {
     throw fail('WORKER_UNINSTALL_UNSAFE', 'Remote uninstall is allowed only for a verified installer-managed current directory.');
@@ -60,7 +56,7 @@ function buildCleanupPlan({ runtimeDir, workerHome }) {
       removeBin = relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative));
     }
   } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
+    if (!(typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT')) throw error;
   }
 
   return {
@@ -72,12 +68,12 @@ function buildCleanupPlan({ runtimeDir, workerHome }) {
   };
 }
 
-function applyCleanupPlan(plan) {
+function applyCleanupPlan(plan: ReturnType<typeof buildCleanupPlan>) {
   if (plan.tmux_session && /^[A-Za-z0-9_.-]{1,80}$/.test(plan.tmux_session)) {
     spawnSync('tmux', ['kill-session', '-t', `=${plan.tmux_session}`], { stdio: 'ignore' });
   }
   if (plan.remove_bin) {
-    try { fs.unlinkSync(plan.bin_path); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    try { fs.unlinkSync(plan.bin_path); } catch (error) { if (!(typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT')) throw error; }
   }
   fs.rmSync(plan.worker_home, { recursive: true, force: true });
   fs.rmSync(plan.install_root, { recursive: true, force: true });
@@ -90,4 +86,4 @@ function applyCleanupPlan(plan) {
   };
 }
 
-module.exports = { buildCleanupPlan, applyCleanupPlan };
+export = {buildCleanupPlan, applyCleanupPlan};

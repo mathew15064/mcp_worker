@@ -1,5 +1,5 @@
 type Strings = string | string[];
-interface ClientRow { id: string; client_id: string; client_secret_hash: string; owner_user_status?: string | null; redirect_uris_json: string; allowed_scopes_json: string; principal_id: string; profile_id: string | null; owner_user_id: string | null; status: string }
+interface ClientRow { id: string; client_id: string; display_name: string; client_secret_hash: string; owner_user_status?: string | null; redirect_uris_json: string; allowed_scopes_json: string; principal_id: string; profile_id: string | null; owner_user_id: string | null; status: string }
 interface TokenRow { id: string; scopes_json: string; client_id: string; principal_id: string; resource: string; expires_at: string; revoked_at?: string | null; client_status?: string; owner_user_id?: string | null; owner_user_status?: string | null; profile_id?: string | null; client_name?: string | null }
 interface AuthCodeRow extends TokenRow { used_at: string | null; redirect_uri: string; code_challenge: string }
 interface RefreshRow extends TokenRow { token_family_id: string; replaced_by_hash: string | null }

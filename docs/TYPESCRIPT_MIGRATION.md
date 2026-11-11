@@ -28,7 +28,7 @@ historical identifiers.
   compiled regression and browser tests, Docker and GitHub CI.
 - TS2: database contracts, adapters, all 13 migrations, all seven repositories, database manager/bootstrap, authentication, session stores, CSRF/session middleware and runtime settings.
 - TS3: MCP server/transport and all 19 Zod-typed tools, OAuth token issuance/refresh/revoke, audit capture, Ed25519 Worker authentication, WebSocket broker and execution services.
-- TS4: routes, browser scripts, legacy Node Worker and scripts.
+- TS4: HTTP entrypoints and routes, browser UI scripts, legacy Node Worker agent/CLI/lifecycle and Node administrative scripts (source TypeScript, build emits JavaScript).
 - TS5: all tests typed, lint, strict build, full regression, security scans
   and release candidate validation.
 
@@ -52,3 +52,17 @@ The TypeScript compiler uses `skipLibCheck: true` to work around upstream
 MCP SDK declaration-resolution errors under Node16 module mode. This does not
 disable `strict` checks for project TypeScript. Do not weaken `strict`, add
 `ts-nocheck` or use blanket `any` in newly migrated code.
+
+## TS4 browser and distribution build
+
+The strict TS compiler typechecks browser scripts and the build pipeline emits
+plain ES2022 JavaScript assets without CommonJS wrappers for direct browser
+script tags. Native Go Worker binaries are built separately and unchanged.
+Node Worker legacy agent, CLI and lifecycle sources are TypeScript; the
+installer still distributes the compiled agent.js, cli.js and lifecycle.js
+at their historical URLs. New local source checkouts should first run
+`npm ci` then `npm run build`; the first MCP call helper is
+`node dist/scripts/first-mcp-call.js` and the legacy Node Worker entrypoint
+is `npm run worker`. Existing Worker settings and persistent state paths stay
+unchanged. Never run the legacy Node installer or CLI lifecycle commands on
+a production machine during tests.

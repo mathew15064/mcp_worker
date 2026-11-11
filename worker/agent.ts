@@ -1,13 +1,25 @@
 #!/usr/bin/env node
-const crypto = require('crypto');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { spawn } = require('child_process');
-const { WebSocket } = require('ws');
-const mime = require('mime-types');
-const { buildCleanupPlan, applyCleanupPlan } = require('./lifecycle');
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {spawn, type ChildProcess} from 'node:child_process';
+import {WebSocket} from 'ws';
+import mime from 'mime-types';
+import lifecycle = require('./lifecycle');
+const {buildCleanupPlan, applyCleanupPlan} = lifecycle;
 
+interface WorkerState {worker_id?: string; name?: string; public_key?: string; private_key?: string; server_url?: string; enrolled_at?: string}
+interface WorkerPayload {tmux_session?: string; text?: string; submit?: boolean; lines?: number; command?: string; cwd?: string; timeout_ms?: number; max_output_bytes?: number;
+  max_bytes?: number; path?: string; content?: string; create_dirs?: boolean; run_as?: unknown; process_id?: string; cursor?: number; force?: boolean; grace_ms?: number; confirm?: string}
+interface WorkerJob {type: 'job'; job_id: string; operation: string; payload?: WorkerPayload; timeout_ms?: number}
+interface OutputBuffer {chunks: Buffer[]; size: number; truncated: boolean}
+interface RunFileOptions {input?: string | Buffer | null; cwd?: string | null; timeoutMs?: number; maxOutputBytes?: number}
+interface RunShellOptions {cwd?: string | null; timeoutMs?: number; maxOutputBytes?: number}
+interface FileResult {code: number; stdout: Buffer; stderr: Buffer}
+interface ManagedProcess {process_id: string; child: ChildProcess; pid: number | undefined; log_path: string; started_at: string; exited_at: string | null; exit_code: number | null; signal: NodeJS.Signals | null}
+function errorCode(error: unknown): string | null {return error !== null && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : null}
+function errorMessage(error: unknown): string {return error instanceof Error ? error.message : String(error)}
 const DEFAULT_CAPABILITIES = Object.freeze([
   'tmux.inspect', 'tmux.send', 'tmux.read', 'tmux.interrupt',
   'workspace.exec', 'artifact.collect', 'file.write',
@@ -24,18 +36,14 @@ const maxJobMs = Math.max(1_000, Math.min(Number(process.env.BOT_REPORT_WORKER_M
 const allowedRoots = String(process.env.BOT_REPORT_WORKER_ALLOWED_ROOTS || '')
   .split(',').map(value => value.trim()).filter(Boolean).map(value => path.resolve(value));
 
-const managedProcesses = new Map();
+const managedProcesses = new Map<string, ManagedProcess>();
 let shuttingDown = false;
 let reconnectAttempt = 0;
-let heartbeatTimer = null;
-let reconnectTimer = null;
-let activeSocket = null;
+let heartbeatTimer: NodeJS.Timeout | undefined;
+let reconnectTimer: NodeJS.Timeout | undefined;
+let activeSocket: WebSocket | null = null;
 
-function fail(code, message) {
-  const error = new Error(message);
-  error.code = code;
-  return error;
-}
+function fail(code: string, message: string) {return Object.assign(new Error(message), {code});}
 
 function requireConfig() {
   let parsed;
@@ -52,16 +60,16 @@ function ensureStateDir() {
   fs.mkdirSync(path.dirname(statePath), { recursive: true, mode: 0o700 });
 }
 
-function loadState() {
+function loadState(): WorkerState | null {
   try {
     return JSON.parse(fs.readFileSync(statePath, 'utf8'));
   } catch (error) {
-    if (error.code === 'ENOENT') return null;
+    if (errorCode(error) === 'ENOENT') return null;
     throw error;
   }
 }
 
-function saveState(state) {
+function saveState(state: WorkerState) {
   ensureStateDir();
   const temp = `${statePath}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
   fs.writeFileSync(temp, JSON.stringify(state, null, 2), { mode: 0o600 });
@@ -77,16 +85,16 @@ function generateIdentity() {
   };
 }
 
-function isWithinRoot(candidate, root) {
+function isWithinRoot(candidate: string, root: string) {
   const relative = path.relative(root, candidate);
   return relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative));
 }
 
-function nearestExistingAncestor(target) {
+function nearestExistingAncestor(target: string) {
   let current = target;
   while (true) {
     try { return fs.realpathSync(current); } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
+      if (errorCode(error) !== 'ENOENT') throw error;
       const parent = path.dirname(current);
       if (parent === current) throw error;
       current = parent;
@@ -94,7 +102,7 @@ function nearestExistingAncestor(target) {
   }
 }
 
-function assertAllowedPath(input, { mustExist = false } = {}) {
+function assertAllowedPath(input: unknown, { mustExist = false }: {mustExist?: boolean} = {}) {
   if (typeof input !== 'string' || !input.trim() || /[\x00-\x1f\x7f]/.test(input)) throw fail('WORKER_PATH_INVALID', 'Path is invalid.');
   const resolved = path.resolve(input);
   if (!allowedRoots.some(root => isWithinRoot(resolved, root))) throw fail('WORKER_PATH_DENIED', `Path '${resolved}' is outside worker allowed roots.`);
@@ -102,7 +110,7 @@ function assertAllowedPath(input, { mustExist = false } = {}) {
   try {
     verified = fs.realpathSync(resolved);
   } catch (error) {
-    if (mustExist || error.code !== 'ENOENT') throw error;
+    if (mustExist || errorCode(error) !== 'ENOENT') throw error;
     verified = nearestExistingAncestor(path.dirname(resolved));
   }
   if (!allowedRoots.some(root => isWithinRoot(verified, root))) throw fail('WORKER_PATH_DENIED', 'Resolved path escapes worker allowed roots.');
@@ -113,13 +121,13 @@ function requireShell() {
   if (!allowShell) throw fail('WORKER_SHELL_DISABLED', 'Shell execution is disabled by local worker policy.');
 }
 
-function rejectRunAs(runAs) {
+function rejectRunAs(runAs: unknown) {
   if (runAs !== null && runAs !== undefined && runAs !== '') {
     throw fail('WORKER_RUN_AS_UNSUPPORTED', 'worker transport executes as the local worker OS user; run_as is not supported.');
   }
 }
 
-function boundedAppend(state, chunk, maxBytes) {
+function boundedAppend(state: OutputBuffer, chunk: string | Buffer, maxBytes: number) {
   const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
   const remaining = Math.max(0, maxBytes - state.size);
   if (remaining > 0) state.chunks.push(value.subarray(0, remaining));
@@ -127,15 +135,15 @@ function boundedAppend(state, chunk, maxBytes) {
   if (state.size > maxBytes) state.truncated = true;
 }
 
-function runShell(command, { cwd, timeoutMs = 30_000, maxOutputBytes = 1024 * 1024 } = {}) {
+function runShell(command: string, { cwd, timeoutMs = 30_000, maxOutputBytes = 1024 * 1024 }: RunShellOptions = {}) {
   requireShell();
   const safeCwd = assertAllowedPath(cwd || allowedRoots[0], { mustExist: true });
   const timeout = Math.max(100, Math.min(Number(timeoutMs) || 30_000, maxJobMs));
-  return new Promise((resolve, reject) => {
+  return new Promise<{exit_code: number; stdout: string; stderr: string; duration_ms: number; stdout_truncated: boolean; stderr_truncated: boolean}>((resolve, reject) => {
     const started = Date.now();
     const child = spawn('/bin/sh', ['-lc', command], { cwd: safeCwd, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
-    const stdout = { chunks: [], size: 0, truncated: false };
-    const stderr = { chunks: [], size: 0, truncated: false };
+    const stdout: OutputBuffer = { chunks: [], size: 0, truncated: false };
+    const stderr: OutputBuffer = { chunks: [], size: 0, truncated: false };
     let settled = false;
     const timer = setTimeout(() => {
       if (settled) return;
@@ -156,7 +164,7 @@ function runShell(command, { cwd, timeoutMs = 30_000, maxOutputBytes = 1024 * 10
       settled = true;
       clearTimeout(timer);
       resolve({
-        exit_code: Number.isInteger(code) ? code : 1,
+        exit_code: Number.isInteger(code) ? Number(code) : 1,
         stdout: Buffer.concat(stdout.chunks).toString('utf8'),
         stderr: Buffer.concat(stderr.chunks).toString('utf8'),
         duration_ms: Date.now() - started,
@@ -167,11 +175,11 @@ function runShell(command, { cwd, timeoutMs = 30_000, maxOutputBytes = 1024 * 10
   });
 }
 
-function runFile(command, args, { input = null, cwd = null, timeoutMs = 10_000, maxOutputBytes = 2 * 1024 * 1024 } = {}) {
-  return new Promise((resolve, reject) => {
+function runFile(command: string, args: string[], { input = null, cwd = null, timeoutMs = 10_000, maxOutputBytes = 2 * 1024 * 1024 }: RunFileOptions = {}): Promise<FileResult> {
+  return new Promise<FileResult>((resolve, reject) => {
     const child = spawn(command, args, { cwd: cwd || undefined, env: process.env, stdio: ['pipe', 'pipe', 'pipe'] });
-    const stdout = { chunks: [], size: 0, truncated: false };
-    const stderr = { chunks: [], size: 0, truncated: false };
+    const stdout: OutputBuffer = { chunks: [], size: 0, truncated: false };
+    const stderr: OutputBuffer = { chunks: [], size: 0, truncated: false };
     let settled = false;
     const timer = setTimeout(() => {
       if (settled) return;
@@ -191,15 +199,15 @@ function runFile(command, args, { input = null, cwd = null, timeoutMs = 10_000, 
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve({ code: Number.isInteger(code) ? code : 1, stdout: Buffer.concat(stdout.chunks), stderr: Buffer.concat(stderr.chunks) });
+      resolve({ code: Number.isInteger(code) ? Number(code) : 1, stdout: Buffer.concat(stdout.chunks), stderr: Buffer.concat(stderr.chunks) });
     });
     if (input !== null && input !== undefined) child.stdin.end(input);
     else child.stdin.end();
   });
 }
 
-async function inspectTmux(session) {
-  if (!/^[A-Za-z0-9_.-]{1,80}$/.test(session || '')) throw fail('INVALID_TMUX_SESSION', 'Invalid tmux session.');
+async function inspectTmux(session: unknown) {
+  if (typeof session !== 'string' || !/^[A-Za-z0-9_.-]{1,80}$/.test(session)) throw fail('INVALID_TMUX_SESSION', 'Invalid tmux session.');
   const version = await runFile('tmux', ['-V']);
   if (version.code !== 0) throw fail('TMUX_NOT_AVAILABLE', 'tmux is not available on the worker host.');
   const exists = await runFile('tmux', ['has-session', '-t', `=${session}`]);
@@ -221,12 +229,12 @@ async function inspectTmux(session) {
   };
 }
 
-function singlePane(inspection) {
+function singlePane(inspection: Awaited<ReturnType<typeof inspectTmux>>) {
   if (!inspection.target_pane) throw fail('TMUX_MULTIPLE_PANES', 'Terminal control requires exactly one tmux pane.');
   return inspection.target_pane;
 }
 
-async function executeOperation(operation, payload = {}) {
+async function executeOperation(operation: string, payload: WorkerPayload = {}): Promise<Record<string, unknown>> {
   switch (operation) {
     case 'tmux.inspect':
       return inspectTmux(payload.tmux_session);
@@ -311,7 +319,7 @@ async function executeOperation(operation, payload = {}) {
       const logPath = path.join(logDir, `${processId}.log`);
       const logFd = fs.openSync(logPath, 'a', 0o600);
       const child = spawn('/bin/sh', ['-lc', command], { cwd, env: process.env, stdio: ['ignore', logFd, logFd], detached: false });
-      const record = { process_id: processId, child, pid: child.pid, log_path: logPath, started_at: new Date().toISOString(), exited_at: null, exit_code: null, signal: null };
+      const record: ManagedProcess = { process_id: processId, child, pid: child.pid, log_path: logPath, started_at: new Date().toISOString(), exited_at: null, exit_code: null, signal: null };
       managedProcesses.set(processId, record);
       child.once('close', (code, signal) => { record.exit_code = Number.isInteger(code) ? code : null; record.signal = signal || null; record.exited_at = new Date().toISOString(); try { fs.closeSync(logFd); } catch (_) {} });
       child.once('error', () => { record.exit_code = 1; record.exited_at = new Date().toISOString(); try { fs.closeSync(logFd); } catch (_) {} });
@@ -357,7 +365,7 @@ async function executeOperation(operation, payload = {}) {
   }
 }
 
-async function enrollIfNeeded(state) {
+async function enrollIfNeeded(state: WorkerState | null): Promise<WorkerState> {
   if (state?.worker_id && state?.private_key && state?.public_key) return state;
   if (!enrollmentToken) throw fail('WORKER_ENROLLMENT_TOKEN_REQUIRED', 'BOT_REPORT_WORKER_ENROLLMENT_TOKEN is required for first enrollment.');
   const identity = state?.private_key && state?.public_key ? state : generateIdentity();
@@ -366,14 +374,15 @@ async function enrollIfNeeded(state) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ token: enrollmentToken, name: workerName, public_key: identity.public_key, capabilities: DEFAULT_CAPABILITIES })
   });
-  const payload = await response.json().catch(() => ({}));
+  const payload = await response.json().catch(() => ({})) as {code?: string; message?: string; worker_id?: string; name?: string};
   if (!response.ok) throw fail(payload.code || 'WORKER_ENROLLMENT_FAILED', payload.message || 'Worker enrollment failed.');
   const enrolled = { ...identity, worker_id: payload.worker_id, name: payload.name, server_url: serverUrl, enrolled_at: new Date().toISOString() };
   saveState(enrolled);
   return enrolled;
 }
 
-function connectionHeaders(state) {
+function connectionHeaders(state: WorkerState) {
+  if (!state.worker_id || !state.private_key) throw fail('WORKER_STATE_INVALID', 'Enrolled Worker identity is missing.');
   const timestamp = String(Date.now());
   const nonce = crypto.randomBytes(24).toString('base64url');
   const message = `${state.worker_id}\n${timestamp}\n${nonce}\n/worker/v1/connect`;
@@ -389,7 +398,7 @@ function websocketUrl() {
   return url.toString();
 }
 
-async function handleJob(ws, message) {
+async function handleJob(ws: WebSocket, message: WorkerJob) {
   const jobId = String(message.job_id || '');
   if (!jobId || typeof message.operation !== 'string') return;
   try {
@@ -403,11 +412,11 @@ async function handleJob(ws, message) {
       else ws.send(response);
     }
   } catch (error) {
-    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'result', job_id: jobId, ok: false, error: { code: error.code || 'WORKER_JOB_FAILED', message: error.message || 'Worker job failed.' } }));
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'result', job_id: jobId, ok: false, error: { code: errorCode(error) || 'WORKER_JOB_FAILED', message: errorMessage(error) || 'Worker job failed.' } }));
   }
 }
 
-function scheduleReconnect(state) {
+function scheduleReconnect(state: WorkerState) {
   if (shuttingDown) return;
   reconnectAttempt += 1;
   const delay = Math.min(30_000, 1000 * (2 ** Math.min(reconnectAttempt - 1, 5))) + Math.floor(Math.random() * 500);
@@ -415,7 +424,7 @@ function scheduleReconnect(state) {
   reconnectTimer = setTimeout(() => connect(state), delay);
 }
 
-function connect(state) {
+function connect(state: WorkerState) {
   if (shuttingDown) return;
   const ws = new WebSocket(websocketUrl(), { headers: connectionHeaders(state), maxPayload: 4 * 1024 * 1024 });
   activeSocket = ws;
@@ -434,7 +443,7 @@ function connect(state) {
   });
   ws.on('close', (code, reason) => {
     clearInterval(heartbeatTimer);
-    heartbeatTimer = null;
+    heartbeatTimer = undefined;
     const reasonText = String(reason || '');
     if (code === 4004 && reasonText === 'worker-removed') {
       shuttingDown = true;
@@ -445,7 +454,7 @@ function connect(state) {
     scheduleReconnect(state);
   });
   ws.on('error', error => {
-    if (!shuttingDown) console.warn(`[WORKER] websocket error: ${error.message}`);
+    if (!shuttingDown) console.warn(`[WORKER] websocket error: ${errorMessage(error)}`);
   });
 }
 
@@ -460,7 +469,7 @@ async function main() {
   connect(state);
 }
 
-function shutdown(signal) {
+function shutdown(signal: string) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[WORKER] shutdown ${signal}`);
@@ -477,10 +486,10 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 if (require.main === module) {
-  main().catch(error => {
-    console.error(`[WORKER_FATAL] ${error.code || error.name || 'ERROR'}: ${error.message}`);
+  main().catch((error: unknown) => {
+    console.error(`[WORKER_FATAL] ${errorCode(error) || 'ERROR'}: ${errorMessage(error)}`);
     process.exit(1);
   });
 }
 
-module.exports = { executeOperation, assertAllowedPath, generateIdentity, connectionHeaders, DEFAULT_CAPABILITIES };
+export = {executeOperation, assertAllowedPath, generateIdentity, connectionHeaders, DEFAULT_CAPABILITIES};

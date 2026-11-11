@@ -13,14 +13,15 @@
     "rotate-admin-password": "node dist/scripts/rotate-admin-password.js",
     "terminal-profile": "node dist/scripts/terminal-profile.js",
     "mcp-client": "node dist/scripts/mcp-client.js",
-    "worker": "node worker/agent.js",
+    "worker": "npm run build && node dist/worker/agent.js",
     "migrate": "node dist/scripts/migrate.js migrate",
     "migrate:status": "node dist/scripts/migrate.js status",
     "migrate:rollback": "node dist/scripts/migrate.js rollback",
     "migrate:reset": "node dist/scripts/migrate.js reset",
     "migrate:fresh": "node dist/scripts/migrate.js fresh",
     "build": "node scripts/build.cjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "first:mcp": "npm run build && node dist/scripts/first-mcp-call.js"
   },
   "keywords": [
     "mcp",
@@ -50,7 +51,9 @@
     "@types/better-sqlite3": "9.6.0",
     "@types/express": "5.0.6",
     "@types/express-session": "1.19.0",
+    "@types/mime-types": "2.1.4",
     "@types/node": "26.6.6",
+    "@types/ssh2": "1.15.5",
     "@types/ws": "8.18.2",
     "typescript": "5.9.3"
   }

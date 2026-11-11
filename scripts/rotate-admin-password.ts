@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const crypto = require('crypto');
+import crypto from 'node:crypto';
 
 const generated = process.argv.includes('--generate');
 if (generated) {

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-const fs = require('fs');
-const path = require('path');
-const Database = require('better-sqlite3');
-const config = require('../src/config/env');
+import fs from 'node:fs';
+import path from 'node:path';
+import Database = require('better-sqlite3');
+import config = require('../src/config/env');
 
 const dbPath = config.DATABASE_PATH;
 if (!fs.existsSync(dbPath)) throw new Error(`Database not found: ${dbPath}`);

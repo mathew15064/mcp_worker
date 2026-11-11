@@ -76,7 +76,7 @@ machine as the browser and standalone service, with Node.js 26 installed,
 run:
 
 ```sh
-node scripts/first-mcp-call.js http://127.0.0.1:3333
+node dist/scripts/first-mcp-call.js http://127.0.0.1:3333
 ```
 
 Enter the client ID and secret at the prompts (secret is hidden), open

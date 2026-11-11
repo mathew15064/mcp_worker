@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-const bootstrapConfigStore = require('../src/db/bootstrapConfigStore');
-const { MysqlAdapter } = require('../src/db/adapters/mysqlAdapter');
-const { MigrationRunner } = require('../src/db/migrationRunner');
+import bootstrapConfigStore = require('../src/db/bootstrapConfigStore');
+import {MysqlAdapter} from '../src/db/adapters/mysqlAdapter';
+import {MigrationRunner} from '../src/db/migrationRunner';
 
-function argValue(name, fallback = null) {
+function argValue(name: string, fallback: string | null = null) {
   const prefix = `--${name}=`;
   const direct = process.argv.find(value => value.startsWith(prefix));
   if (direct) return direct.slice(prefix.length);
@@ -12,9 +12,9 @@ function argValue(name, fallback = null) {
   return fallback;
 }
 
-function hasFlag(name) { return process.argv.includes(`--${name}`); }
+function hasFlag(name: string) { return process.argv.includes(`--${name}`); }
 
-function printStatus(rows) {
+function printStatus(rows: Awaited<ReturnType<MigrationRunner['status']>>) {
   const width = Math.max('Migration'.length, ...rows.map(row => row.migration.length));
   console.log(`${'Ran?'.padEnd(7)} ${'Batch'.padEnd(7)} ${'Migration'.padEnd(width)} Executed at`);
   for (const row of rows) {
@@ -28,6 +28,7 @@ async function main() {
     throw Object.assign(new Error('MySQL is not configured. Configure Database from /admin/settings first.'), { code: 'DATABASE_UNCONFIGURED' });
   }
   const config = bootstrapConfigStore.load();
+  if (!config) throw new Error('MySQL bootstrap configuration is missing.');
   const adapter = MysqlAdapter.create(config);
   try {
     await adapter.ping();
@@ -76,7 +77,8 @@ async function main() {
   }
 }
 
-main().catch(error => {
-  console.error(`[${error.code || 'MIGRATION_ERROR'}] ${error.message}`);
+main().catch((error: unknown) => {
+  const detail = error && typeof error === 'object' ? error as {code?: string;message?: string} : {};
+  console.error(`[${detail.code || 'MIGRATION_ERROR'}] ${detail.message || 'Migration failed'}`);
   process.exit(1);
 });

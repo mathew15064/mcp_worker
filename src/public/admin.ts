@@ -1,9 +1,14 @@
+interface WorkerStatus {id: string; enabled: boolean; connected: boolean; last_seen_at?: string | null}
+interface WorkerProbe {id: string; ok: boolean; latency_ms?: number}
+interface WorkerStatusResponse {workers: WorkerStatus[]; probe?: WorkerProbe | null}
+interface ProfileEdit {id?: string; name?: string; description?: string; worker_id?: string; enabled?: boolean}
+interface ApiError {message?: string; duration_ms?: number; version?: string}
 (() => {
   'use strict';
 
-  const $ = (selector, root = document) => root.querySelector(selector);
-  const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
-  const modalOpeners = new WeakMap();
+  const $ = <T extends HTMLElement = HTMLElement>(selector: string, root: ParentNode | null | undefined = document): T | null => root?.querySelector<T>(selector) || null;
+  const $$ = <T extends HTMLElement = HTMLElement>(selector: string, root: ParentNode | null | undefined = document): T[] => Array.from(root?.querySelectorAll<T>(selector) || []);
+  const modalOpeners = new WeakMap<HTMLElement, HTMLElement>();
   const focusableSelector = [
     'a[href]',
     'button:not([disabled])',
@@ -13,7 +18,7 @@
     '[tabindex]:not([tabindex="-1"])'
   ].join(',');
 
-  function setTheme(theme) {
+  function setTheme(theme: string) {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem('bot-report-theme', theme);
     $$('[data-theme-toggle]').forEach(button => {
@@ -23,22 +28,22 @@
   }
 
   setTheme(localStorage.getItem('bot-report-theme') || 'dark');
-  $$('[data-account-return-to]').forEach(input => {
+  $$<HTMLInputElement>('[data-account-return-to]').forEach(input => {
     input.value = `${window.location.pathname}${window.location.search}`;
   });
   $$('[data-theme-toggle]').forEach(button => button.addEventListener('click', () => {
     setTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
   }));
 
-  function focusables(root) {
+  function focusables(root: HTMLElement) {
     return $$(focusableSelector, root).filter(element => {
       const style = window.getComputedStyle(element);
       return style.display !== 'none' && style.visibility !== 'hidden' && !element.hidden;
     });
   }
 
-  function openModal(id, opener = document.activeElement) {
-    const backdrop = document.getElementById(id);
+  function openModal(id: string | undefined, opener: Element | null = document.activeElement) {
+    const backdrop = id ? document.getElementById(id) : null;
     if (!backdrop) return;
     if (opener instanceof HTMLElement) modalOpeners.set(backdrop, opener);
     backdrop.classList.add('open');
@@ -48,7 +53,7 @@
     if (first) requestAnimationFrame(() => first.focus());
   }
 
-  function closeModal(backdrop, { restoreFocus = true } = {}) {
+  function closeModal(backdrop: HTMLElement | null, { restoreFocus = true }: {restoreFocus?: boolean} = {}) {
     if (!backdrop) return;
     backdrop.classList.remove('open');
     backdrop.setAttribute('aria-hidden', 'true');
@@ -63,7 +68,7 @@
   $$('[data-modal-close]').forEach(button => button.addEventListener('click', () => closeModal(button.closest('.modal-backdrop'))));
   $$('[data-auto-open="true"]').forEach(backdrop => openModal(backdrop.id, null));
 
-  function trapModalFocus(event, backdrop) {
+  function trapModalFocus(event: KeyboardEvent, backdrop: HTMLElement) {
     if (event.key !== 'Tab') return false;
     const items = focusables(backdrop);
     if (!items.length) return false;
@@ -82,15 +87,15 @@
     return false;
   }
 
-  function toast(kind, title, message) {
+  function toast(kind: string, title: string, message: string) {
     const stack = $('#toast-stack');
     if (!stack || !message) return;
     const item = document.createElement('div');
     item.className = `toast toast-${kind}`;
     item.setAttribute('role', kind === 'error' ? 'alert' : 'status');
     item.innerHTML = '<div><div class="toast-title"></div><div class="toast-message"></div></div>';
-    $('.toast-title', item).textContent = title;
-    $('.toast-message', item).textContent = message;
+    $('.toast-title', item)!.textContent = title;
+    $('.toast-message', item)!.textContent = message;
     stack.appendChild(item);
     setTimeout(() => item.remove(), 4800);
   }
@@ -101,14 +106,14 @@
     if (flash.dataset.error) toast('error', 'Something went wrong', flash.dataset.error);
   }
 
-  async function copyText(value, button) {
+  async function copyText(value: string | undefined, button: HTMLElement | null = null) {
     if (!value) return;
     try {
       await navigator.clipboard.writeText(value);
       const original = button?.innerHTML;
       if (button) {
         button.innerHTML = 'Copied';
-        setTimeout(() => { button.innerHTML = original; }, 1200);
+        setTimeout(() => { button.innerHTML = original || ''; }, 1200);
       }
       toast('success', 'Copied', 'Value copied to clipboard.');
     } catch (_) {
@@ -118,11 +123,11 @@
 
   $$('[data-copy-value]').forEach(button => button.addEventListener('click', () => copyText(button.dataset.copyValue, button)));
   $$('[data-copy-target]').forEach(button => button.addEventListener('click', () => {
-    const target = document.getElementById(button.dataset.copyTarget);
-    copyText(target?.textContent?.trim() || target?.value || '', button);
+    const target = button.dataset.copyTarget ? document.getElementById(button.dataset.copyTarget) : null;
+    copyText(target?.textContent?.trim() || (target instanceof HTMLInputElement ? target.value : ''), button);
   }));
 
-  function prettyAuditPayload(raw) {
+  function prettyAuditPayload(raw: string | null | undefined) {
     if (raw === null || raw === undefined || raw === '') return 'Payload was not captured for this legacy audit event.';
     try {
       const parsed = JSON.parse(raw);
@@ -133,7 +138,7 @@
     }
   }
 
-  async function loadAuditDetail(id) {
+  async function loadAuditDetail(id: string | undefined) {
     const requestPayload = $('#audit-request-payload');
     const responsePayload = $('#audit-response-payload');
     const requestNote = $('#audit-request-note');
@@ -144,10 +149,10 @@
     if (requestNote) requestNote.hidden = true;
     if (responseNote) responseNote.hidden = true;
     try {
-      const response = await fetch(`/admin/audit/${encodeURIComponent(id)}`, { headers: { accept: 'application/json' } });
+      const response = await fetch(`/admin/audit/${encodeURIComponent(id || '')}`, { headers: { accept: 'application/json' } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const detail = await response.json();
-      const set = (selector, value) => { const target = $(selector); if (target) target.textContent = value ?? '—'; };
+      const set = (selector: string, value: string) => { const target = $(selector); if (target) target.textContent = value ?? '—'; };
       set('#audit-detail-request-id', detail.request_id || '—');
       set('#audit-detail-client', detail.client_display_name || detail.client_id || 'Unknown client');
       set('#audit-detail-method', detail.mcp_method || '—');
@@ -167,8 +172,8 @@
 
   $$('[data-audit-detail]').forEach(button => button.addEventListener('click', () => loadAuditDetail(button.dataset.auditDetail)));
 
-  $$('[data-table-search]').forEach(input => input.addEventListener('input', () => {
-    const table = document.getElementById(input.dataset.tableSearch);
+  $$<HTMLInputElement>('[data-table-search]').forEach(input => input.addEventListener('input', () => {
+    const table = document.getElementById(input.dataset.tableSearch || '');
     if (!table) return;
     const query = input.value.trim().toLowerCase();
     let visible = 0;
@@ -177,23 +182,23 @@
       row.hidden = Boolean(query && !haystack.includes(query));
       if (!row.hidden) visible += 1;
     });
-    const empty = document.querySelector(`[data-search-empty="${input.dataset.tableSearch}"]`);
+    const empty = document.querySelector<HTMLElement>(`[data-search-empty="${input.dataset.tableSearch}"]`);
     if (empty) empty.hidden = visible !== 0;
   }));
 
-  $$('[data-page-size]').forEach(select => select.addEventListener('change', () => {
-    select.closest('form')?.requestSubmit();
+  $$<HTMLSelectElement>('[data-page-size]').forEach(select => select.addEventListener('change', () => {
+    select.closest<HTMLFormElement>('form')?.requestSubmit();
   }));
 
-  function closeDropdown(details) {
+  function closeDropdown(details: HTMLDetailsElement) {
     details.removeAttribute('open');
     const summary = $('summary', details);
     summary?.setAttribute('aria-expanded', 'false');
   }
 
-  function positionDropdown(details) {
+  function positionDropdown(details: HTMLDetailsElement) {
     const summary = $('summary', details);
-    const menu = $('.menu', details);
+    const menu = $<HTMLElement>('.menu', details);
     if (!summary || !menu) return;
     const trigger = summary.getBoundingClientRect();
     const menuBox = menu.getBoundingClientRect();
@@ -207,7 +212,7 @@
     menu.style.top = `${Math.max(margin, top)}px`;
   }
 
-  $$('.dropdown').forEach(details => {
+  $$<HTMLDetailsElement>('.dropdown').forEach(details => {
     const summary = $('summary', details);
     summary?.setAttribute('aria-expanded', 'false');
     details.addEventListener('toggle', () => {
@@ -215,7 +220,7 @@
         summary?.setAttribute('aria-expanded', 'false');
         return;
       }
-      $$('.dropdown[open]').filter(other => other !== details).forEach(closeDropdown);
+      $$<HTMLDetailsElement>('.dropdown[open]').filter(other => other !== details).forEach(closeDropdown);
       summary?.setAttribute('aria-expanded', 'true');
       positionDropdown(details);
       requestAnimationFrame(() => positionDropdown(details));
@@ -223,23 +228,23 @@
   });
 
   document.addEventListener('click', event => {
-    $$('.dropdown[open]').forEach(details => {
-      if (!details.contains(event.target)) closeDropdown(details);
+    $$<HTMLDetailsElement>('.dropdown[open]').forEach(details => {
+      if (event.target instanceof Node && !details.contains(event.target)) closeDropdown(details);
     });
   });
-  window.addEventListener('resize', () => $$('.dropdown[open]').forEach(closeDropdown));
-  window.addEventListener('scroll', () => $$('.dropdown[open]').forEach(closeDropdown), true);
+  window.addEventListener('resize', () => $$<HTMLDetailsElement>('.dropdown[open]').forEach(closeDropdown));
+  window.addEventListener('scroll', () => $$<HTMLDetailsElement>('.dropdown[open]').forEach(closeDropdown), true);
 
-  let pendingForm = null;
+  let pendingForm: HTMLFormElement | null = null;
   const confirmModal = $('#confirm-modal');
-  $$('form[data-confirm-title]').forEach(form => form.addEventListener('submit', event => {
+  $$<HTMLFormElement>('form[data-confirm-title]').forEach(form => form.addEventListener('submit', event => {
     event.preventDefault();
     pendingForm = form;
     if (!confirmModal) return form.submit();
-    $('#confirm-title').textContent = form.dataset.confirmTitle || 'Confirm action';
-    $('#confirm-message').textContent = form.dataset.confirmMessage || 'Are you sure?';
-    $('#confirm-action').textContent = form.dataset.confirmAction || 'Continue';
-    $('#confirm-action').className = `btn ${form.dataset.confirmDanger === 'true' ? 'btn-danger' : 'btn-primary'}`;
+    $('#confirm-title')!.textContent = form.dataset.confirmTitle || 'Confirm action';
+    $('#confirm-message')!.textContent = form.dataset.confirmMessage || 'Are you sure?';
+    $('#confirm-action')!.textContent = form.dataset.confirmAction || 'Continue';
+    $('#confirm-action')!.className = `btn ${form.dataset.confirmDanger === 'true' ? 'btn-danger' : 'btn-primary'}`;
     const opener = event.submitter || document.activeElement;
     openModal('confirm-modal', opener);
   }));
@@ -255,8 +260,8 @@
   // connection and confirm it with a real WebSocket ping/pong before reporting success.
   const workerStatusTable = $('#workers-table[data-worker-status-url]');
   if (workerStatusTable) {
-    const workerRows = new Map($$('tbody tr[data-worker-id]', workerStatusTable).map(row => [row.dataset.workerId, row]));
-    const searchInput = $('[data-table-search="workers-table"]');
+    const workerRows = new Map<string, HTMLElement>($$('tbody tr[data-worker-id]', workerStatusTable).map(row => [row.dataset.workerId || '', row]));
+    const searchInput = $<HTMLInputElement>('[data-table-search="workers-table"]');
     let checkingWorkerId = workerStatusTable.dataset.workerCheck || '';
     const checkDeadline = Date.now() + 30000;
     let checkingFinished = false;
@@ -265,10 +270,11 @@
       if (badge) badge.textContent = 'Checking…';
     }
 
+    const statusTable = workerStatusTable;
     function finishWorkerCheck() {
       checkingFinished = true;
       checkingWorkerId = '';
-      workerStatusTable.dataset.workerCheck = '';
+      statusTable.dataset.workerCheck = '';
       const page = new URL(window.location.href);
       if (page.searchParams.has('check')) {
         page.searchParams.delete('check');
@@ -278,7 +284,7 @@
 
     async function refreshWorkerConnections() {
       try {
-        const url = new URL(workerStatusTable.dataset.workerStatusUrl, window.location.origin);
+        const url = new URL(statusTable.dataset.workerStatusUrl || '', window.location.origin);
         if (checkingWorkerId) url.searchParams.set('check', checkingWorkerId);
         const response = await fetch(url, {
           cache: 'no-store',
@@ -286,10 +292,10 @@
           headers: { Accept: 'application/json' }
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const payload = await response.json();
+        const payload = await response.json() as WorkerStatusResponse;
         if (!Array.isArray(payload.workers)) throw new Error('Invalid Worker status response');
-        const counts = { online: 0, offline: 0, disabled: 0 };
-        let checkingWorker = null;
+        const counts: Record<'online' | 'offline' | 'disabled', number> = { online: 0, offline: 0, disabled: 0 };
+        let checkingWorker: WorkerStatus | null = null;
         for (const worker of payload.workers) {
           const row = workerRows.get(worker.id);
           if (!row) continue;
@@ -313,7 +319,7 @@
               ? timestamp.toLocaleString('en-GB') : 'Never';
           }
         }
-        for (const type of ['online', 'offline', 'disabled']) {
+        for (const type of ['online', 'offline', 'disabled'] as const) {
           const badge = `[data-worker-count="${type}"]`;
           const element = $(badge);
           if (element) element.textContent = `${counts[type]} ${type}`;
@@ -346,69 +352,69 @@
     refreshWorkerConnections();
   }
 
-  const workerEditForm = $('#worker-edit-form');
+  const workerEditForm = $<HTMLFormElement>('#worker-edit-form');
   $$('[data-worker-edit]').forEach(button => button.addEventListener('click', () => {
     try {
-      const worker = JSON.parse(button.dataset.workerEdit);
+      const worker = JSON.parse(button.dataset.workerEdit || '{}') as {id?: string;name?: string};
       const routeBase = button.dataset.workerRouteBase || '/admin/workers';
       if (!worker?.id || !workerEditForm) throw new Error('missing worker');
       workerEditForm.action = `${routeBase}/${encodeURIComponent(worker.id)}/edit`;
       const name = workerEditForm.elements.namedItem('name');
-      if (name) name.value = worker.name || '';
+      if (name instanceof HTMLInputElement) name.value = worker.name || '';
     } catch (_) {
       toast('error', 'Unable to edit Worker', 'Worker data could not be loaded.');
     }
   }));
 
-  const accountSshForm = $('#account-ssh-form');
-  function configureAccountSshForm(profile = null) {
+  const accountSshForm = $<HTMLFormElement>('#account-ssh-form');
+  function configureAccountSshForm(profile: ProfileEdit | null = null) {
     if (!accountSshForm) return;
     const editing = Boolean(profile?.id);
     const routeBase = accountSshForm.dataset.routeBase || '/account/ssh-profiles';
-    accountSshForm.action = editing ? `${routeBase}/${encodeURIComponent(profile.id)}/update` : routeBase;
-    const set = (name, value) => {
+    accountSshForm.action = editing ? `${routeBase}/${encodeURIComponent(profile?.id || '')}/update` : routeBase;
+    const set = (name: string, value: string | null | undefined) => {
       const field = accountSshForm.elements.namedItem(name);
-      if (field) field.value = value ?? '';
+      if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement || field instanceof HTMLSelectElement) field.value = value ?? '';
     };
     set('name', profile?.name || '');
     set('description', profile?.description || '');
     set('worker_id', profile?.worker_id || '');
     const enabled = accountSshForm.elements.namedItem('enabled');
-    if (enabled) enabled.checked = profile ? Boolean(profile.enabled) : true;
+    if (enabled instanceof HTMLInputElement) enabled.checked = profile ? Boolean(profile.enabled) : true;
     const title = $('#account-ssh-title');
     if (title) title.textContent = 'Edit SSH Profile';
   }
   $$('[data-account-ssh-edit]').forEach(button => button.addEventListener('click', () => {
-    try { configureAccountSshForm(JSON.parse(button.dataset.accountSshEdit)); }
+    try { configureAccountSshForm(JSON.parse(button.dataset.accountSshEdit || '{}') as ProfileEdit); }
     catch (_) { toast('error', 'Unable to edit SSH Profile', 'Profile data could not be loaded.'); }
   }));
 
-  $$('form[data-terminal-test]').forEach(form => form.addEventListener('submit', async event => {
+  $$<HTMLFormElement>('form[data-terminal-test]').forEach(form => form.addEventListener('submit', async event => {
     event.preventDefault();
-    const button = form.querySelector('button[type="submit"]');
+    const button = form.querySelector<HTMLButtonElement>('button[type="submit"]');
     const original = button?.innerHTML || '';
     if (button) {
       button.disabled = true;
       button.textContent = 'Testing…';
     }
-    const dropdown = form.closest('.dropdown');
+    const dropdown = form.closest<HTMLDetailsElement>('.dropdown');
     if (dropdown) closeDropdown(dropdown);
     try {
       const response = await fetch(form.action, {
         method: 'POST',
         headers: { 'Accept': 'application/json' },
-        body: new URLSearchParams(new FormData(form))
+        body: new URLSearchParams([...new FormData(form).entries()].map(([key, value]) => [key, String(value)]))
       });
-      const payload = await response.json().catch(() => ({}));
+      const payload = await response.json().catch(() => ({})) as ApiError;
       if (!response.ok) throw new Error(payload.message || 'Connection test failed.');
       const detail = `${payload.message || 'Connection verified.'}${Number.isFinite(payload.duration_ms) ? ` ${payload.duration_ms} ms.` : ''}`;
       toast('success', `${form.dataset.profileName || 'Terminal'} is reachable`, detail);
     } catch (error) {
-      toast('error', `${form.dataset.profileName || 'Terminal'} connection failed`, error.message || 'Connection test failed.');
+      toast('error', `${form.dataset.profileName || 'Terminal'} connection failed`, error instanceof Error ? error.message : 'Connection test failed.');
     } finally {
       if (button) {
         button.disabled = false;
-        button.innerHTML = original;
+        button.innerHTML = original || '';
       }
     }
   }));
@@ -419,7 +425,7 @@
   const sidebarCollapse = $('[data-sidebar-collapse]');
   const sidebarCollapseKey = 'bot-report-sidebar-collapsed';
 
-  function setSidebar(open) {
+  function setSidebar(open: boolean) {
     if (!sidebar || !mobileMenu) return;
     sidebar.classList.toggle('open', open);
     sidebarScrim?.classList.toggle('open', open);
@@ -428,7 +434,7 @@
     document.body.classList.toggle('sidebar-open', open);
   }
 
-  function setSidebarCollapsed(collapsed, { persist = true } = {}) {
+  function setSidebarCollapsed(collapsed: boolean, { persist = true }: {persist?: boolean} = {}) {
     if (!sidebar || !sidebarCollapse) return;
     const desktop = window.matchMedia('(min-width: 781px)').matches;
     const active = desktop && collapsed;
@@ -442,9 +448,9 @@
 
   const savedSidebarCollapsed = localStorage.getItem(sidebarCollapseKey) === 'true';
   setSidebarCollapsed(savedSidebarCollapsed, { persist: false });
-  mobileMenu?.addEventListener('click', () => setSidebar(!sidebar.classList.contains('open')));
+  mobileMenu?.addEventListener('click', () => setSidebar(!sidebar?.classList.contains('open')));
   sidebarScrim?.addEventListener('click', () => setSidebar(false));
-  sidebarCollapse?.addEventListener('click', () => setSidebarCollapsed(!sidebar.classList.contains('collapsed')));
+  sidebarCollapse?.addEventListener('click', () => setSidebarCollapsed(!sidebar?.classList.contains('collapsed')));
   window.addEventListener('resize', () => setSidebarCollapsed(localStorage.getItem(sidebarCollapseKey) === 'true', { persist: false }));
   $$('.nav-link', sidebar || document).forEach(link => link.addEventListener('click', () => setSidebar(false)));
 
@@ -456,7 +462,7 @@
       if (modal.dataset.static !== 'true') closeModal(modal);
       return;
     }
-    const dropdown = $('.dropdown[open]');
+    const dropdown = $<HTMLDetailsElement>('.dropdown[open]');
     if (dropdown) {
       closeDropdown(dropdown);
       $('summary', dropdown)?.focus();
@@ -468,7 +474,7 @@
     }
   });
 
-  $$('[data-test-database]').forEach(button => button.addEventListener('click', async event => {
+  $$<HTMLButtonElement>('[data-test-database]').forEach(button => button.addEventListener('click', async event => {
     event.preventDefault();
     const form = button.form;
     if (!form) return;
@@ -479,21 +485,21 @@
       const response = await fetch(button.formAction, {
         method: 'POST',
         headers: { Accept: 'application/json' },
-        body: new URLSearchParams(new FormData(form))
+        body: new URLSearchParams([...new FormData(form).entries()].map(([key, value]) => [key, String(value)]))
       });
-      const payload = await response.json().catch(() => ({}));
+      const payload = await response.json().catch(() => ({})) as ApiError;
       if (!response.ok) throw new Error(payload.message || 'MySQL connection failed.');
       toast('success', 'MySQL connection successful', `${payload.version || 'MySQL'} · ${payload.duration_ms ?? '—'} ms`);
     } catch (error) {
-      toast('error', 'MySQL connection failed', error.message || 'Unable to connect to MySQL.');
+      toast('error', 'MySQL connection failed', error instanceof Error ? error.message : 'Unable to connect to MySQL.');
     } finally {
       button.disabled = false;
-      button.innerHTML = original;
+      button.innerHTML = original || '';
     }
   }));
 
-  $$('form[data-disable-on-submit]').forEach(form => form.addEventListener('submit', () => {
-    $$('button[type="submit"]', form).forEach(button => {
+  $$<HTMLFormElement>('form[data-disable-on-submit]').forEach(form => form.addEventListener('submit', () => {
+    $$<HTMLButtonElement>('button[type="submit"]', form).forEach(button => {
       button.disabled = true;
       button.dataset.originalHtml = button.innerHTML;
       button.textContent = 'Saving…';

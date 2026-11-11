@@ -1,3 +1,13 @@
+interface BrowserFitAddon {fit(): void}
+interface BrowserTerminal {
+  cols: number; rows: number; loadAddon(addon: BrowserFitAddon): void; open(container: HTMLElement): void;
+  focus(): void; write(text: string): void;
+  onData(handler: (data: string) => void): void;
+  onResize(handler: (size: {cols: number;rows: number}) => void): void;
+}
+interface BrowserExtensions {Terminal?: new (options: Record<string, unknown>) => BrowserTerminal; FitAddon?: {FitAddon: new () => BrowserFitAddon}}
+interface TerminalSessionResponse {ws_url?: string;message?: string}
+interface TerminalMessage {type?: string; state?: string; data?: string; message?: string;code?: string}
 (() => {
   'use strict';
 
@@ -5,11 +15,14 @@
   const screen = document.getElementById('terminal-screen');
   const status = document.getElementById('terminal-connection-status');
   const errorBox = document.getElementById('terminal-console-error');
-  const reconnectButton = document.querySelector('[data-terminal-reconnect]');
-  const disconnectButton = document.querySelector('[data-terminal-disconnect]');
-  if (!root || !screen || !status || !window.Terminal || !window.FitAddon?.FitAddon) return;
+  const reconnectButton = document.querySelector<HTMLButtonElement>('[data-terminal-reconnect]');
+  const disconnectButton = document.querySelector<HTMLButtonElement>('[data-terminal-disconnect]');
+  const browser = window as typeof window & BrowserExtensions;
+  const Terminal = browser.Terminal;
+  const FitAddon = browser.FitAddon?.FitAddon;
+  if (!root || !screen || !status || !Terminal || !FitAddon) return;
 
-  const terminal = new window.Terminal({
+  const terminal = new Terminal({
     cursorBlink: true,
     convertEol: false,
     scrollback: 5000,
@@ -23,14 +36,15 @@
       selectionBackground: '#334155'
     }
   });
-  const fit = new window.FitAddon.FitAddon();
+  const fit = new FitAddon();
   terminal.loadAddon(fit);
   terminal.open(screen);
 
-  let socket = null;
+  let socket: WebSocket | null = null;
   let connecting = false;
 
-  function setStatus(value, kind = 'off') {
+  function setStatus(value: string, kind: 'off' | 'ok' | 'danger' = 'off') {
+    if (!status) return;
     status.textContent = value;
     status.className = `badge ${kind === 'ok' ? 'badge-ok' : kind === 'danger' ? 'badge-danger' : 'badge-off'}`;
   }
@@ -41,7 +55,7 @@
     errorBox.hidden = !message;
   }
 
-  function send(message) {
+  function send(message: Record<string, unknown>) {
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
   }
 
@@ -53,6 +67,7 @@
   }
 
   async function connect() {
+    if (!root) return;
     if (connecting || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
     connecting = true;
     showError('');
@@ -61,7 +76,9 @@
     terminal.focus();
 
     try {
-      const response = await fetch(root.dataset.sessionUrl, {
+      const sessionUrl = root.dataset.sessionUrl;
+      if (!sessionUrl) throw new Error('Missing terminal session endpoint.');
+      const response = await fetch(sessionUrl, {
         method: 'POST',
         headers: {
           'Accept': 'application/json',
@@ -69,7 +86,7 @@
         },
         body: new URLSearchParams({ _csrf: root.dataset.csrf || '' }).toString()
       });
-      const payload = await response.json().catch(() => ({}));
+      const payload = await response.json().catch(() => ({})) as TerminalSessionResponse;
       if (!response.ok || !payload.ws_url) throw new Error(payload.message || 'Unable to create terminal session.');
 
       const ws = new WebSocket(payload.ws_url);
@@ -83,8 +100,8 @@
       });
       ws.addEventListener('message', event => {
         if (socket !== ws) return;
-        let message;
-        try { message = JSON.parse(event.data); } catch (_) { return; }
+        let message: TerminalMessage;
+        try { message = JSON.parse(String(event.data)) as TerminalMessage; } catch (_) { return; }
         if (message.type === 'output' && typeof message.data === 'string') {
           terminal.write(message.data);
           return;
@@ -96,7 +113,7 @@
             CONNECTED: 'Connected',
             CLOSED: 'Disconnected'
           };
-          setStatus(labels[message.state] || message.state || 'Connecting…', message.state === 'CONNECTED' ? 'ok' : 'off');
+          setStatus(labels[message.state as keyof typeof labels] || message.state || 'Connecting…', message.state === 'CONNECTED' ? 'ok' : 'off');
           if (message.state === 'CONNECTED') terminal.focus();
           return;
         }
@@ -121,7 +138,7 @@
       connecting = false;
       reconnectButton?.removeAttribute('disabled');
       setStatus('Connection failed', 'danger');
-      showError(error.message || 'Unable to open terminal session.');
+      showError(error instanceof Error ? error.message : 'Unable to open terminal session.');
     }
   }
 
@@ -137,8 +154,8 @@
     setStatus('Disconnected');
   }
 
-  terminal.onData(data => send({ type: 'input', data }));
-  terminal.onResize(({ cols, rows }) => send({ type: 'resize', cols, rows }));
+  terminal.onData((data: string) => send({ type: 'input', data }));
+  terminal.onResize(({ cols, rows }: {cols: number; rows: number}) => send({ type: 'resize', cols, rows }));
   reconnectButton?.addEventListener('click', () => {
     disconnect();
     terminal.write('\r\n\x1b[90m[reconnecting]\x1b[0m\r\n');
