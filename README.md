@@ -14,6 +14,10 @@ Owner -> ChatGPT -> mcp_worker -> SSH Profile -> SSH -> machine
 
 The project keeps a small Admin UI for configuration and observability. V2 focuses on the coding execution gateway, not business workflows.
 
+## Deployment modes (staged roadmap)
+
+The currently supported deployment is **self-hosted Docker with MySQL and a native Worker**. The project is adding two user-facing paths on a dedicated development branch: **Quick Start** (Vercel + durable cloud storage + isolated Sandbox, with an optional remote Worker) and **Self-host** (SQLite single-node or MySQL). These planned profiles are **not yet deployable**; selecting an unfinished profile fails closed rather than running with unsafe ephemeral storage. See [deployment plan](docs/DEPLOYMENT_IMPLEMENTATION.md) and [architecture decision](docs/adr/0001-deployment-modes.md). Do not use a local SQLite file as persistent storage on Vercel.
+
 ## Version and release policy
 
 The main branch is the mcp_worker V2 line, with the 19-tool MCP catalog and outbound Go Worker transport. Stable releases will use versioned Git tags. This repository contains the V2 source release candidate. Public source access does not imply a stable signed release. See [the public release roadmap](docs/PUBLIC_RELEASE_ROADMAP.md).

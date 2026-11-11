@@ -2,11 +2,11 @@ import app from './app';
 import type { Server } from 'node:http';
 import config from './config/env';
 import mcpConfig from './config/mcpConfig';
-import databaseManager from './db/databaseManager';
 import runtimeSettings from './services/runtimeSettingsService';
-import sessionMiddleware from './middleware/sessionMiddleware';
 import { closeDb } from './db/connection';
-import workerBrokerService from './services/workerConnectionBroker';
+import { createAppRuntime } from './deployment/bootstrap';
+import type { DeploymentRuntime } from './deployment/runtime';
+import type { WorkerTransportPort } from './deployment/ports';
 interface Closable {
   close(): void;
 }
@@ -14,10 +14,13 @@ import terminalWebSocketModule from './services/terminalWebSocketService';
 
 let server: Server | null = null;
 let terminalWebSocket: Closable | null = null;
-let workerBroker: typeof workerBrokerService | null = null;
+let workerBroker: WorkerTransportPort | null = null;
+let deployment: DeploymentRuntime | null = null;
 let closing = false;
 
 async function bootstrap(): Promise<Server> {
+  deployment = createAppRuntime();
+  const { storage: databaseManager } = deployment;
   const storage = await databaseManager.initialize();
   if (databaseManager.isMysqlReady())
     await runtimeSettings.seedDefaults(databaseManager.getAdapter());
@@ -31,11 +34,12 @@ async function bootstrap(): Promise<Server> {
   server = app.listen(config.PORT, config.HOST, () => {
     console.log(`[BOOT] mcp_worker listening on http://${config.HOST}:${config.PORT}`);
     console.log(`[BOOT] Storage state: ${storage.state}`);
+    console.log(`[BOOT] Deployment profile: ${deployment?.profile.id || 'unknown'}`);
     if (databaseManager.isOperational())
       console.log(`[BOOT] MCP resource: ${mcpConfig.resourceUrl}`);
   });
   terminalWebSocket = terminalWebSocketModule.attachTerminalWebSocket(server);
-  workerBroker = workerBrokerService;
+  workerBroker = deployment.worker;
   workerBroker.attach(server);
   return server;
 }
@@ -51,10 +55,10 @@ async function shutdown(signal: string): Promise<void> {
     workerBroker?.close();
   } catch (_) {}
   try {
-    sessionMiddleware.store?.close?.();
+    deployment?.sessions.close();
   } catch (_) {}
   try {
-    await databaseManager.close();
+    await deployment?.storage.close();
   } catch (_) {}
   try {
     closeDb();
