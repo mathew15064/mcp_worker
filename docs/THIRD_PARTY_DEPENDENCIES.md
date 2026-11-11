@@ -42,11 +42,14 @@ corresponding actual license/copyright text or manual review.
 
 Runtime image spot-check on 2026-11-11: **155 of 156** installed
 runtime/non-dev packages have a recognizable LICENSE/NOTICE-like file.
-The nested `express-session/node_modules/cookie-signature` 1.0.7 declares
-MIT in its package metadata but contains **no LICENSE file**. Retrieve and
-verify the matching version's attribution/license terms before publishing
-complete notices; do not assume the license file of a different version
-applies without verification.
+The remaining nested `express-session/node_modules/cookie-signature` 1.0.7
+has **the complete MIT license grant and copyright attribution in its own
+installed `Readme.md`**, including Copyright (c) 2012 LearnBoost. It has no
+separate LICENSE file; the text was verified against the exact packaged
+1.0.7 directory, rather than borrowed from another version. This resolves
+the apparent *missing-license-text* finding for that npm package, but does
+**not** complete the required combined third-party notices for the shipped
+app/MySQL images and Worker binaries or replace owner/legal approval.
 
 The legacy Node Worker lockfile has three MIT entries; native Go Worker is
 the supported default. Audit both when distributing either implementation.
