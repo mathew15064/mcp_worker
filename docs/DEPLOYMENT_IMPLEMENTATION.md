@@ -10,7 +10,7 @@ It does not change the current production installation or authorize publishing.
 | P0 | Architecture ADR, tool contract baseline, staging policy | TS6.3 | Foundation drafted |
 | P1 | Deployment profile validation and runtime ports | P0 | Initial implementation |
 | P2 | Production SQLite local mode, migrations, backups | P1 | Pending |
-| P3 | Remote libSQL adapter and migrations | P1 | Pending |
+| P3 | Remote libSQL adapter and migrations | P1 | Adapter + 13 migrations tested locally; remote session/runtime pending |
 | P4 | Vercel Express entrypoint, persistent sessions and OAuth | P3 | Pending |
 | P5 | SandboxExecutionBackend and workspace lifecycle | P4 | Pending |
 | P6 | Durable external Worker jobs, reconnect and streaming | P4 | Pending |
