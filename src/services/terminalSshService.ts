@@ -1,20 +1,40 @@
-const crypto = require('crypto');
-const path = require('path');
-const mime = require('mime-types');
-const { Client } = require('ssh2');
-const { TMUX_SESSION_RE } = require('../repositories/terminalProfileRepository');
+import crypto from 'node:crypto';
+import path from 'node:path';
+import mime from 'mime-types';
+import {Client, type ClientChannel, type ExecOptions} from 'ssh2';
+import terminalProfileRepo = require('../repositories/terminalProfileRepository');
+const {TMUX_SESSION_RE} = terminalProfileRepo;
 
-function terminalError(code, message) {
-  const error = new Error(message);
-  error.code = code;
-  return error;
+
+interface SshProfile {host: string; port: number; username: string; tmux_session: string}
+interface AbortOptions {signal?: AbortSignal}
+interface SshOptions extends AbortOptions {runAs?: string | null}
+interface ReadOptions extends AbortOptions {targetPane?: string | null}
+interface CommandOptions extends SshOptions {cwd?: string | null; timeoutMs?: number; maxOutputBytes?: number}
+interface FileOptions extends SshOptions {maxBytes?: number}
+interface WriteOptions extends SshOptions {createDirs?: boolean}
+interface InputOptions extends AbortOptions {timeoutMs?: number; maxStderrBytes?: number}
+interface ProcessOptions extends SshOptions {cwd?: string | null}
+interface ProcessReadOptions extends AbortOptions {lines?: number}
+interface ProcessLogOptions extends AbortOptions {cursor?: number; maxBytes?: number}
+interface ProcessStopOptions extends AbortOptions {force?: boolean; graceMs?: number; lines?: number}
+interface InteractiveOptions extends AbortOptions {cols?: number; rows?: number; onState?: (value: string) => void}
+interface SshConnection {client: Client}
+interface PaneInspection {pane_count: number; panes: Array<{id: string; current_command: string | null}>; target_pane: string | null; pane_current_command: string | null}
+interface ReadCapture {text: string; lines: number; truncated: boolean}
+interface ProcessSnapshot {process_id: string; state: string; exit_code: number | null; pid: number | null; current_command: string | null; output: string; output_lines: number}
+interface CommandResult {exit_code: number; stdout: string; stderr: string; duration_ms: number; stdout_truncated: boolean; stderr_truncated: boolean}
+function codeOf(error: unknown): string | undefined {
+  return error !== null && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : undefined;
 }
 
-function shellQuote(value) {
+function terminalError(code: string, message: string) {return Object.assign(new Error(message), {code});}
+
+function shellQuote(value: unknown) {
   return "'" + String(value).replace(/'/g, "'\\''") + "'";
 }
 
-function validateRunAs(runAs) {
+function validateRunAs(runAs: unknown) {
   if (runAs === null || runAs === undefined || runAs === '') return null;
   if (typeof runAs !== 'string' || !/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/.test(runAs)) {
     throw terminalError('INVALID_RUN_AS', 'run_as must be a valid local username.');
@@ -22,19 +42,19 @@ function validateRunAs(runAs) {
   return runAs;
 }
 
-function validateManagedProcessId(processId) {
+function validateManagedProcessId(processId: unknown) {
   if (typeof processId !== 'string' || !/^brproc-[a-f0-9]{16}$/.test(processId)) {
     throw terminalError('INVALID_PROCESS_ID', 'Invalid managed process identifier.');
   }
   return processId;
 }
 
-function managedProcessLogPath(processId) {
+function managedProcessLogPath(processId: unknown) {
   const id = validateManagedProcessId(processId);
   return `/tmp/bot-report-mcp-process/${id}.log`;
 }
 
-function sanitizeTerminalText(text) {
+function sanitizeTerminalText(text: unknown) {
   return String(text || '')
     .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, '')
     .replace(/\x1b[P^_][\s\S]*?\x1b\\/g, '')
@@ -45,14 +65,17 @@ function sanitizeTerminalText(text) {
 }
 
 class TerminalSshService {
-  constructor({ ClientClass = Client, connectTimeoutMs = 10_000, commandTimeoutMs = 5_000 } = {}) {
+  ClientClass: typeof Client;
+  connectTimeoutMs: number;
+  commandTimeoutMs: number;
+  constructor({ ClientClass = Client, connectTimeoutMs = 10_000, commandTimeoutMs = 5_000 }: {ClientClass?: typeof Client; connectTimeoutMs?: number; commandTimeoutMs?: number} = {}) {
     this.ClientClass = ClientClass;
     this.connectTimeoutMs = connectTimeoutMs;
     this.commandTimeoutMs = commandTimeoutMs;
   }
 
-  connect(profile, password, { signal } = {}) {
-    return new Promise((resolve, reject) => {
+  connect(profile: SshProfile, password: string, { signal }: AbortOptions = {}): Promise<Client> {
+    return new Promise<Client>((resolve, reject) => {
       const client = new this.ClientClass();
       let settled = false;
       const abort = () => {
@@ -100,8 +123,8 @@ class TerminalSshService {
     });
   }
 
-  execChannel(client, command, options = {}, signal) {
-    return new Promise((resolve, reject) => {
+  execChannel(client: Client, command: string, options: ExecOptions = {}, signal?: AbortSignal): Promise<ClientChannel> {
+    return new Promise<ClientChannel>((resolve, reject) => {
       let settled = false;
       const cleanup = () => {
         clearTimeout(timer);
@@ -133,9 +156,9 @@ class TerminalSshService {
     });
   }
 
-  async execStatus(client, command, signal) {
+  async execStatus(client: Client, command: string, signal?: AbortSignal): Promise<number> {
     const stream = await this.execChannel(client, command, {}, signal);
-    return new Promise((resolve, reject) => {
+    return new Promise<number>((resolve, reject) => {
       let settled = false;
       const cleanup = () => {
         clearTimeout(timer);
@@ -167,12 +190,12 @@ class TerminalSshService {
     });
   }
 
-  async execText(client, command, signal, maxBytes = 16 * 1024) {
+  async execText(client: Client, command: string, signal?: AbortSignal, maxBytes = 16 * 1024): Promise<string> {
     const stream = await this.execChannel(client, command, {}, signal);
-    return new Promise((resolve, reject) => {
+    return new Promise<string>((resolve, reject) => {
       let settled = false;
       let size = 0;
-      const chunks = [];
+      const chunks: Buffer[] = [];
       const cleanup = () => {
         clearTimeout(timer);
         signal?.removeEventListener('abort', fail);
@@ -209,9 +232,9 @@ class TerminalSshService {
     });
   }
 
-  async execInput(client, command, input, signal) {
+  async execInput(client: Client, command: string, input: string | Buffer, signal?: AbortSignal): Promise<void> {
     const stream = await this.execChannel(client, command, {}, signal);
-    return new Promise((resolve, reject) => {
+    return new Promise<void>((resolve, reject) => {
       let settled = false;
       const cleanup = () => {
         clearTimeout(timer);
@@ -222,7 +245,7 @@ class TerminalSshService {
         stream.removeListener('exit', complete);
         stream.removeListener('close', complete);
       };
-      const finish = (code) => {
+      const finish = (code: number | null) => {
         if (settled) return;
         settled = true;
         cleanup();
@@ -258,7 +281,7 @@ class TerminalSshService {
     });
   }
 
-  async checkTmux(client, sessionName, signal) {
+  async checkTmux(client: Client, sessionName: string, signal?: AbortSignal) {
     if (!TMUX_SESSION_RE.test(sessionName)) throw terminalError('INVALID_TMUX_SESSION', 'Invalid tmux session.');
     const available = await this.execStatus(client, 'tmux -V', signal);
     if (available !== 0) throw terminalError('TMUX_NOT_AVAILABLE', 'tmux is not available on the SSH host.');
@@ -266,11 +289,11 @@ class TerminalSshService {
     if (exists !== 0) throw terminalError('TMUX_SESSION_NOT_FOUND', 'Configured tmux session was not found.');
   }
 
-  async inspectTmux(client, sessionName, signal) {
+  async inspectTmux(client: Client, sessionName: string, signal?: AbortSignal): Promise<PaneInspection> {
     await this.checkTmux(client, sessionName, signal);
     const output = await this.execText(client,
       `tmux list-panes -t '=${sessionName}' -F '#{pane_id}\t#{pane_current_command}'`, signal);
-    const panes = output.split(/\r?\n/).filter(Boolean).map(line => {
+    const panes = output.split(/\r?\n/).filter(Boolean).map((line: string) => {
       const tab = line.indexOf('\t');
       const id = tab === -1 ? line : line.slice(0, tab);
       const currentCommand = tab === -1 ? '' : line.slice(tab + 1);
@@ -286,21 +309,21 @@ class TerminalSshService {
     };
   }
 
-  requireSinglePane(inspection) {
+  requireSinglePane(inspection: PaneInspection): string {
     if (!inspection?.target_pane) {
       throw terminalError('TMUX_MULTIPLE_PANES', 'MCP terminal control requires exactly one tmux pane in the configured session.');
     }
     return inspection.target_pane;
   }
 
-  async captureText(connection, profile, lines, { signal, targetPane = null } = {}) {
+  async captureText(connection: SshConnection, profile: SshProfile, lines: number, { signal, targetPane = null }: ReadOptions = {}): Promise<ReadCapture> {
     if (!Number.isInteger(lines) || lines < 1 || lines > 10000) throw terminalError('INVALID_LINES', 'Invalid line count.');
     if (!TMUX_SESSION_RE.test(profile.tmux_session)) throw terminalError('INVALID_TMUX_SESSION', 'Invalid tmux session.');
     if (!connection?.client || signal?.aborted) throw terminalError('SSH_DISCONNECTED', 'Terminal disconnected.');
     const target = targetPane && /^%\d+$/.test(targetPane) ? targetPane : `=${profile.tmux_session}:`;
     const command = `tmux capture-pane -p -J -t '${target}' -S -`;
-    return new Promise((resolve, reject) => {
-      let stream, done = false, tail = Buffer.alloc(0), truncated = false;
+    return new Promise<ReadCapture>((resolve, reject) => {
+      let stream: ClientChannel | undefined, done = false, tail = Buffer.alloc(0), truncated = false;
       const finish = (code) => {
         if (done) return; done = true; clearTimeout(timer);
         signal?.removeEventListener('abort', abort);
@@ -316,8 +339,8 @@ class TerminalSshService {
         resolve({ text, lines: Math.min(rows.length, lines), truncated });
       };
       const abort = () => finish('CAPTURE_FAILED');
-      const closed = code => finish(code === 0 ? null : 'TMUX_TARGET_MISSING');
-      const data = chunk => {
+      const closed = (code: number | undefined) => finish(code === 0 ? null : 'TMUX_TARGET_MISSING');
+      const data = (chunk: Buffer | string) => {
         const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
         const size = 2 * 1024 * 1024;
         if (tail.length + bytes.length > size) truncated = true;
@@ -337,7 +360,7 @@ class TerminalSshService {
     });
   }
 
-  async withVerifiedClient(profile, password, operation, { signal } = {}) {
+  async withVerifiedClient<T>(profile: SshProfile, password: string, operation: (client: Client) => Promise<T>, { signal }: AbortOptions = {}): Promise<T> {
     let client;
     try {
       client = await this.connect(profile, password, { signal });
@@ -348,19 +371,19 @@ class TerminalSshService {
     }
   }
 
-  async testConnection(profile, password, { signal } = {}) {
+  async testConnection(profile: SshProfile, password: string, { signal }: AbortOptions = {}) {
     return this.withVerifiedClient(profile, password, async client => {
       const inspection = await this.inspectTmux(client, profile.tmux_session, signal);
       return { code: 'TEST_OK', ...inspection };
     }, { signal });
   }
 
-  async inspectProfile(profile, password, { signal } = {}) {
+  async inspectProfile(profile: SshProfile, password: string, { signal }: AbortOptions = {}) {
     return this.withVerifiedClient(profile, password,
       client => this.inspectTmux(client, profile.tmux_session, signal), { signal });
   }
 
-  async sendText(profile, password, text, { submit = true, signal } = {}) {
+  async sendText(profile: SshProfile, password: string, text: string, { submit = true, signal }: AbortOptions & {submit?: boolean} = {}) {
     if (typeof text !== 'string' || !text || Buffer.byteLength(text, 'utf8') > 64 * 1024) {
       throw terminalError('INVALID_INPUT', 'Terminal input must be between 1 byte and 64 KiB.');
     }
@@ -377,7 +400,7 @@ class TerminalSshService {
     }, { signal });
   }
 
-  async readText(profile, password, lines = 200, { signal } = {}) {
+  async readText(profile: SshProfile, password: string, lines = 200, { signal }: AbortOptions = {}) {
     return this.withVerifiedClient(profile, password, async client => {
       const inspection = await this.inspectTmux(client, profile.tmux_session, signal);
       const target = this.requireSinglePane(inspection);
@@ -387,7 +410,7 @@ class TerminalSshService {
   }
 
 
-  async sendInterrupt(profile, password, { signal } = {}) {
+  async sendInterrupt(profile: SshProfile, password: string, { signal }: AbortOptions = {}) {
     return this.withVerifiedClient(profile, password, async client => {
       const inspection = await this.inspectTmux(client, profile.tmux_session, signal);
       const target = this.requireSinglePane(inspection);
@@ -398,7 +421,7 @@ class TerminalSshService {
     }, { signal });
   }
 
-  async execWorkspaceCommand(profile, password, command, { cwd = null, runAs = null, timeoutMs = 30000, maxOutputBytes = 1024 * 1024, signal } = {}) {
+  async execWorkspaceCommand(profile: SshProfile, password: string, command: string, { cwd = null, runAs = null, timeoutMs = 30000, maxOutputBytes = 1024 * 1024, signal }: CommandOptions = {}): Promise<CommandResult> {
     runAs = validateRunAs(runAs);
     const timeout = Math.min(Math.max(Number(timeoutMs) || 30000, 100), 300000);
     const start = Date.now();
@@ -411,13 +434,13 @@ class TerminalSshService {
         : innerCommand;
 
       const stream = await this.execChannel(client, remoteShellCommand, {}, signal);
-      return await new Promise((resolve, reject) => {
+      return await new Promise<CommandResult>((resolve, reject) => {
         let settled = false;
-        let exitCode = null;
+        let exitCode: number | null = null;
         let stdoutBytes = 0;
         let stderrBytes = 0;
-        const stdoutChunks = [];
-        const stderrChunks = [];
+        const stdoutChunks: Buffer[] = [];
+        const stderrChunks: Buffer[] = [];
         let stdoutTruncated = false;
         let stderrTruncated = false;
 
@@ -517,7 +540,7 @@ class TerminalSshService {
     }
   }
 
-  async inspectArtifactPath(client, targetPath, signal, { runAs = null } = {}) {
+  async inspectArtifactPath(client: Client, targetPath: string, signal?: AbortSignal, { runAs = null }: SshOptions = {}): Promise<{realTarget: string; fileSize: number}> {
     const escapedTarget = targetPath.replace(/'/g, "'\\''");
     const inspectScript = `target='${escapedTarget}'\n` +
       `real_target=$(realpath -e -- "$target" 2>/dev/null) || exit 2\n` +
@@ -529,7 +552,7 @@ class TerminalSshService {
       : inspectScript;
 
     const stream = await this.execChannel(client, inspectCommand, {}, signal);
-    return new Promise((resolve, reject) => {
+    return new Promise<{realTarget: string;fileSize: number}>((resolve, reject) => {
       let settled = false;
       const chunks = [];
       let exitCode = null;
@@ -574,9 +597,9 @@ class TerminalSshService {
     });
   }
 
-  async execBinary(client, command, signal, maxBytes = 2 * 1024 * 1024) {
+  async execBinary(client: Client, command: string, signal?: AbortSignal, maxBytes = 2 * 1024 * 1024): Promise<Buffer> {
     const stream = await this.execChannel(client, command, {}, signal);
-    return new Promise((resolve, reject) => {
+    return new Promise<Buffer>((resolve, reject) => {
       let settled = false;
       let size = 0;
       const chunks = [];
@@ -618,7 +641,7 @@ class TerminalSshService {
     });
   }
 
-  async collectArtifact(profile, password, requestedPath, { maxBytes = 2 * 1024 * 1024, runAs = null, signal } = {}) {
+  async collectArtifact(profile: SshProfile, password: string, requestedPath: string, { maxBytes = 2 * 1024 * 1024, runAs = null, signal }: FileOptions = {}) {
     runAs = validateRunAs(runAs);
     let client;
     try {
@@ -666,10 +689,10 @@ class TerminalSshService {
     }
   }
 
-  async execInputCommand(client, command, input, { signal, timeoutMs = 30000, maxStderrBytes = 64 * 1024 } = {}) {
+  async execInputCommand(client: Client, command: string, input: Buffer | string, { signal, timeoutMs = 30000, maxStderrBytes = 64 * 1024 }: InputOptions = {}): Promise<{exit_code: number; stderr: string}> {
     const stream = await this.execChannel(client, command, {}, signal);
     const timeout = Math.min(Math.max(Number(timeoutMs) || 30000, 100), 300000);
-    return new Promise((resolve, reject) => {
+    return new Promise<{exit_code: number;stderr: string}>((resolve, reject) => {
       let settled = false;
       let exitCode = null;
       let stderrBytes = 0;
@@ -735,7 +758,7 @@ class TerminalSshService {
     });
   }
 
-  async writeTextFile(profile, password, targetPath, content, { createDirs = false, runAs = null, signal } = {}) {
+  async writeTextFile(profile: SshProfile, password: string, targetPath: string, content: string, { createDirs = false, runAs = null, signal }: WriteOptions = {}) {
     runAs = validateRunAs(runAs);
     let client;
     try {
@@ -761,7 +784,7 @@ class TerminalSshService {
     }
   }
 
-  async inspectManagedProcess(client, processId, signal, lines = 200) {
+  async inspectManagedProcess(client: Client, processId: unknown, signal?: AbortSignal, lines = 200): Promise<ProcessSnapshot> {
     const id = validateManagedProcessId(processId);
     const exists = await this.execStatus(client, `tmux has-session -t ${shellQuote('=' + id)}`, signal);
     if (exists !== 0) throw terminalError('PROCESS_NOT_FOUND', 'Managed process was not found.');
@@ -773,7 +796,7 @@ class TerminalSshService {
     const rawOutput = await this.execText(client,
       `tmux capture-pane -p -J -t ${shellQuote(target)} -S -`, signal, 512 * 1024);
     const rows = rawOutput.replace(/\r\n/g, '\n').split('\n');
-    while (rows.length && rows.at(-1).trim() === '') rows.pop();
+    while (rows.length && rows.at(-1)?.trim() === '') rows.pop();
     const selected = rows.slice(-Math.max(1, Math.min(Number(lines) || 200, 1000)));
     const dead = deadRaw === '1';
     return {
@@ -787,7 +810,7 @@ class TerminalSshService {
     };
   }
 
-  async startManagedProcess(profile, password, command, { cwd = null, runAs = null, signal } = {}) {
+  async startManagedProcess(profile: SshProfile, password: string, command: string, { cwd = null, runAs = null, signal }: ProcessOptions = {}) {
     runAs = validateRunAs(runAs);
     let client;
     const processId = `brproc-${crypto.randomBytes(8).toString('hex')}`;
@@ -818,7 +841,7 @@ class TerminalSshService {
     }
   }
 
-  async getManagedProcessStatus(profile, password, processId, { lines = 200, signal } = {}) {
+  async getManagedProcessStatus(profile: SshProfile, password: string, processId: unknown, { lines = 200, signal }: ProcessReadOptions = {}) {
     let client;
     try {
       client = await this.connect(profile, password, { signal });
@@ -828,7 +851,7 @@ class TerminalSshService {
     }
   }
 
-  async readManagedProcessLogs(profile, password, processId, { cursor = 0, maxBytes = 64 * 1024, signal } = {}) {
+  async readManagedProcessLogs(profile: SshProfile, password: string, processId: unknown, { cursor = 0, maxBytes = 64 * 1024, signal }: ProcessLogOptions = {}) {
     const id = validateManagedProcessId(processId);
     const offset = Number(cursor);
     const limit = Number(maxBytes);
@@ -864,7 +887,7 @@ class TerminalSshService {
     }
   }
 
-  async stopManagedProcess(profile, password, processId, { force = true, graceMs = 1000, lines = 200, signal } = {}) {
+  async stopManagedProcess(profile: SshProfile, password: string, processId: unknown, { force = true, graceMs = 1000, lines = 200, signal }: ProcessStopOptions = {}) {
     let client;
     try {
       client = await this.connect(profile, password, { signal });
@@ -898,7 +921,7 @@ class TerminalSshService {
     }
   }
 
-  async openInteractive(profile, password, { cols = 80, rows = 24, onState = () => {}, signal } = {}) {
+  async openInteractive(profile: SshProfile, password: string, { cols = 80, rows = 24, onState = () => {}, signal }: InteractiveOptions = {}) {
     let client;
     try {
       client = await this.connect(profile, password, { signal });
@@ -923,6 +946,4 @@ class TerminalSshService {
   }
 }
 
-module.exports = new TerminalSshService();
-module.exports.TerminalSshService = TerminalSshService;
-module.exports.terminalError = terminalError;
+export = Object.assign(new TerminalSshService(), {TerminalSshService, terminalError});
