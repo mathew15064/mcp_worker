@@ -1,4 +1,7 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
+import { routeError } from '../http/domainErrors';
+import { formString, formFlag } from '../http/requestContracts';
+import pages from '../http/pages';
 declare module 'express-serve-static-core' {
   interface Request {
     /** Present only after requireUser middleware succeeds. */
@@ -12,27 +15,19 @@ declare module 'express-serve-static-core' {
     };
   }
 }
-function routeError(value: unknown): { code?: string; status?: number; message: string } {
-  const e =
-    value && typeof value === 'object'
-      ? (value as { code?: string; status?: number; message?: string })
-      : {};
-  return { code: e.code, status: e.status, message: e.message || 'Request failed' };
-}
-
 import authRoutes from './authRoutes';
 const { currentIdentity } = authRoutes;
 import oauthRepo from '../repositories/mcpOAuthRepository';
 import workerRepo from '../repositories/workerRepository';
 import workerBroker from '../services/workerConnectionBroker';
 import workerExecutionService from '../services/workerExecutionService';
-const terminalNonces = require('../services/terminalNonceService');
-const terminalOrigins = require('../services/terminalPublicOriginService');
+import terminalNonces from '../services/terminalNonceService';
+import terminalOrigins from '../services/terminalPublicOriginService';
 import workerLifecycle from '../services/workerLifecycleService';
 import oauthService from '../services/mcpOAuthService';
 import userService from '../services/userService';
-const userTelegramSettings = require('../services/userTelegramSettingsService');
-const telegramService = require('../services/telegramService');
+import userTelegramSettings from '../services/userTelegramSettingsService';
+import telegramService from '../services/telegramService';
 import mcpConfig from '../config/mcpConfig';
 const {
   accountClientsPage,
@@ -41,7 +36,7 @@ const {
   terminalConsolePage,
   workersPage,
   errorPage,
-} = require('../http/pages');
+} = pages;
 
 const router = express.Router();
 
@@ -140,7 +135,9 @@ router.get('/account/clients', async (req, res, next) => {
     return res.type('html').send(
       accountClientsPage({
         user: req.currentUser,
-        clients: await oauthRepo.listClientsByOwner(req.currentUser.id),
+        clients: (await oauthRepo.listClientsByOwner(req.currentUser.id)).filter(
+          (client): client is NonNullable<typeof client> => client !== null,
+        ),
         mcpUrl: mcpConfig.resourceUrl,
         csrfToken: csrf(req),
         secret: consumeOneTimeSecret(req),
@@ -154,12 +151,12 @@ router.get('/account/clients', async (req, res, next) => {
 
 router.post('/account/clients', async (req, res) => {
   try {
-    const redirectUris = String(req.body.redirect_uris || '')
+    const redirectUris = String(formString(req.body, 'redirect_uris') || '')
       .split(/\r?\n/)
       .map((v) => v.trim())
       .filter(Boolean);
     const result = await oauthService.registerClient({
-      displayName: req.body.display_name,
+      displayName: formString(req.body, 'display_name'),
       principalId: req.currentUser.principal_id,
       profileId: req.currentUser.profile_id,
       ownerUserId: req.currentUser.id,
@@ -236,7 +233,9 @@ router.get('/account/workers', async (req, res, next) => {
             ...worker,
             status: worker.enabled && workerBroker.isOnline(worker.id) ? 'online' : 'offline',
           })),
-        profiles: await workerRepo.listProfilesByOwner(req.currentUser.id),
+        profiles: (await workerRepo.listProfilesByOwner(req.currentUser.id)).filter(
+          (profile): profile is NonNullable<typeof profile> => profile !== null,
+        ),
         checkingWorkerId: String(req.query.check || ''),
         enrollment: consumeWorkerEnrollment(req),
         workerInstallUrl: `${mcpConfig.publicBaseUrl}/worker/install.sh`,
@@ -253,7 +252,10 @@ router.get('/account/workers', async (req, res, next) => {
 
 router.post('/account/workers/enrollment', async (req, res) => {
   try {
-    const ttlSeconds = Math.max(60, Math.min(Number(req.body.ttl_seconds) || 600, 3600));
+    const ttlSeconds = Math.max(
+      60,
+      Math.min(Number(formString(req.body, 'ttl_seconds')) || 600, 3600),
+    );
     const enrollment = await workerRepo.createEnrollmentToken({
       ttlSeconds,
       ownerUserId: req.currentUser.id,
@@ -296,7 +298,7 @@ router.post('/account/workers/:id/:action', async (req, res) => {
       return res.redirect('/account/workers');
     }
     if (action === 'edit') {
-      await workerRepo.updateWorkerName(worker.id, req.body.name, {
+      await workerRepo.updateWorkerName(worker.id, formString(req.body, 'name'), {
         ownerUserId: req.currentUser.id,
       });
       setFlash(req, 'success', 'Worker name updated.');
@@ -324,13 +326,13 @@ router.post('/account/workers/:id/:action', async (req, res) => {
 
 router.post('/account/workers/profiles', async (req, res) => {
   try {
-    await requireActiveOwnedWorker(req.body.worker_id, req.currentUser.id);
+    await requireActiveOwnedWorker(formString(req.body, 'worker_id'), req.currentUser.id);
     await workerRepo.createProfile(
       {
-        name: req.body.name,
-        description: req.body.description,
-        worker_id: req.body.worker_id,
-        enabled: req.body.enabled,
+        name: formString(req.body, 'name'),
+        description: formString(req.body, 'description'),
+        worker_id: formString(req.body, 'worker_id'),
+        enabled: formFlag(req.body, 'enabled'),
       },
       { ownerUserId: req.currentUser.id },
     );
@@ -390,13 +392,13 @@ router.get('/account/ssh-profiles', async (req, res, next) => {
 
 router.post('/account/ssh-profiles', async (req, res) => {
   try {
-    await requireActiveOwnedWorker(req.body.worker_id, req.currentUser.id);
+    await requireActiveOwnedWorker(formString(req.body, 'worker_id'), req.currentUser.id);
     await workerRepo.createProfile(
       {
-        name: req.body.name,
-        description: req.body.description,
-        worker_id: req.body.worker_id,
-        enabled: req.body.enabled,
+        name: formString(req.body, 'name'),
+        description: formString(req.body, 'description'),
+        worker_id: formString(req.body, 'worker_id'),
+        enabled: formFlag(req.body, 'enabled'),
       },
       { ownerUserId: req.currentUser.id },
     );
@@ -412,14 +414,14 @@ router.post('/account/ssh-profiles/:id/update', async (req, res) => {
     const existing = await workerRepo.findProfileByIdForOwner(req.params.id, req.currentUser.id);
     if (!existing)
       return res.status(404).type('html').send(errorPage(404, 'SSH Profile not found.'));
-    await requireActiveOwnedWorker(req.body.worker_id, req.currentUser.id);
+    await requireActiveOwnedWorker(formString(req.body, 'worker_id'), req.currentUser.id);
     await workerRepo.updateProfile(
       existing.id,
       {
-        name: req.body.name,
-        description: req.body.description,
-        worker_id: req.body.worker_id,
-        enabled: req.body.enabled,
+        name: formString(req.body, 'name'),
+        description: formString(req.body, 'description'),
+        worker_id: formString(req.body, 'worker_id'),
+        enabled: formFlag(req.body, 'enabled'),
       },
       { ownerUserId: req.currentUser.id },
     );
@@ -552,9 +554,9 @@ router.get('/account/telegram', async (req, res, next) => {
 router.post('/account/telegram', async (req, res) => {
   try {
     await userTelegramSettings.save(req.currentUser.id, {
-      enabled: req.body.enabled === 'true',
-      chatId: req.body.chat_id,
-      botToken: req.body.bot_token,
+      enabled: formFlag(req.body, 'enabled'),
+      chatId: formString(req.body, 'chat_id'),
+      botToken: formString(req.body, 'bot_token'),
     });
     setFlash(req, 'success', 'Your Telegram settings were saved separately from Admin Telegram.');
   } catch (error) {
@@ -580,8 +582,8 @@ router.post('/account/profile', async (req, res) => {
   const returnTo = accountReturnTo(req);
   try {
     const updated = await userService.updateProfile(req.currentUser.id, {
-      displayName: req.body.display_name,
-      email: req.body.email,
+      displayName: formString(req.body, 'display_name'),
+      email: formString(req.body, 'email'),
     });
     if (!updated) throw new Error('Profile update returned no user.');
     req.session.username = updated.username;
@@ -595,7 +597,7 @@ router.post('/account/profile', async (req, res) => {
 router.post('/account/password', async (req, res, next) => {
   const returnTo = accountReturnTo(req);
   try {
-    await userService.changePassword(req.currentUser.id, req.body.password);
+    await userService.changePassword(req.currentUser.id, formString(req.body, 'password'));
     return req.session.destroy((error) => (error ? next(error) : res.redirect('/login')));
   } catch (error) {
     setFlash(req, 'error', routeError(error).message);

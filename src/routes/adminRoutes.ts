@@ -1,12 +1,7 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
-function routeError(value: unknown): { code?: string; status?: number; message: string } {
-  const e =
-    value && typeof value === 'object'
-      ? (value as { code?: string; status?: number; message?: string })
-      : {};
-  return { code: e.code, status: e.status, message: e.message || 'Request failed' };
-}
-
+import { routeError } from '../http/domainErrors';
+import { formString, formFlag, formList } from '../http/requestContracts';
+import pages from '../http/pages';
 const packageJson = require('../../package.json');
 import authRoutes from './authRoutes';
 const { currentAdmin } = authRoutes;
@@ -18,13 +13,13 @@ import workerRepo from '../repositories/workerRepository';
 import workerBroker from '../services/workerConnectionBroker';
 import workerLifecycleService from '../services/workerLifecycleService';
 import workerExecutionService from '../services/workerExecutionService';
-const terminalNonces = require('../services/terminalNonceService');
-const terminalOrigins = require('../services/terminalPublicOriginService');
+import terminalNonces from '../services/terminalNonceService';
+import terminalOrigins from '../services/terminalPublicOriginService';
 import settingsRepo from '../repositories/settingsRepository';
 import telegramSecrets from '../services/telegramSecretService';
 import telegramService from '../services/telegramService';
 import runtimeSettings from '../services/runtimeSettingsService';
-const legacyImporter = require('../services/legacySqliteImportService');
+import legacyImporter from '../services/legacySqliteImportService';
 import databaseManager from '../db/databaseManager';
 import bootstrapConfigStore from '../db/bootstrapConfigStore';
 const { normalizeDatabaseConfig } = bootstrapConfigStore;
@@ -42,7 +37,7 @@ const {
   settingsPage,
   setupRequiredPage,
   errorPage,
-} = require('../http/pages');
+} = pages;
 
 const router = express.Router();
 
@@ -176,7 +171,7 @@ function databaseFormInput(
   req: Request,
   { allowStoredPassword = true }: { allowStoredPassword?: boolean } = {},
 ) {
-  const passwordInput = String(req.body.password || '');
+  const passwordInput = String(formString(req.body, 'password') || '');
   let password = passwordInput;
   if (!password && allowStoredPassword && bootstrapConfigStore.exists()) {
     const stored = bootstrapConfigStore.load();
@@ -184,12 +179,12 @@ function databaseFormInput(
   }
   return normalizeDatabaseConfig(
     {
-      host: req.body.host,
-      port: req.body.port,
-      database: req.body.database,
-      username: req.body.username,
+      host: formString(req.body, 'host'),
+      port: formString(req.body, 'port'),
+      database: formString(req.body, 'database'),
+      username: formString(req.body, 'username'),
       password,
-      ssl: req.body.ssl === 'true',
+      ssl: formFlag(req.body, 'ssl'),
     },
     { requirePassword: true },
   );
@@ -204,7 +199,9 @@ router.get('/admin', async (req, res, next) => {
   try {
     const operational = databaseManager.isOperational();
     const clients = operational ? await clientList() : [];
-    const terminals = operational ? await workerRepo.listAdminProfiles() : [];
+    const terminals = operational
+      ? (await workerRepo.listAdminProfiles()).filter((p): p is NonNullable<typeof p> => p !== null)
+      : [];
     const telegram = await telegramConfig();
     const startedAt = new Date(Date.now() - Math.round(process.uptime() * 1000)).toISOString();
     return res.type('html').send(
@@ -418,7 +415,7 @@ router.post('/admin/settings/database/initialize', async (req, res) => {
 
 router.post('/admin/settings/mcp', requireDataStore, async (req, res) => {
   try {
-    const publicBaseUrl = String(req.body.public_base_url || '')
+    const publicBaseUrl = String(formString(req.body, 'public_base_url') || '')
       .trim()
       .replace(/\/+$/, '');
     const url = new URL(publicBaseUrl);
@@ -427,19 +424,25 @@ router.post('/admin/settings/mcp', requireDataStore, async (req, res) => {
     if (process.env.NODE_ENV === 'production' && url.protocol !== 'https:')
       throw new Error('MCP Public Base URL must use HTTPS in production.');
     const entries = {
-      'mcp.enabled': req.body.enabled === 'true' ? 'true' : 'false',
+      'mcp.enabled': formFlag(req.body, 'enabled') ? 'true' : 'false',
       'mcp.public_base_url': publicBaseUrl,
       'mcp.access_token_ttl_seconds': String(
-        Math.max(60, Math.min(86400, Number(req.body.access_token_ttl_seconds) || 900)),
+        Math.max(
+          60,
+          Math.min(86400, Number(formString(req.body, 'access_token_ttl_seconds')) || 900),
+        ),
       ),
       'mcp.refresh_token_ttl_seconds': String(
-        Math.max(3600, Math.min(31536000, Number(req.body.refresh_token_ttl_seconds) || 2592000)),
+        Math.max(
+          3600,
+          Math.min(31536000, Number(formString(req.body, 'refresh_token_ttl_seconds')) || 2592000),
+        ),
       ),
       'mcp.auth_code_ttl_seconds': String(
-        Math.max(60, Math.min(3600, Number(req.body.auth_code_ttl_seconds) || 300)),
+        Math.max(60, Math.min(3600, Number(formString(req.body, 'auth_code_ttl_seconds')) || 300)),
       ),
       'mcp.rate_limit_per_minute': String(
-        Math.max(1, Math.min(10000, Number(req.body.rate_limit_per_minute) || 120)),
+        Math.max(1, Math.min(10000, Number(formString(req.body, 'rate_limit_per_minute')) || 120)),
       ),
     };
     await runtimeSettings.setMany(entries);
@@ -452,12 +455,12 @@ router.post('/admin/settings/mcp', requireDataStore, async (req, res) => {
 
 router.post('/admin/settings/telegram', requireDataStore, async (req, res) => {
   try {
-    const chatId = String(req.body.chat_id || '').trim();
+    const chatId = String(formString(req.body, 'chat_id') || '').trim();
     if (chatId.length > 128 || /[\x00-\x1f\x7f]/.test(chatId))
       throw new Error('Telegram Chat ID is invalid.');
-    await runtimeSettings.set('telegram.enabled', req.body.enabled === 'true' ? 'true' : 'false');
+    await runtimeSettings.set('telegram.enabled', formFlag(req.body, 'enabled') ? 'true' : 'false');
     await runtimeSettings.set('telegram.chat_id', chatId);
-    const token = String(req.body.bot_token || '').trim();
+    const token = String(formString(req.body, 'bot_token') || '').trim();
     if (token) await runtimeSettings.set('telegram.bot_token', telegramSecrets.encrypt(token));
     else await migrateTelegramTokenIfNeeded();
     setFlash(req, 'success', 'Telegram settings saved to database.');
@@ -530,7 +533,7 @@ router.get('/admin/workers', requireDataStore, async (req, res, next) => {
     return res.type('html').send(
       workersPage({
         workers,
-        profiles,
+        profiles: profiles.filter((p): p is NonNullable<typeof p> => p !== null),
         checkingWorkerId: String(req.query.check || ''),
         enrollment: consumeWorkerEnrollment(req),
         workerInstallUrl: `${mcpConfig.publicBaseUrl}/worker/install.sh`,
@@ -545,7 +548,10 @@ router.get('/admin/workers', requireDataStore, async (req, res, next) => {
 
 router.post('/admin/workers/enrollment', requireDataStore, async (req, res) => {
   try {
-    const ttlSeconds = Math.max(60, Math.min(Number(req.body.ttl_seconds) || 600, 3600));
+    const ttlSeconds = Math.max(
+      60,
+      Math.min(Number(formString(req.body, 'ttl_seconds')) || 600, 3600),
+    );
     const enrollment = await workerRepo.createEnrollmentToken({ ttlSeconds });
     setWorkerEnrollment(req, enrollment);
     setFlash(req, 'success', 'One-time worker enrollment token created.');
@@ -557,12 +563,12 @@ router.post('/admin/workers/enrollment', requireDataStore, async (req, res) => {
 
 router.post('/admin/workers/profiles', requireDataStore, async (req, res) => {
   try {
-    await requireActiveAdminWorker(req.body.worker_id);
+    await requireActiveAdminWorker(formString(req.body, 'worker_id'));
     await workerRepo.createProfile({
-      name: req.body.name,
-      description: req.body.description,
-      worker_id: req.body.worker_id,
-      enabled: req.body.enabled,
+      name: formString(req.body, 'name'),
+      description: formString(req.body, 'description'),
+      worker_id: formString(req.body, 'worker_id'),
+      enabled: formFlag(req.body, 'enabled'),
     });
     setFlash(req, 'success', 'SSH Profile created through the active Worker.');
   } catch (error) {
@@ -610,7 +616,7 @@ router.post('/admin/workers/:id/:action', requireDataStore, async (req, res) => 
       return res.redirect('/admin/workers');
     }
     if (String(req.params.action) === 'edit') {
-      await workerRepo.updateWorkerName(worker.id, req.body.name);
+      await workerRepo.updateWorkerName(worker.id, formString(req.body, 'name'));
       setFlash(req, 'success', 'Worker name updated.');
       return res.redirect('/admin/workers');
     }
@@ -653,10 +659,10 @@ router.get('/admin/users', requireDataStore, async (req, res, next) => {
 router.post('/admin/users', requireDataStore, async (req, res) => {
   try {
     await userService.createUser({
-      username: req.body.username,
-      email: req.body.email,
-      displayName: req.body.display_name,
-      password: req.body.password,
+      username: formString(req.body, 'username'),
+      email: formString(req.body, 'email'),
+      displayName: formString(req.body, 'display_name'),
+      password: formString(req.body, 'password'),
     });
     setFlash(req, 'success', 'User created.');
   } catch (error) {
@@ -667,7 +673,7 @@ router.post('/admin/users', requireDataStore, async (req, res) => {
 
 router.post('/admin/users/:id/reset-password', requireDataStore, async (req, res) => {
   try {
-    await userService.resetPassword(String(req.params.id), req.body.password);
+    await userService.resetPassword(String(req.params.id), formString(req.body, 'password'));
     setFlash(req, 'success', 'User password reset and existing sessions revoked.');
   } catch (error) {
     setFlash(req, 'error', routeError(error).message);
@@ -746,9 +752,13 @@ router.get('/admin/audit', requireDataStore, async (req, res, next) => {
     ]);
     return res.type('html').send(
       auditPage({
-        logs,
+        logs: logs.map((row) => ({
+          ...row,
+          id: typeof row.id === 'string' ? row.id : '',
+          result: typeof row.result === 'string' ? row.result : '',
+        })),
         clients,
-        toolNames,
+        toolNames: toolNames.filter((name): name is string => typeof name === 'string'),
         filters,
         page,
         perPage,
@@ -795,19 +805,15 @@ router.get('/admin/audit/:id', requireDataStore, async (req, res, next) => {
 
 router.post('/admin/clients', requireDataStore, async (req, res) => {
   try {
-    const redirectUris = String(req.body.redirect_uris || '')
+    const redirectUris = String(formString(req.body, 'redirect_uris') || '')
       .split(/\r?\n/)
       .map((v) => v.trim())
       .filter(Boolean);
-    const scopes = (
-      Array.isArray(req.body.scopes)
-        ? req.body.scopes
-        : String(req.body.scopes || '').split(/[\s,]+/)
-    )
-      .map((v: unknown) => String(v).trim())
+    const scopes = formList(req.body, 'scopes')
+      .map((scope) => scope.trim())
       .filter(Boolean);
     const result = await oauthService.registerClient({
-      displayName: req.body.display_name,
+      displayName: formString(req.body, 'display_name'),
       redirectUris,
       allowedScopes: scopes,
     });
@@ -944,7 +950,7 @@ router.post('/admin/terminals/:id/session', requireDataStore, async (req, res) =
     const origin = terminalOrigins.resolve(req);
     const issued = terminalNonces.issue({
       sessionId: req.sessionID,
-      userId: req.session.userId,
+      userId: req.session.userId || '',
       sessionVersion: req.session.sessionVersion || 1,
       profileId: profile.id,
       origin,
@@ -964,12 +970,12 @@ router.post('/admin/terminals/:id/session', requireDataStore, async (req, res) =
 
 router.post('/admin/terminals', requireDataStore, async (req, res) => {
   try {
-    await requireActiveAdminWorker(req.body.worker_id);
+    await requireActiveAdminWorker(formString(req.body, 'worker_id'));
     await workerRepo.createProfile({
-      name: req.body.name,
-      description: req.body.description,
-      worker_id: req.body.worker_id,
-      enabled: req.body.enabled,
+      name: formString(req.body, 'name'),
+      description: formString(req.body, 'description'),
+      worker_id: formString(req.body, 'worker_id'),
+      enabled: formFlag(req.body, 'enabled'),
     });
     setFlash(req, 'success', 'SSH Profile created through the active Worker.');
   } catch (error) {
@@ -986,12 +992,12 @@ router.post('/admin/terminals/:id/update', requireDataStore, async (req, res) =>
         code: 'PROFILE_NOT_FOUND',
         status: 404,
       });
-    await requireActiveAdminWorker(req.body.worker_id);
+    await requireActiveAdminWorker(formString(req.body, 'worker_id'));
     await workerRepo.updateProfile(existing.id, {
-      name: req.body.name,
-      description: req.body.description,
-      worker_id: req.body.worker_id,
-      enabled: req.body.enabled,
+      name: formString(req.body, 'name'),
+      description: formString(req.body, 'description'),
+      worker_id: formString(req.body, 'worker_id'),
+      enabled: formFlag(req.body, 'enabled'),
     });
     setFlash(req, 'success', 'SSH Profile updated.');
   } catch (error) {

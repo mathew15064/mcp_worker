@@ -115,20 +115,14 @@
     },
     "src/routes/accountRoutes.ts": {
       "@typescript-eslint/no-base-to-string": 2,
-      "@typescript-eslint/no-require-imports": 5,
-      "@typescript-eslint/no-unsafe-argument": 5,
-      "@typescript-eslint/no-unsafe-assignment": 18,
-      "@typescript-eslint/no-unsafe-call": 20,
-      "@typescript-eslint/no-unsafe-member-access": 37,
+      "@typescript-eslint/no-unsafe-member-access": 1,
       "@typescript-eslint/no-unused-vars": 1
     },
     "src/routes/adminRoutes.ts": {
       "@typescript-eslint/no-base-to-string": 11,
-      "@typescript-eslint/no-require-imports": 5,
-      "@typescript-eslint/no-unsafe-argument": 6,
-      "@typescript-eslint/no-unsafe-assignment": 22,
-      "@typescript-eslint/no-unsafe-call": 24,
-      "@typescript-eslint/no-unsafe-member-access": 56,
+      "@typescript-eslint/no-require-imports": 1,
+      "@typescript-eslint/no-unsafe-assignment": 3,
+      "@typescript-eslint/no-unsafe-member-access": 2,
       "@typescript-eslint/no-unused-vars": 1,
       "@typescript-eslint/require-await": 1,
       "@typescript-eslint/restrict-template-expressions": 1
@@ -379,7 +373,6 @@
     "src/db/migrations/2026_11_01_000011_add_user_ownership_to_oauth_clients.ts": "4d1b68e3ea67ab4a1f4dcb8d0313e82583d9bd11248f54eb29cd4e63a91eb7e2",
     "src/db/migrations/2026_11_02_000011_add_payloads_to_mcp_request_audit.ts": "af026d6f11828475918522eef27c6b8b939944e8c00ad4a7c535cdeb577b32aa",
     "src/db/migrations/2026_11_02_000012_add_user_ownership_to_workers.ts": "c133e5f7299abba080413dbe3475905beb5a68ba06c5c39ef775da652c32c323",
-    "src/http/pages.ts": "e7d86a1bfc53fd45b1c86ca47d4ac641a6702a1abebb6070e72def169f525e87",
     "src/mcp/context.ts": "5a3caf16d3d115055f7941c4fde21a547e05801ed01d6768264028122ad77e4e",
     "src/mcp/toolTypes.ts": "cba2ee9d8c534fe7b3e11e3985ed0bf24e388947160e69f402b0ecb421b280d6",
     "src/middleware/csrfMiddleware.ts": "b23977076ccdd1f471154523438a399334baefbba8b575462540b8b4bba554ee",
