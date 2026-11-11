@@ -273,7 +273,7 @@ void test(
       scopes: ['bot_report.read', 'bot_report.terminal'],
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     });
-    const { OAuthResourceServer } = await import('../src/auth/oauthResourceServer.js');
+    const { OAuthResourceServer } = (await import('../src/auth/oauthResourceServer.js')).default;
     const resourceServer = new OAuthResourceServer({ repo: oauthRepo, allowTestFixtures: false });
     const alicePrincipal = await resourceServer.verifyToken(rawAccessToken);
     assert.equal(alicePrincipal.principal_id, alice.principal_id);

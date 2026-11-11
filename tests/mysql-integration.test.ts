@@ -43,13 +43,16 @@ void test(
 
     const { MysqlAdapter } = await import('../src/db/adapters/mysqlAdapter.js');
     const { MigrationRunner } = await import('../src/db/migrationRunner.js');
-    const { SettingsRepository } = await import('../src/repositories/settingsRepository.js');
-    const { TerminalProfileRepository } =
-      await import('../src/repositories/terminalProfileRepository.js');
-    const { WorkerRepository } = await import('../src/repositories/workerRepository.js');
-    const { WorkerAuthService } = await import('../src/services/workerAuthService.js');
-    const { McpOAuthRepository } = await import('../src/repositories/mcpOAuthRepository.js');
-    const { McpOAuthService } = await import('../src/services/mcpOAuthService.js');
+    const { SettingsRepository } = (await import('../src/repositories/settingsRepository.js'))
+      .default;
+    const { TerminalProfileRepository } = (
+      await import('../src/repositories/terminalProfileRepository.js')
+    ).default;
+    const { WorkerRepository } = (await import('../src/repositories/workerRepository.js')).default;
+    const { WorkerAuthService } = (await import('../src/services/workerAuthService.js')).default;
+    const { McpOAuthRepository } = (await import('../src/repositories/mcpOAuthRepository.js'))
+      .default;
+    const { McpOAuthService } = (await import('../src/services/mcpOAuthService.js')).default;
     const legacyImporter = (await import('../src/services/legacySqliteImportService.js')).default;
     const Database = (await import('better-sqlite3')).default;
     const { runMigrations: runLegacySchema } = await import('../src/db/migrations.js');
