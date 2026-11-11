@@ -1,28 +1,31 @@
 'use strict';
 
-const workerRepository = require('../repositories/workerRepository');
-const workerBroker = require('./workerConnectionBroker');
-const terminalAuditRepository = require('../repositories/terminalAuditRepository');
+import workerRepository = require('../repositories/workerRepository');
+import workerBroker = require('./workerConnectionBroker');
+import {errorFields} from './workerProtocol';
+import terminalAuditRepository = require('../repositories/terminalAuditRepository');
+interface WorkerRecord {id: string; name: string; status?: string | null}
+interface LifecycleOptions {actorId?: string | null; ownerUserId?: string | null}
+type Repository = Pick<typeof workerRepository, 'deleteWorker'>;
+type Broker = Pick<typeof workerBroker, 'isOnline' | 'dispatchControl' | 'disconnect'>;
+type Audit = Pick<typeof terminalAuditRepository, 'log'>;
+type AuditEntry = Parameters<Audit['log']>[0];
 
-function lifecycleError(code, message, status = 422) {
-  const error = new Error(message);
-  error.code = code;
-  error.status = status;
-  return error;
-}
+function lifecycleError(code: string, message: string, status = 422) { return Object.assign(new Error(message), {code, status}); }
 
 class WorkerLifecycleService {
-  constructor({ repository = workerRepository, broker = workerBroker, audit = terminalAuditRepository } = {}) {
+  repository: Repository; broker: Broker; audit: Audit;
+  constructor({ repository = workerRepository, broker = workerBroker, audit = terminalAuditRepository }: {repository?: Repository; broker?: Broker; audit?: Audit} = {}) {
     this.repository = repository;
     this.broker = broker;
     this.audit = audit;
   }
 
-  async safeAudit(entry) {
+  async safeAudit(entry: AuditEntry) {
     try { await this.audit.log(entry); } catch (_) {}
   }
 
-  async decommission(worker, { actorId, ownerUserId = null } = {}) {
+  async decommission(worker: WorkerRecord | null, { actorId, ownerUserId = null }: LifecycleOptions = {}) {
     if (!worker?.id) throw lifecycleError('WORKER_NOT_FOUND', 'Worker not found.', 404);
 
     const auditBase = { profileName: worker.name, actorId: actorId || null };
@@ -30,7 +33,7 @@ class WorkerLifecycleService {
 
     try {
       if (!this.broker.isOnline(worker.id)) throw lifecycleError('WORKER_OFFLINE', 'Worker must be online before it can be removed remotely.', 409);
-      const result = await this.broker.dispatchControl(
+      const result = await this.broker.dispatchControl<{code: string}>(
         worker.id,
         'worker.self_uninstall',
         { confirm: 'REMOVE_THIS_WORKER' },
@@ -53,13 +56,13 @@ class WorkerLifecycleService {
         ...auditBase,
         eventType: 'WORKER_REMOTE_REMOVE_FAILED',
         outcome: 'FAILED',
-        detailCode: String(error.code || 'WORKER_REMOTE_REMOVE_FAILED').slice(0, 100)
+        detailCode: String(errorFields(error).code || 'WORKER_REMOTE_REMOVE_FAILED').slice(0, 100)
       });
       throw error;
     }
   }
 
-  async forceRemove(worker, { actorId, ownerUserId = null } = {}) {
+  async forceRemove(worker: WorkerRecord | null, { actorId, ownerUserId = null }: LifecycleOptions = {}) {
     if (!worker?.id) throw lifecycleError('WORKER_NOT_FOUND', 'Worker not found.', 404);
     const auditBase = { profileName: worker.name, actorId: actorId || null };
     await this.safeAudit({ ...auditBase, eventType: 'WORKER_FORCE_REMOVE_REQUESTED', outcome: 'ATTEMPT', detailCode: worker.status || 'unknown' });
@@ -72,12 +75,11 @@ class WorkerLifecycleService {
       await this.safeAudit({ ...auditBase, eventType: 'WORKER_FORCE_REMOVE_COMPLETED', outcome: 'SUCCESS', detailCode: 'SERVER_RECORD_DELETED' });
       return { code: 'FORCE_REMOVED' };
     } catch (error) {
-      await this.safeAudit({ ...auditBase, eventType: 'WORKER_FORCE_REMOVE_FAILED', outcome: 'FAILED', detailCode: String(error.code || 'WORKER_FORCE_REMOVE_FAILED').slice(0, 100) });
+      await this.safeAudit({ ...auditBase, eventType: 'WORKER_FORCE_REMOVE_FAILED', outcome: 'FAILED', detailCode: String(errorFields(error).code || 'WORKER_FORCE_REMOVE_FAILED').slice(0, 100) });
       throw error;
     }
   }
 }
 
-module.exports = new WorkerLifecycleService();
-module.exports.WorkerLifecycleService = WorkerLifecycleService;
-module.exports.lifecycleError = lifecycleError;
+const instance = Object.assign(new WorkerLifecycleService(), {WorkerLifecycleService, lifecycleError});
+export = instance;

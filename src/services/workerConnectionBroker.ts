@@ -1,18 +1,38 @@
-const crypto = require('crypto');
-const { WebSocketServer, WebSocket } = require('ws');
-const workerAuthService = require('./workerAuthService');
-const workerRepository = require('../repositories/workerRepository');
-const { WORKER_CONNECT_PATH } = require('./workerAuthService');
-const ownerNotificationService = require('./ownerNotificationService');
+import crypto from 'node:crypto';
+import type { Server as HttpServer, IncomingMessage } from 'node:http';
+import type { Duplex } from 'node:stream';
+import type { RawData } from 'ws';
+import { decodeWorkerMessage, errorFields } from './workerProtocol';
+import type { WorkerStreamHandlers, WorkerPayload, WorkerJobEnvelope } from './workerProtocol';
+import { WebSocketServer, WebSocket } from 'ws';
+import workerAuthService = require('./workerAuthService');
+import workerRepository = require('../repositories/workerRepository');
+const {WORKER_CONNECT_PATH} = workerAuthService;
+interface AlertPayload { code: string; severity: string; phase: string; workerId?: string; workerName: string;
+  memoryUsedPercent: number; memoryTotalBytes: number; memoryAvailableBytes: number;
+  thresholdPercent: number; resumePercent: number;
+  stopped: {workspace_commands: number; managed_processes: number; shell_sessions: number} }
+interface Notifier { sendWorkerResourceAlert(value: AlertPayload): Promise<unknown> | unknown }
+const ownerNotificationService: Notifier = require('./ownerNotificationService');
+type WorkerRecord = NonNullable<Awaited<ReturnType<typeof workerRepository.findWorkerById>>>;
+type WorkerSocket = WebSocket & {workerId?: string; worker?: WorkerRecord};
+type WorkerRequest = IncomingMessage & {workerAuth?: {worker: WorkerRecord}};
+type WorkerRepository = Pick<typeof workerRepository, 'findWorkerById' | 'updateWorkerPresence' | 'touchWorker' | 'updateWorkerCapabilities'>;
+type WorkerAuth = Pick<typeof workerAuthService, 'authenticateConnect' | 'normalizeCapabilities'>;
+interface PendingJob {workerId: string; ws: WorkerSocket; resolve(value: unknown): void; reject(error: Error): void;
+  timer: NodeJS.Timeout; operation: string; control: boolean}
+interface StreamRecord extends WorkerStreamHandlers {workerId: string; ws: WorkerSocket; operation: string}
+interface BrokerOptions { authService?: WorkerAuth; repository?: WorkerRepository; notifier?: Notifier;
+  defaultTimeoutMs?: number; maxPendingGlobal?: number; maxPendingPerWorker?: number;
+  maxControlGlobal?: number; maxControlPerWorker?: number; maxStreamsGlobal?: number;
+  maxStreamsPerWorker?: number; maxBufferedBytes?: number }
+interface DispatchOptions {timeoutMs?: number | null}
+interface StreamCommand {type: string; [key: string]: unknown}
 
-function brokerError(code, message, status = 503) {
-  const error = new Error(message);
-  error.code = code;
-  error.status = status;
-  return error;
-}
 
-function rejectUpgrade(socket, status, code) {
+function brokerError(code: string, message: string, status = 503) { return Object.assign(new Error(message), {code, status}); }
+
+function rejectUpgrade(socket: Duplex | null | undefined, status: number, code: string) {
   if (!socket || socket.destroyed) return;
   const reason = status === 401 ? 'Unauthorized' : status === 403 ? 'Forbidden' : status === 429 ? 'Too Many Requests' : 'Service Unavailable';
   try {
@@ -22,12 +42,19 @@ function rejectUpgrade(socket, status, code) {
 }
 
 class WorkerConnectionBroker {
+  authService: WorkerAuth; repository: WorkerRepository; notifier: Notifier;
+  defaultTimeoutMs: number; maxPendingGlobal: number; maxPendingPerWorker: number;
+  maxControlGlobal: number; maxControlPerWorker: number; maxStreamsGlobal: number;
+  maxStreamsPerWorker: number; maxBufferedBytes: number;
+  connections: Map<string, WorkerSocket>; pending: Map<string, PendingJob>; streams: Map<string, StreamRecord>;
+  wss: WebSocketServer | null; server: HttpServer | null;
+  upgradeHandler: ((request: WorkerRequest, socket: Duplex, head: Buffer) => Promise<void>) | null;
   constructor({
     authService = workerAuthService, repository = workerRepository, notifier = ownerNotificationService,
     defaultTimeoutMs = 30_000, maxPendingGlobal = 256, maxPendingPerWorker = 16,
     maxControlGlobal = 16, maxControlPerWorker = 4, maxStreamsGlobal = 128,
     maxStreamsPerWorker = 16, maxBufferedBytes = 8 * 1024 * 1024
-  } = {}) {
+  }: BrokerOptions = {}) {
     this.authService = authService;
     this.repository = repository;
     this.notifier = notifier;
@@ -39,39 +66,44 @@ class WorkerConnectionBroker {
     this.maxStreamsGlobal = maxStreamsGlobal;
     this.maxStreamsPerWorker = maxStreamsPerWorker;
     this.maxBufferedBytes = maxBufferedBytes;
-    this.connections = new Map();
-    this.pending = new Map();
-    this.streams = new Map();
+    this.connections = new Map<string, WorkerSocket>();
+    this.pending = new Map<string, PendingJob>();
+    this.streams = new Map<string, StreamRecord>();
     this.wss = null;
     this.server = null;
     this.upgradeHandler = null;
   }
 
-  attach(server) {
+  attach(server: HttpServer) {
     if (this.server) return this;
     this.server = server;
     this.wss = new WebSocketServer({ noServer: true, maxPayload: 4 * 1024 * 1024 });
     this.upgradeHandler = async (request, socket, head) => {
       let url;
-      try { url = new URL(request.url, 'http://worker.invalid'); } catch (_) { return; }
+      try { url = new URL(request.url || '', 'http://worker.invalid'); } catch (_) { return; }
       if (url.pathname !== WORKER_CONNECT_PATH) return;
       try {
         const worker = await this.authService.authenticateConnect(request.headers || {});
         request.workerAuth = { worker };
-        this.wss.handleUpgrade(request, socket, head, ws => this.wss.emit('connection', ws, request));
+        const wss = this.wss;
+        if (!wss) throw brokerError('WORKER_BROKER_CLOSED', 'Worker server is unavailable.');
+        wss.handleUpgrade(request, socket, head, ws => wss.emit('connection', ws, request));
       } catch (error) {
         const workerId = String(request.headers?.['x-br-worker-id'] || '').trim().slice(0, 64);
-        console.warn(`[WORKER_AUTH] rejected worker=${workerId || 'unknown'} code=${error.code || 'WORKER_AUTH_INVALID'} status=${error.status || 401}`);
-        rejectUpgrade(socket, error.status || 401, error.code || 'WORKER_AUTH_INVALID');
+        const fields = errorFields(error);
+        const status = typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number' ? error.status : 401;
+        console.warn(`[WORKER_AUTH] rejected worker=${workerId || 'unknown'} code=${fields.code || 'WORKER_AUTH_INVALID'} status=${status}`);
+        rejectUpgrade(socket, status, fields.code || 'WORKER_AUTH_INVALID');
       }
     };
     server.on('upgrade', this.upgradeHandler);
-    this.wss.on('connection', (ws, request) => this.handleConnection(ws, request));
+    this.wss.on('connection', (ws, request) => this.handleConnection(ws as WorkerSocket, request as WorkerRequest));
     return this;
   }
 
-  handleConnection(ws, request) {
-    const worker = request.workerAuth.worker;
+  handleConnection(ws: WorkerSocket, request: WorkerRequest) {
+    const worker = request.workerAuth?.worker;
+    if (!worker) { try { ws.close(1008, 'worker-not-authenticated'); } catch (_) {} return; }
     const workerId = worker.id;
     const previous = this.connections.get(workerId);
     this.connections.set(workerId, ws);
@@ -92,20 +124,14 @@ class WorkerConnectionBroker {
     ws.on('error', () => this.handleDisconnect(ws));
   }
 
-  handleMessage(ws, data) {
-    let message;
-    try {
-      message = JSON.parse(Buffer.isBuffer(data) ? data.toString('utf8') : String(data));
-    } catch (_) {
-      try { ws.close(1003, 'invalid-json'); } catch (_) {}
-      return;
-    }
-    if (!message || typeof message !== 'object') return;
+  handleMessage(ws: WorkerSocket, data: RawData | string) {
+    const message = decodeWorkerMessage(data);
+    if (!message) { try { ws.close(1003, 'invalid-json'); } catch (_) {} return; }
     if (ws.workerId && this.connections.has(ws.workerId) && this.connections.get(ws.workerId) !== ws) return;
     if (message.type === 'resource_alert') {
       const code = String(message.code || '');
       if (!['WORKER_MEMORY_EMERGENCY', 'WORKER_MEMORY_RECOVERED'].includes(code)) return;
-      const stopped = message.stopped && typeof message.stopped === 'object' ? message.stopped : {};
+      const stopped: Record<string, unknown> = message.stopped && typeof message.stopped === 'object' && !Array.isArray(message.stopped) ? message.stopped as Record<string, unknown> : {};
       Promise.resolve(this.notifier.sendWorkerResourceAlert({
         code,
         severity: String(message.severity || ''),
@@ -122,21 +148,21 @@ class WorkerConnectionBroker {
           managed_processes: Math.max(0, Number(stopped.managed_processes || 0)),
           shell_sessions: Math.max(0, Number(stopped.shell_sessions || 0))
         }
-      })).catch(error => console.error('[WORKER_ALERT] Telegram delivery failed:', error.message));
+      })).catch((error: unknown) => console.error('[WORKER_ALERT] Telegram delivery failed:', error instanceof Error ? error.message : String(error)));
       return;
     }
     if (message.type === 'heartbeat') {
       const capabilities = Array.isArray(message.capabilities) ? this.authService.normalizeCapabilities(message.capabilities) : null;
       const previous = this.authService.normalizeCapabilities(Array.isArray(ws.worker?.capabilities) ? ws.worker.capabilities : []);
       if (capabilities && (capabilities.length !== previous.length || capabilities.some((cap, i) => cap !== previous[i]))) {
-        ws.worker.capabilities = capabilities;
-        Promise.resolve(this.repository.updateWorkerCapabilities(ws.workerId, capabilities)).catch(() => {});
+        if (ws.worker) ws.worker.capabilities = capabilities;
+        Promise.resolve(this.repository.updateWorkerCapabilities(ws.workerId || '', capabilities)).catch(() => {});
       }
-      Promise.resolve(this.repository.touchWorker(ws.workerId)).catch(() => {});
+      Promise.resolve(this.repository.touchWorker(ws.workerId || '')).catch(() => {});
       try { ws.send(JSON.stringify({ type: 'heartbeat_ack', server_time: new Date().toISOString() })); } catch (_) {}
       return;
     }
-    if (typeof message.stream_id === 'string' && message.type?.startsWith('stream_')) {
+    if (typeof message.stream_id === 'string' && typeof message.type === 'string' && message.type.startsWith('stream_')) {
       const stream = this.streams.get(message.stream_id);
       if (!stream || stream.workerId !== ws.workerId || stream.ws !== ws) return;
       if (message.type === 'stream_state') return stream.onState?.(String(message.state || 'UNKNOWN'), message);
@@ -144,7 +170,7 @@ class WorkerConnectionBroker {
         try { return stream.onOutput?.(Buffer.from(String(message.data || ''), 'base64')); } catch (_) { return; }
       }
       if (message.type === 'stream_error') {
-        const error = brokerError(String(message.error?.code || 'WORKER_STREAM_FAILED'), String(message.error?.message || 'Worker shell stream failed.'), 422);
+        const error = brokerError(String(errorFields(message.error).code || 'WORKER_STREAM_FAILED'), String(errorFields(message.error).message || 'Worker shell stream failed.'), 422);
         stream.onError?.(error);
         this.streams.delete(message.stream_id);
         return;
@@ -161,12 +187,12 @@ class WorkerConnectionBroker {
     this.pending.delete(message.job_id);
     clearTimeout(pending.timer);
     if (message.ok === true) return pending.resolve(message.result ?? null);
-    const code = String(message.error?.code || 'WORKER_JOB_FAILED');
-    const text = String(message.error?.message || 'Worker job failed.');
+    const code = String(errorFields(message.error).code || 'WORKER_JOB_FAILED');
+    const text = String(errorFields(message.error).message || 'Worker job failed.');
     return pending.reject(brokerError(code, text, 422));
   }
 
-  handleDisconnect(ws) {
+  handleDisconnect(ws: WorkerSocket) {
     if (!ws?.workerId) return;
     if (this.connections.get(ws.workerId) === ws) {
       this.connections.delete(ws.workerId);
@@ -186,21 +212,21 @@ class WorkerConnectionBroker {
     }
   }
 
-  isOnline(workerId) {
+  isOnline(workerId: string) {
     const ws = this.connections.get(workerId);
     return Boolean(ws && ws.readyState === WebSocket.OPEN);
   }
 
   // Ping the live outbound WebSocket. Offline Workers cannot receive commands.
-  async probeConnection(workerId, { timeoutMs = 1500 } = {}) {
+  async probeConnection(workerId: string, { timeoutMs = 1500 }: {timeoutMs?: number} = {}) {
     const ws = this.connections.get(workerId);
     if (!ws || ws.readyState !== WebSocket.OPEN) return { ok: false, reason: 'worker_offline' };
     const nonce = crypto.randomBytes(12);
     const started = Date.now();
-    return new Promise(resolve => {
+    return new Promise<{ok: boolean; reason: string | null; latency_ms: number | null}>(resolve => {
       let settled = false;
-      let timer;
-      const finish = (ok, reason) => {
+      let timer: NodeJS.Timeout | undefined;
+      const finish = (ok: boolean, reason: string | null) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
@@ -209,7 +235,11 @@ class WorkerConnectionBroker {
         ws.removeListener('error', onClose);
         resolve({ ok, reason: ok ? null : reason, latency_ms: ok ? Date.now() - started : null });
       };
-      const onPong = payload => { if (Buffer.from(payload).equals(nonce)) finish(true, null); };
+      const onPong = (payload: RawData) => {
+        const pong = Buffer.isBuffer(payload) ? payload : payload instanceof ArrayBuffer
+          ? Buffer.from(new Uint8Array(payload)) : Buffer.concat(payload);
+        if (pong.equals(nonce)) finish(true, null);
+      };
       const onClose = () => finish(false, 'worker_disconnected');
       ws.on('pong', onPong);
       ws.on('close', onClose);
@@ -219,7 +249,7 @@ class WorkerConnectionBroker {
     });
   }
 
-  disconnect(workerId, { code = 4003, reason = 'worker-disabled' } = {}) {
+  disconnect(workerId: string, { code = 4003, reason = 'worker-disabled' }: {code?: number; reason?: string} = {}) {
     const ws = this.connections.get(workerId);
     if (!ws) return false;
     try { ws.close(code, reason); } catch (_) {}
@@ -227,7 +257,7 @@ class WorkerConnectionBroker {
     return true;
   }
 
-  assertCapacity(workerId, ws, { control = false, stream = false } = {}) {
+  assertCapacity(workerId: string, ws: WorkerSocket, { control = false, stream = false }: {control?: boolean; stream?: boolean} = {}) {
     if (Number(ws.bufferedAmount || 0) >= this.maxBufferedBytes) {
       throw brokerError('WORKER_BACKPRESSURE', 'Worker transport buffer is saturated.', 429);
     }
@@ -235,7 +265,7 @@ class WorkerConnectionBroker {
     let globalCount = 0;
     let workerCount = 0;
     for (const record of records.values()) {
-      if (!stream && Boolean(record.control) !== control) continue;
+      if (!stream && 'control' in record && Boolean(record.control) !== control) continue;
       globalCount += 1;
       if (record.workerId === workerId) workerCount += 1;
     }
@@ -246,18 +276,18 @@ class WorkerConnectionBroker {
     }
   }
 
-  async dispatch(workerId, operation, payload = {}, { timeoutMs = null } = {}) {
-    return this.dispatchInternal(workerId, operation, payload, { timeoutMs, enforceCapability: true });
+  async dispatch<T = unknown>(workerId: string, operation: string, payload: WorkerPayload = {}, { timeoutMs = null }: DispatchOptions = {}): Promise<T> {
+    return this.dispatchInternal<T>(workerId, operation, payload, { timeoutMs, enforceCapability: true });
   }
 
-  async dispatchControl(workerId, operation, payload = {}, { timeoutMs = null } = {}) {
+  async dispatchControl<T = unknown>(workerId: string, operation: string, payload: WorkerPayload = {}, { timeoutMs = null }: DispatchOptions = {}): Promise<T> {
     if (operation !== 'worker.self_uninstall') {
       throw brokerError('WORKER_CONTROL_OPERATION_DENIED', `Unsupported worker control operation '${operation}'.`, 403);
     }
-    return this.dispatchInternal(workerId, operation, payload, { timeoutMs, enforceCapability: false });
+    return this.dispatchInternal<T>(workerId, operation, payload, { timeoutMs, enforceCapability: false });
   }
 
-  async dispatchInternal(workerId, operation, payload = {}, { timeoutMs = null, enforceCapability = true } = {}) {
+  async dispatchInternal<T = unknown>(workerId: string, operation: string, payload: WorkerPayload = {}, { timeoutMs = null, enforceCapability = true }: DispatchOptions & {enforceCapability?: boolean} = {}): Promise<T> {
     const ws = this.connections.get(workerId);
     if (!ws || ws.readyState !== WebSocket.OPEN) throw brokerError('WORKER_OFFLINE', 'Worker is not connected.');
     const worker = await this.repository.findWorkerById(workerId);
@@ -275,20 +305,21 @@ class WorkerConnectionBroker {
     this.assertCapacity(workerId, ws, { control: !enforceCapability });
     const requestedTimeout = Math.max(100, Math.min(Number(timeoutMs) || this.defaultTimeoutMs, 300_000));
     const jobId = `job_${crypto.randomUUID()}`;
-    return new Promise((resolve, reject) => {
+    return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(jobId);
         reject(brokerError('WORKER_JOB_TIMEOUT', `Worker job '${operation}' timed out.`));
       }, requestedTimeout + 2_000);
-      this.pending.set(jobId, { workerId, ws, resolve, reject, timer, operation, control: !enforceCapability });
+      this.pending.set(jobId, { workerId, ws, resolve: value => resolve(value as T), reject, timer, operation, control: !enforceCapability });
       try {
-        ws.send(JSON.stringify({
+        const job: WorkerJobEnvelope = {
           type: 'job',
           job_id: jobId,
           operation,
           payload,
           timeout_ms: requestedTimeout
-        }));
+        };
+        ws.send(JSON.stringify(job));
       } catch (_) {
         this.pending.delete(jobId);
         clearTimeout(timer);
@@ -297,7 +328,7 @@ class WorkerConnectionBroker {
     });
   }
 
-  async openStream(workerId, operation, payload = {}, handlers = {}) {
+  async openStream(workerId: string, operation: string, payload: WorkerPayload = {}, handlers: WorkerStreamHandlers = {}) {
     const ws = this.connections.get(workerId);
     if (!ws || ws.readyState !== WebSocket.OPEN) throw brokerError('WORKER_OFFLINE', 'Worker is not connected.');
     const worker = await this.repository.findWorkerById(workerId);
@@ -314,7 +345,7 @@ class WorkerConnectionBroker {
     const streamId = `stream_${crypto.randomUUID()}`;
     const record = { workerId, ws, operation, ...handlers };
     this.streams.set(streamId, record);
-    const send = message => {
+    const send = (message: StreamCommand): void => {
       const current = this.connections.get(workerId);
       if (current !== ws || current.readyState !== WebSocket.OPEN) throw brokerError('WORKER_DISCONNECTED', 'Worker shell stream is disconnected.');
       if (message.type !== 'stream_close' && Number(current.bufferedAmount || 0) >= this.maxBufferedBytes) {
@@ -326,8 +357,8 @@ class WorkerConnectionBroker {
     catch (error) { this.streams.delete(streamId); throw error; }
     return {
       id: streamId,
-      input(data) { send({ type: 'stream_input', data: Buffer.from(String(data), 'utf8').toString('base64') }); },
-      resize(cols, rows) { send({ type: 'stream_resize', cols, rows }); },
+      input(data: string) { send({ type: 'stream_input', data: Buffer.from(String(data), 'utf8').toString('base64') }); },
+      resize(cols: number, rows: number) { send({ type: 'stream_resize', cols, rows }); },
       close: () => {
         if (!this.streams.has(streamId)) return;
         try { send({ type: 'stream_close' }); } catch (_) {}
@@ -359,7 +390,5 @@ class WorkerConnectionBroker {
   }
 }
 
-module.exports = new WorkerConnectionBroker();
-module.exports.WorkerConnectionBroker = WorkerConnectionBroker;
-module.exports.brokerError = brokerError;
-module.exports.rejectUpgrade = rejectUpgrade;
+const instance = Object.assign(new WorkerConnectionBroker(), {WorkerConnectionBroker, brokerError, rejectUpgrade});
+export = instance;

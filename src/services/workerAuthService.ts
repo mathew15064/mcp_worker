@@ -1,6 +1,8 @@
-const crypto = require('crypto');
-const workerRepository = require('../repositories/workerRepository');
-const { workerError } = require('../repositories/workerRepository');
+import crypto from 'node:crypto';
+import type { IncomingHttpHeaders } from 'node:http';
+import type { WorkerConnectRequest } from './workerProtocol';
+import workerRepository = require('../repositories/workerRepository');
+const { workerError } = workerRepository;
 
 const WORKER_CONNECT_PATH = '/worker/v1/connect';
 const MAX_CLOCK_SKEW_MS = 60_000;
@@ -26,23 +28,26 @@ const ALLOWED_CAPABILITIES = Object.freeze([
   'process.stop'
 ]);
 
-function canonicalConnectMessage({ workerId, timestamp, nonce }) {
+function canonicalConnectMessage({ workerId, timestamp, nonce }: WorkerConnectRequest) {
   return `${workerId}\n${timestamp}\n${nonce}\n${WORKER_CONNECT_PATH}`;
 }
 
 class WorkerAuthService {
-  constructor({ repository = workerRepository, now = () => Date.now() } = {}) {
+  repository: InstanceType<typeof workerRepository.WorkerRepository>;
+  now: () => number;
+  seenNonces: Map<string, number>;
+  constructor({ repository = workerRepository, now = () => Date.now() }: {repository?: InstanceType<typeof workerRepository.WorkerRepository>; now?: () => number} = {}) {
     this.repository = repository;
     this.now = now;
-    this.seenNonces = new Map();
+    this.seenNonces = new Map<string, number>();
   }
 
-  normalizeCapabilities(value) {
+  normalizeCapabilities(value: unknown): string[] {
     const requested = Array.isArray(value) ? value : [];
-    return [...new Set(requested.filter(item => ALLOWED_CAPABILITIES.includes(item)))].sort();
+    return [...new Set(requested.filter((item): item is string => typeof item === 'string' && ALLOWED_CAPABILITIES.includes(item)))].sort();
   }
 
-  validatePublicKey(publicKey) {
+  validatePublicKey(publicKey: unknown) {
     if (typeof publicKey !== 'string' || publicKey.length < 64 || publicKey.length > 4096) {
       throw workerError('WORKER_PUBLIC_KEY_INVALID', 'Worker public key is invalid.');
     }
@@ -55,7 +60,7 @@ class WorkerAuthService {
     }
   }
 
-  validateName(name) {
+  validateName(name: unknown) {
     const normalized = String(name || '').trim();
     if (!WORKER_NAME_RE.test(normalized)) {
       throw workerError('WORKER_NAME_INVALID', 'Worker name must be 1-100 safe characters.');
@@ -63,7 +68,7 @@ class WorkerAuthService {
     return normalized;
   }
 
-  async enroll({ token, name, publicKey, capabilities = [] }) {
+  async enroll({ token, name, publicKey, capabilities = [] }: {token: string; name: string; publicKey: string; capabilities?: string[]}) {
     const normalizedName = this.validateName(name);
     const normalizedKey = this.validatePublicKey(publicKey);
     const normalizedCapabilities = this.normalizeCapabilities(capabilities);
@@ -83,7 +88,7 @@ class WorkerAuthService {
     }
   }
 
-  async authenticateConnect(headers = {}) {
+  async authenticateConnect(headers: IncomingHttpHeaders = {}) {
     const workerId = String(headers['x-br-worker-id'] || '').trim();
     const timestamp = String(headers['x-br-worker-timestamp'] || '').trim();
     const nonce = String(headers['x-br-worker-nonce'] || '').trim();
@@ -120,8 +125,5 @@ class WorkerAuthService {
   }
 }
 
-module.exports = new WorkerAuthService();
-module.exports.WorkerAuthService = WorkerAuthService;
-module.exports.ALLOWED_CAPABILITIES = ALLOWED_CAPABILITIES;
-module.exports.WORKER_CONNECT_PATH = WORKER_CONNECT_PATH;
-module.exports.canonicalConnectMessage = canonicalConnectMessage;
+const instance = Object.assign(new WorkerAuthService(), {WorkerAuthService, ALLOWED_CAPABILITIES, WORKER_CONNECT_PATH, canonicalConnectMessage});
+export = instance;
