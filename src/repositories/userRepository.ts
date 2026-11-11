@@ -1,26 +1,32 @@
-const databaseManager = require('../db/databaseManager');
+interface UserInput { id: string; username: string; email?: string | null; display_name: string; password_hash: string; role?: string; status?: string; principal_id: string; profile_id: string | null; session_version?: number; created_at: string; updated_at: string }
+interface UserRow extends UserInput { role: string; status: string; session_version: number; last_login_at: string | null }
+import type { DatabaseAdapter } from '../db/contracts';
+import type Database from 'better-sqlite3';
+const databaseManager: { requireAdapter(): DatabaseAdapter } = require('../db/databaseManager');
+
 
 class UserRepository {
-  constructor(db = null) { this._db = db; }
+  private _db: DatabaseAdapter | null;
+  constructor(db: DatabaseAdapter | null = null) { this._db = db; }
   get db() { return this._db || databaseManager.requireAdapter(); }
 
-  async findByUsername(username) {
+  async findByUsername(username: string) {
     if (!username) return null;
-    return this.db.queryOne('SELECT * FROM users WHERE username = ?', [String(username).trim()]);
+    return this.db.queryOne<UserRow>('SELECT * FROM users WHERE username = ?', [String(username).trim()]);
   }
 
-  async findById(id) {
+  async findById(id: string) {
     if (!id) return null;
-    return this.db.queryOne('SELECT * FROM users WHERE id = ?', [id]);
+    return this.db.queryOne<UserRow>('SELECT * FROM users WHERE id = ?', [id]);
   }
 
   async list() {
-    return this.db.queryAll(`SELECT id, username, email, display_name, role, status, principal_id, profile_id,
+    return this.db.queryAll<Omit<UserRow, "password_hash">>(`SELECT id, username, email, display_name, role, status, principal_id, profile_id,
       session_version, last_login_at, created_at, updated_at
       FROM users ORDER BY LOWER(username), username`);
   }
 
-  async create(record) {
+  async create(record: UserInput) {
     await this.db.execute(`INSERT INTO users
       (id, username, email, display_name, password_hash, role, status, principal_id, profile_id, session_version, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
@@ -31,30 +37,30 @@ class UserRepository {
     return this.findById(record.id);
   }
 
-  async updateProfile(id, { displayName, email }) {
+  async updateProfile(id: string, { displayName, email }: {displayName: string; email?: string | null}) {
     const now = new Date().toISOString();
     await this.db.execute('UPDATE users SET display_name = ?, email = ?, updated_at = ? WHERE id = ?', [displayName, email || null, now, id]);
     return this.findById(id);
   }
 
-  async updatePassword(id, passwordHash) {
+  async updatePassword(id: string, passwordHash: string) {
     const now = new Date().toISOString();
     return this.db.execute(`UPDATE users
       SET password_hash = ?, session_version = session_version + 1, updated_at = ? WHERE id = ?`, [passwordHash, now, id]);
   }
 
-  async setStatus(id, status) {
+  async setStatus(id: string, status: string) {
     const now = new Date().toISOString();
     return this.db.execute(`UPDATE users
       SET status = ?, session_version = session_version + 1, updated_at = ? WHERE id = ?`, [status, now, id]);
   }
 
-  async recordLogin(id) {
+  async recordLogin(id: string) {
     const now = new Date().toISOString();
     await this.db.execute('UPDATE users SET last_login_at = ?, updated_at = ? WHERE id = ?', [now, now, id]);
     return this.findById(id);
   }
 }
 
-module.exports = new UserRepository();
-module.exports.UserRepository = UserRepository;
+const instance = Object.assign(new UserRepository(), { UserRepository });
+export = instance;
