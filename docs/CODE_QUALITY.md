@@ -40,3 +40,18 @@ dependency or force an unrelated downgrade without testing.
 CI runs the quality gate, compiler, Node/MySQL regression, Chromium and
 Go checks on the TS6 branch. The release verification workflow still tests
 fresh Docker setup, persistence, real Go Worker integration and image scans.
+
+## TS6.2 promise and type-safety hardening
+
+Node test registration uses explicit `void test(...)`: the node:test harness
+owns and observes the returned promise. This exception is specific to top-level
+registration; assertions, service operations and cleanup must still be awaited
+or have an explicit rejection path. Runtime event callbacks dispatch asynchronous
+work with error handling; malformed terminal frames are rejected before reaching
+the Worker. OAuth string form parameters are checked from unknown values and
+malformed scopes cannot consume or broaden a valid token grant. Valid OAuth
+PKCE, refresh, scopes, redirects and the 19-tool catalog remain covered by tests.
+
+The CommonJS runtime layout is preserved. Typed default imports replace import
+assignment where safe; configuration-sensitive test fixtures retain their lazy
+loading order. Remaining lint debt is recorded explicitly, not suppressed.

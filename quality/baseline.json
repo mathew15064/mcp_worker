@@ -215,8 +215,7 @@
     },
     "tests/admin-config-ui.test.ts": {
       "@typescript-eslint/consistent-type-imports": 1,
-      "@typescript-eslint/no-floating-promises": 10,
-      "@typescript-eslint/no-require-imports": 16,
+      "@typescript-eslint/no-require-imports": 15,
       "@typescript-eslint/no-unsafe-argument": 6,
       "@typescript-eslint/no-unsafe-assignment": 35,
       "@typescript-eslint/no-unsafe-call": 29,
@@ -224,25 +223,14 @@
       "@typescript-eslint/require-await": 1
     },
     "tests/audit-payload.test.ts": {
-      "@typescript-eslint/no-floating-promises": 3,
       "@typescript-eslint/no-unsafe-assignment": 1,
       "@typescript-eslint/no-unsafe-member-access": 2
     },
     "tests/catalog-retirement.test.ts": {
-      "@typescript-eslint/consistent-type-imports": 1,
-      "@typescript-eslint/no-floating-promises": 3,
-      "@typescript-eslint/no-require-imports": 2,
-      "@typescript-eslint/no-unsafe-assignment": 1,
-      "@typescript-eslint/no-unsafe-member-access": 1
+      "@typescript-eslint/consistent-type-imports": 1
     },
     "tests/coding-service-core.test.ts": {
-      "@typescript-eslint/no-floating-promises": 3,
-      "@typescript-eslint/no-require-imports": 1,
       "@typescript-eslint/require-await": 2
-    },
-    "tests/database-contracts.test.ts": {
-      "@typescript-eslint/no-floating-promises": 3,
-      "@typescript-eslint/no-require-imports": 1
     },
     "tests/e2e/admin-ux.spec.ts": {
       "@typescript-eslint/no-non-null-assertion": 18,
@@ -255,43 +243,20 @@
     },
     "tests/execution-regression.test.ts": {
       "@typescript-eslint/consistent-type-imports": 2,
-      "@typescript-eslint/no-floating-promises": 7,
-      "@typescript-eslint/no-require-imports": 2,
       "@typescript-eslint/require-await": 8
     },
     "tests/helper.ts": {
-      "@typescript-eslint/no-non-null-assertion": 2,
-      "@typescript-eslint/no-require-imports": 8,
-      "@typescript-eslint/no-unsafe-assignment": 15,
-      "@typescript-eslint/no-unsafe-call": 9,
-      "@typescript-eslint/no-unsafe-member-access": 15,
-      "@typescript-eslint/no-unsafe-return": 3,
-      "@typescript-eslint/no-unused-vars": 4
+      "@typescript-eslint/no-require-imports": 6,
+      "@typescript-eslint/no-unsafe-return": 2
     },
     "tests/http-mcp-core.test.ts": {
-      "@typescript-eslint/no-floating-promises": 6,
       "@typescript-eslint/no-require-imports": 6,
       "@typescript-eslint/no-unsafe-argument": 5,
-      "@typescript-eslint/no-unsafe-assignment": 18,
+      "@typescript-eslint/no-unsafe-assignment": 16,
       "@typescript-eslint/no-unsafe-call": 10,
-      "@typescript-eslint/no-unsafe-member-access": 28
-    },
-    "tests/mcp-tool-contracts.test.ts": {
-      "@typescript-eslint/no-floating-promises": 3,
-      "@typescript-eslint/no-require-imports": 1
-    },
-    "tests/mcp-tool-list-cache-http.test.ts": {
-      "@typescript-eslint/no-floating-promises": 1,
-      "@typescript-eslint/no-require-imports": 3,
-      "@typescript-eslint/no-unsafe-argument": 5,
-      "@typescript-eslint/no-unsafe-assignment": 6,
-      "@typescript-eslint/no-unsafe-member-access": 11
-    },
-    "tests/mcp-tool-list-cache.test.ts": {
-      "@typescript-eslint/no-floating-promises": 2
+      "@typescript-eslint/no-unsafe-member-access": 25
     },
     "tests/mysql-integration.test.ts": {
-      "@typescript-eslint/no-floating-promises": 1,
       "@typescript-eslint/no-require-imports": 12,
       "@typescript-eslint/no-unsafe-argument": 3,
       "@typescript-eslint/no-unsafe-assignment": 51,
@@ -302,7 +267,6 @@
     },
     "tests/mysql-setup-ui-integration.test.ts": {
       "@typescript-eslint/consistent-type-imports": 1,
-      "@typescript-eslint/no-floating-promises": 1,
       "@typescript-eslint/no-require-imports": 5,
       "@typescript-eslint/no-unsafe-argument": 1,
       "@typescript-eslint/no-unsafe-assignment": 11,
@@ -313,73 +277,41 @@
       "@typescript-eslint/require-await": 1
     },
     "tests/oauth-core.test.ts": {
-      "@typescript-eslint/no-floating-promises": 3,
-      "@typescript-eslint/no-require-imports": 3,
+      "@typescript-eslint/no-require-imports": 1,
       "@typescript-eslint/unbound-method": 4
     },
-    "tests/oauth-typed-flow.test.ts": {
-      "@typescript-eslint/no-floating-promises": 1,
-      "@typescript-eslint/no-require-imports": 4
-    },
     "tests/owner-notification.test.ts": {
-      "@typescript-eslint/no-floating-promises": 2,
-      "@typescript-eslint/no-require-imports": 1,
       "@typescript-eslint/require-await": 4
     },
     "tests/registry-core.test.ts": {
-      "@typescript-eslint/no-floating-promises": 3,
       "@typescript-eslint/no-require-imports": 1,
       "@typescript-eslint/unbound-method": 3
     },
     "tests/schema-core.test.ts": {
-      "@typescript-eslint/no-floating-promises": 4,
-      "@typescript-eslint/no-require-imports": 1,
       "@typescript-eslint/require-await": 2
     },
     "tests/setup-mode.test.ts": {
       "@typescript-eslint/consistent-type-imports": 1,
-      "@typescript-eslint/no-floating-promises": 3,
-      "@typescript-eslint/no-require-imports": 6,
       "@typescript-eslint/no-unsafe-assignment": 1
     },
     "tests/standalone-install-smoke.ts": {
       "@typescript-eslint/no-require-imports": 9
     },
     "tests/terminal-profile-core.test.ts": {
-      "@typescript-eslint/no-floating-promises": 2,
       "@typescript-eslint/no-non-null-assertion": 2,
-      "@typescript-eslint/no-require-imports": 5,
       "@typescript-eslint/no-unnecessary-type-assertion": 1
     },
     "tests/terminal-typed-service.test.ts": {
-      "@typescript-eslint/no-floating-promises": 2,
-      "@typescript-eslint/no-require-imports": 1,
       "@typescript-eslint/require-await": 2
     },
     "tests/terminal-websocket.test.ts": {
       "@typescript-eslint/consistent-type-imports": 6,
       "@typescript-eslint/no-base-to-string": 1,
-      "@typescript-eslint/no-floating-promises": 2,
       "@typescript-eslint/no-unsafe-argument": 1,
       "@typescript-eslint/require-await": 6
     },
-    "tests/ts4-build-artifacts.test.ts": {
-      "@typescript-eslint/no-floating-promises": 2
-    },
-    "tests/ts4-crypto-service.test.ts": {
-      "@typescript-eslint/no-floating-promises": 2,
-      "@typescript-eslint/no-require-imports": 4
-    },
-    "tests/ts5-render-ssh.test.ts": {
-      "@typescript-eslint/no-floating-promises": 3,
-      "@typescript-eslint/no-require-imports": 2
-    },
-    "tests/typescript-core.test.ts": {
-      "@typescript-eslint/no-floating-promises": 2
-    },
     "tests/user-account-integration.test.ts": {
       "@typescript-eslint/consistent-type-imports": 1,
-      "@typescript-eslint/no-floating-promises": 1,
       "@typescript-eslint/no-require-imports": 11,
       "@typescript-eslint/no-unsafe-argument": 6,
       "@typescript-eslint/no-unsafe-assignment": 33,
@@ -391,19 +323,14 @@
     },
     "tests/user-telegram-settings.test.ts": {
       "@typescript-eslint/no-base-to-string": 1,
-      "@typescript-eslint/no-floating-promises": 2,
-      "@typescript-eslint/no-require-imports": 1,
       "@typescript-eslint/require-await": 2
     },
     "tests/worker-control-broker.test.ts": {
-      "@typescript-eslint/no-floating-promises": 1,
-      "@typescript-eslint/no-require-imports": 1,
       "@typescript-eslint/no-unsafe-assignment": 1,
       "@typescript-eslint/require-await": 1
     },
     "tests/worker-core.test.ts": {
-      "@typescript-eslint/no-floating-promises": 12,
-      "@typescript-eslint/no-require-imports": 5,
+      "@typescript-eslint/no-require-imports": 4,
       "@typescript-eslint/no-unsafe-argument": 7,
       "@typescript-eslint/no-unsafe-assignment": 32,
       "@typescript-eslint/no-unsafe-call": 67,
@@ -412,13 +339,10 @@
       "@typescript-eslint/require-await": 18
     },
     "tests/worker-lifecycle-service.test.ts": {
-      "@typescript-eslint/no-floating-promises": 3,
-      "@typescript-eslint/no-require-imports": 1,
       "@typescript-eslint/require-await": 7
     },
     "tests/worker-live-integration.test.ts": {
       "@typescript-eslint/consistent-type-imports": 1,
-      "@typescript-eslint/no-floating-promises": 1,
       "@typescript-eslint/no-require-imports": 9,
       "@typescript-eslint/no-unnecessary-type-assertion": 1,
       "@typescript-eslint/no-unsafe-argument": 2,
@@ -429,10 +353,6 @@
       "@typescript-eslint/no-unused-vars": 5,
       "@typescript-eslint/only-throw-error": 1,
       "@typescript-eslint/require-await": 1
-    },
-    "tests/worker-protocol-typed.test.ts": {
-      "@typescript-eslint/no-floating-promises": 2,
-      "@typescript-eslint/no-require-imports": 3
     },
     "worker/agent.ts": {
       "@typescript-eslint/no-base-to-string": 1,
@@ -485,40 +405,9 @@
     "src/services/auditPayloadService.ts": "e274ba705d37e3266c724b3d38f55f72e33c288a7c2cc9c33e50a0c90429da45",
     "src/services/terminalCredentialService.ts": "f6082b63bee5f51d45776afc31749119b0a5b6f0fcad146cb2ff068748f9dc3b",
     "src/services/terminalPublicOriginService.ts": "3439f78f6f7867503a55b7fa5c6768c32ab42e415635adcf2fc97e9f5a11f5af",
-    "tests/admin-config-ui.test.ts": "19d1ddb6e4af5edb7237f7093a52bd81b13d0610d131212e9929f4cec460ad13",
-    "tests/audit-payload.test.ts": "21f2dd5084125c761d3a1767c83752db8a63e42300f2bbcac7521c4c498a6d2c",
-    "tests/catalog-retirement.test.ts": "8b1aba7f1ec09387bfc0cfa717770b79aab498c22982eee30cc5b8abfa9abf3a",
-    "tests/coding-service-core.test.ts": "ca32e6faad232579231bc3be07c22454137b0ca7099d246cae5e8435c8737f4c",
-    "tests/database-contracts.test.ts": "f751f3180b70ff506b883968a277ea5055da79f7e93e82d38dfc1714be91b654",
     "tests/e2e/admin-ux.spec.ts": "899933732c15e584a7949e39f2401ecfca9e196ce2c41df1917903d19053b078",
     "tests/e2e/fixtures/start-test-server.ts": "cd60c3e9e45eb84551ba0204b9c6b8e143e61545a6c8a9a49623435845ae041a",
-    "tests/execution-regression.test.ts": "7e3dd768b9c02ab16faac09d9e9c43fba74c0959862724c2c171228c602a4b13",
-    "tests/helper.ts": "7a6f9c9a8a4ebd42bc72c1b041e7ef98ad8d770cab8cd1effa6f5570f3474ba3",
-    "tests/mcp-tool-contracts.test.ts": "c423619f135eeea746a69b6c70b73015cd1b586831bfd4b602f6d3de6fe9d65b",
-    "tests/mcp-tool-list-cache-http.test.ts": "f30d9d7e051e1d7e26ab744f5c7a0b6a1d243cbd586ec804934243679766b36a",
-    "tests/mcp-tool-list-cache.test.ts": "a168d593082489f45335d45a949183eaff2ef48a40646bbed3c520c8a84b197b",
-    "tests/mysql-integration.test.ts": "3cdae10e88378a5b51b781c5ad1a3715ac80b4e48a60b500c2ca51142d3479e6",
-    "tests/mysql-setup-ui-integration.test.ts": "29008381ea759f50d3fb8e310231168767c81bcbdb87cfc146f544b655773315",
-    "tests/oauth-core.test.ts": "f1e8b0d58282f52fd43629459d831fe8f475ae3397af89ff569e8a1facf892a8",
-    "tests/oauth-typed-flow.test.ts": "9c3760791b60b8457c9e60a004350fd67a019270e68937f9eba75279149285da",
-    "tests/owner-notification.test.ts": "9061f77d7c776311cb53bc728a46efc1b790579ae8243a0c0e4ef7351590b23b",
-    "tests/registry-core.test.ts": "514c2a582f2b0c474d6d8ca9ebacba5d1a335ed57cdad235990f1fe70dfede52",
-    "tests/schema-core.test.ts": "2d4389dcef0ea0298c64abcb6b357f45811a4fefe91ad2dcc1815519b98ce452",
-    "tests/setup-mode.test.ts": "c91096977b4751af2119439fd430b60d49abb2ccce0c33e4b497e577aea5e4e3",
     "tests/standalone-install-smoke.ts": "dfd433ff05024cc8a57f1c487dd6f0f1b5948c83410579ed21d48d36be3d37a7",
-    "tests/terminal-profile-core.test.ts": "40c58b065d04ff08025dd4979a9226526919b3d533dce14e26170692cbf98f32",
-    "tests/terminal-typed-service.test.ts": "092b30ae8c29f3ec1196c00ad20ce2396a0a184e8d681d85256735dbdabaad4c",
-    "tests/ts4-build-artifacts.test.ts": "8da9dede0711e0430f26b5690ea784ccbad4113eb883f7ac6b6c218d4af18c70",
-    "tests/ts4-crypto-service.test.ts": "a3088ca8f1d7b73bc4536150357ed391c8ca175809a1904d8b79d35c52d1331c",
-    "tests/ts5-render-ssh.test.ts": "aa657c28b5b9b230a57fb18b3bab98ba3a20417fc76df5fddf1598ed6a0d2f36",
-    "tests/typescript-core.test.ts": "a57389d954d8e9cd6ba43be8829d3edc6d32b403c841155f4725e9c16968bc32",
-    "tests/user-account-integration.test.ts": "bb3b3180080feccc9226df38112324fae96ab65bbcadbd0e6f6da862e7bd7b70",
-    "tests/user-telegram-settings.test.ts": "79e167e0a0cd72d4c2778d2da063539d43184dd45397ecb995a855ec95571f11",
-    "tests/worker-control-broker.test.ts": "91b439abef46be92a09126590f99d9bee4a3f691722d8761b2bcc6230c9c3c97",
-    "tests/worker-core.test.ts": "e3815d8079ae9e8c9eed3ec7d91bda8c69cf00d5a92c914e9d6886d5d339d632",
-    "tests/worker-lifecycle-service.test.ts": "b771984f35b6c3c94efce92d61e5cd058936127ebdfca7ad7a0a895b66748899",
-    "tests/worker-live-integration.test.ts": "c1f9374cbcf7af7fc427d7557519b7c1ac94fda134c0e3dee3932f9f8f4b0c01",
-    "tests/worker-protocol-typed.test.ts": "d02df0ced728a5f933df8428adb6a601e51ccc049c1555a1a49c3dbb27545c50",
     "worker/agent.ts": "8f3497ae45ec1a3dcdd7505b639d0c07f34925f5aa270e02e57b6bda2f1d0d73",
     "worker/cli.ts": "d8f20c7d7552783c749a377f94bc57dd50423244aba8a97d82ff3da211ddb197",
     "worker/lifecycle.ts": "67b8caccf1846a114f946183e3aff8f7b85a737b1c8d9438013b958ce16d4580"

@@ -1,16 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import Database = require('better-sqlite3');
+import Database from 'better-sqlite3';
 import { SqliteAdapter } from '../src/db/adapters/sqliteAdapter';
 import { runMigrations } from '../src/db/migrations';
-import oauthRepository = require('../src/repositories/mcpOAuthRepository');
-import oauthService = require('../src/services/mcpOAuthService');
-import mcpConfig = require('../src/config/mcpConfig');
+import oauthRepository from '../src/repositories/mcpOAuthRepository';
+import oauthService from '../src/services/mcpOAuthService';
+import mcpConfig from '../src/config/mcpConfig';
 
 const sha = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
 
-test('typed OAuth flow preserves PKCE, refresh rotation, replay protection, revocation', async () => {
+void test('typed OAuth flow preserves PKCE, refresh rotation, replay protection, revocation', async () => {
   const raw = new Database(':memory:');
   const repository = new oauthRepository.McpOAuthRepository(new SqliteAdapter(raw));
   const service = new oauthService.McpOAuthService(repository, mcpConfig);
@@ -18,8 +18,9 @@ test('typed OAuth flow preserves PKCE, refresh rotation, replay protection, revo
     runMigrations(raw);
     const redirectUri = 'https://client.example.invalid/callback';
     const client = await service.registerClient({
-      displayName: 'Typed OAuth Regression', redirectUris: [redirectUri],
-      allowedScopes: ['bot_report.read', 'offline_access']
+      displayName: 'Typed OAuth Regression',
+      redirectUris: [redirectUri],
+      allowedScopes: ['bot_report.read', 'offline_access'],
     });
     assert.ok(client.client);
     const clientId = client.client.client_id;
@@ -27,37 +28,76 @@ test('typed OAuth flow preserves PKCE, refresh rotation, replay protection, revo
     const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
     const resource = mcpConfig.resourceUrl;
     const authorized = await service.validateAuthorizeRequest({
-      clientId, redirectUri, responseType: 'code', scope: 'bot_report.read offline_access',
-      state: 'regression', codeChallenge: challenge, codeChallengeMethod: 'S256', resource
+      clientId,
+      redirectUri,
+      responseType: 'code',
+      scope: 'bot_report.read offline_access',
+      state: 'regression',
+      codeChallenge: challenge,
+      codeChallengeMethod: 'S256',
+      resource,
     });
     assert.deepEqual(authorized.scopes, ['bot_report.read', 'offline_access']);
-    await assert.rejects(service.validateAuthorizeRequest({
-      clientId, redirectUri, responseType: 'code', codeChallenge: challenge,
-      codeChallengeMethod: 'plain', resource
-    }), {error: 'invalid_request'});
+    await assert.rejects(
+      service.validateAuthorizeRequest({
+        clientId,
+        redirectUri,
+        responseType: 'code',
+        codeChallenge: challenge,
+        codeChallengeMethod: 'plain',
+        resource,
+      }),
+      { error: 'invalid_request' },
+    );
     const code = await service.issueAuthorizationCode({
-      clientId, userId: 'env-admin', principalId: client.client.principal_id,
-      redirectUri, resource, scopes: authorized.scopes,
-      codeChallenge: challenge, codeChallengeMethod: 'S256'
+      clientId,
+      userId: 'env-admin',
+      principalId: client.client.principal_id,
+      redirectUri,
+      resource,
+      scopes: authorized.scopes,
+      codeChallenge: challenge,
+      codeChallengeMethod: 'S256',
     });
-    const args = {clientId, clientSecret: client.rawSecret, code, redirectUri, resource, codeVerifier: verifier};
+    const args = {
+      clientId,
+      clientSecret: client.rawSecret,
+      code,
+      redirectUri,
+      resource,
+      codeVerifier: verifier,
+    };
     const token = await service.exchangeAuthorizationCode(args);
     assert.equal(token.token_type, 'Bearer');
     assert.ok(token.refresh_token);
-    await assert.rejects(service.exchangeAuthorizationCode(args), {error: 'invalid_grant'});
+    await assert.rejects(service.exchangeAuthorizationCode(args), { error: 'invalid_grant' });
     const rotated = await service.exchangeRefreshToken({
-      clientId, clientSecret: client.rawSecret,
-      refreshToken: token.refresh_token, resource
+      clientId,
+      clientSecret: client.rawSecret,
+      refreshToken: token.refresh_token,
+      resource,
     });
     assert.ok(rotated.refresh_token);
-    await assert.rejects(service.exchangeRefreshToken({
-      clientId, clientSecret: client.rawSecret,
-      refreshToken: token.refresh_token, resource
-    }), {error: 'invalid_grant'});
+    await assert.rejects(
+      service.exchangeRefreshToken({
+        clientId,
+        clientSecret: client.rawSecret,
+        refreshToken: token.refresh_token,
+        resource,
+      }),
+      { error: 'invalid_grant' },
+    );
     const compromised = await repository.findRefreshTokenByHash(sha(rotated.refresh_token));
     assert.ok(compromised?.revoked_at, 'replay must revoke whole token family');
-    await service.revokeToken({clientId, clientSecret: client.rawSecret, token: rotated.access_token, tokenTypeHint: 'access_token'});
+    await service.revokeToken({
+      clientId,
+      clientSecret: client.rawSecret,
+      token: rotated.access_token,
+      tokenTypeHint: 'access_token',
+    });
     const access = await repository.findAccessTokenByHash(sha(rotated.access_token));
     assert.ok(access?.revoked_at);
-  } finally { raw.close(); }
+  } finally {
+    raw.close();
+  }
 });

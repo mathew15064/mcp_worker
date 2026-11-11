@@ -1,21 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import settingsService = require('../src/services/userTelegramSettingsService');
-const {UserTelegramSettingsService, keys} = settingsService;
+import settingsService from '../src/services/userTelegramSettingsService';
+const { UserTelegramSettingsService, keys } = settingsService;
 
 class MemorySettings {
   values: Map<string, string>;
-  constructor() { this.values = new Map<string, string>(); }
-  async get<T = null>(key: string, fallback: T | null = null): Promise<string | T | null> { return this.values.get(key) ?? fallback; }
-  async set(key: string, value: unknown) { this.values.set(key, String(value ?? '')); return {changes: 1, insertId: null}; }
+  constructor() {
+    this.values = new Map<string, string>();
+  }
+  async get<T = null>(key: string, fallback: T | null = null): Promise<string | T | null> {
+    return this.values.get(key) ?? fallback;
+  }
+  async set(key: string, value: unknown) {
+    this.values.set(key, String(value ?? ''));
+    return { changes: 1, insertId: null };
+  }
 }
 
 const secrets = {
-  encrypt(value: string) { return `encrypted:${value}`; },
-  decrypt(value: unknown) { return String(value).replace(/^encrypted:/, ''); }
+  encrypt(value: string) {
+    return `encrypted:${value}`;
+  },
+  decrypt(value: unknown) {
+    return String(value).replace(/^encrypted:/, '');
+  },
 };
 
-test('user Telegram settings are namespaced per user and never fall back to Admin Telegram keys', async () => {
+void test('user Telegram settings are namespaced per user and never fall back to Admin Telegram keys', async () => {
   const settings = new MemorySettings();
   settings.values.set('telegram.enabled', 'true');
   settings.values.set('telegram.chat_id', 'admin-chat');
@@ -26,8 +37,15 @@ test('user Telegram settings are namespaced per user and never fall back to Admi
 
   assert.deepEqual(await service.get(alice), { enabled: false, chatId: '', hasToken: false });
   await service.save(alice, { enabled: true, chatId: 'alice-chat', botToken: 'alice-token' });
-  assert.deepEqual(await service.get(alice), { enabled: true, chatId: 'alice-chat', hasToken: true });
-  assert.deepEqual(await service.credentials(alice), { token: 'alice-token', chatId: 'alice-chat' });
+  assert.deepEqual(await service.get(alice), {
+    enabled: true,
+    chatId: 'alice-chat',
+    hasToken: true,
+  });
+  assert.deepEqual(await service.credentials(alice), {
+    token: 'alice-token',
+    chatId: 'alice-chat',
+  });
   assert.deepEqual(await service.get(bob), { enabled: false, chatId: '', hasToken: false });
 
   const aliceKeys = keys(alice);
@@ -35,7 +53,7 @@ test('user Telegram settings are namespaced per user and never fall back to Admi
   assert.equal(settings.values.get('telegram.bot_token'), 'encrypted:admin-token');
 });
 
-test('saving a blank user Telegram token preserves the existing encrypted token', async () => {
+void test('saving a blank user Telegram token preserves the existing encrypted token', async () => {
   const settings = new MemorySettings();
   const service = new UserTelegramSettingsService({ settings, secrets });
   const userId = 'usr_11111111-2222-4333-8444-555555555555';

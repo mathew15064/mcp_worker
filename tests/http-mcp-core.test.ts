@@ -45,7 +45,7 @@ test.after(async () => {
   cleanup(env.dir);
 });
 
-test('HTTP surface is MCP-only', async () => {
+void test('HTTP surface is MCP-only', async () => {
   const health = await fetch(`${baseUrl}/healthz`);
   assert.equal(health.status, 200);
   const healthBody = (await health.json()) as {
@@ -71,7 +71,7 @@ test('HTTP surface is MCP-only', async () => {
   }
 });
 
-test('worker curl installer uses verified standalone binaries without Node.js runtime dependencies', async () => {
+void test('worker curl installer uses verified standalone binaries without Node.js runtime dependencies', async () => {
   const installer = await fetch(`${baseUrl}/worker/install.sh`);
   assert.equal(installer.status, 200);
   const script = await installer.text();
@@ -154,7 +154,7 @@ test('worker curl installer uses verified standalone binaries without Node.js ru
 const standaloneBinaryBuilt = fs.existsSync(
   path.resolve(__dirname, '../worker/bin/bot-report-worker-linux-amd64'),
 );
-test(
+void test(
   'standalone curl installer produces an executable Worker CLI without target Node.js setup',
   { skip: !standaloneBinaryBuilt },
   async () => {
@@ -195,7 +195,7 @@ test(
   },
 );
 
-test('OAuth discovery and unauthenticated MCP challenge remain available', async () => {
+void test('OAuth discovery and unauthenticated MCP challenge remain available', async () => {
   const metadata = await fetch(`${baseUrl}/.well-known/oauth-authorization-server`);
   assert.equal(metadata.status, 200);
   const body = await metadata.json();
@@ -211,7 +211,7 @@ test('OAuth discovery and unauthenticated MCP challenge remain available', async
   assert.match(denied.headers.get('www-authenticate') || '', /oauth-protected-resource/);
 });
 
-test('administrator login can authorize an OAuth client through the minimal consent page', async () => {
+void test('administrator login can authorize an OAuth client through the minimal consent page', async () => {
   const login = await fetch(`${baseUrl}/login`);
   const loginHtml = await login.text();
   const firstCookie = (login.headers.get('set-cookie') || '').split(';')[0];
@@ -351,7 +351,7 @@ void test('OAuth rejects malformed scope without consuming a valid refresh token
   assert.equal(result.scope, 'bot_report.read');
 });
 
-test('authenticated MCP initialize returns instructions and exactly 19 tools', async () => {
+void test('authenticated MCP initialize returns instructions and exactly 19 tools', async () => {
   const issued = await issueToken();
   const headers = {
     'content-type': 'application/json',

@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import helper = require('./helper');
-const {setupEnv, cleanup, initDb} = helper;
+import helper from './helper';
+const { setupEnv, cleanup, initDb } = helper;
 
 const env = setupEnv('admin-ui');
 initDb();
@@ -12,7 +12,7 @@ let server: http.Server;
 let baseUrl = '';
 let cookie = '';
 let csrf = '';
-let adminWorker: {id:string} = {id: ""};
+let adminWorker: { id: string } = { id: '' };
 let originalWorkerIsOnline: ((workerId: string) => boolean) | null = null;
 
 function extractCsrf(html: string) {
@@ -34,8 +34,8 @@ async function login() {
       _csrf: loginCsrf,
       username: 'admin',
       password: 'TestAdminPassword2026!',
-      returnTo: '/admin'
-    }).toString()
+      returnTo: '/admin',
+    }).toString(),
   });
   assert.equal(response.status, 302);
   cookie = (response.headers.get('set-cookie') || '').split(';')[0];
@@ -49,7 +49,7 @@ async function login() {
 
 test.before(async () => {
   server = http.createServer(app);
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   baseUrl = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
   await login();
   const workerRepo = require('../src/repositories/workerRepository');
@@ -57,20 +57,21 @@ test.before(async () => {
   adminWorker = await workerRepo.createWorker({
     name: 'UI-Admin-Worker',
     publicKey: 'test-public-key',
-    capabilities: ['tmux.inspect', 'tmux.send', 'tmux.read', 'tmux.interrupt']
+    capabilities: ['tmux.inspect', 'tmux.send', 'tmux.read', 'tmux.interrupt'],
   });
   originalWorkerIsOnline = workerBroker.isOnline.bind(workerBroker);
-  workerBroker.isOnline = (workerId: string) => workerId === adminWorker.id || (originalWorkerIsOnline?.(workerId) ?? false);
+  workerBroker.isOnline = (workerId: string) =>
+    workerId === adminWorker.id || (originalWorkerIsOnline?.(workerId) ?? false);
 });
 
 test.after(async () => {
   const workerBroker = require('../src/services/workerConnectionBroker');
   if (originalWorkerIsOnline) workerBroker.isOnline = originalWorkerIsOnline;
-  if (server) await new Promise<void>(resolve => server.close(() => resolve()));
+  if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
   cleanup(env.dir);
 });
 
-test('root redirects to authenticated admin console with configuration navigation', async () => {
+void test('root redirects to authenticated admin console with configuration navigation', async () => {
   const root = await fetch(`${baseUrl}/`, { redirect: 'manual' });
   assert.equal(root.status, 302);
   assert.equal(root.headers.get('location'), '/admin');
@@ -88,7 +89,7 @@ test('root redirects to authenticated admin console with configuration navigatio
   assert.doesNotMatch(html, /Antigravity|Control Plane|Bot Inbox/);
 });
 
-test('OAuth client can be created from admin UI and secret is shown once', async () => {
+void test('OAuth client can be created from admin UI and secret is shown once', async () => {
   const response = await fetch(`${baseUrl}/admin/clients`, {
     method: 'POST',
     redirect: 'manual',
@@ -98,8 +99,8 @@ test('OAuth client can be created from admin UI and secret is shown once', async
       display_name: 'UI Client',
       principal_id: 'principal:ui_client',
       redirect_uris: 'https://chatgpt.com/connector_platform_oauth_redirect',
-      scopes: 'bot_report.read bot_report.terminal offline_access'
-    }).toString()
+      scopes: 'bot_report.read bot_report.terminal offline_access',
+    }).toString(),
   });
   assert.equal(response.status, 302);
   assert.equal(response.headers.get('location'), '/admin/clients');
@@ -111,14 +112,18 @@ test('OAuth client can be created from admin UI and secret is shown once', async
   const secondGet = await fetch(`${baseUrl}/admin/clients`, { headers: { cookie } });
   assert.doesNotMatch(await secondGet.text(), /Client secret created/);
   const clients = await require('../src/repositories/mcpOAuthRepository').listClients();
-  const matching = clients.filter((client: {display_name:string}) => client.display_name === 'UI Client');
+  const matching = clients.filter(
+    (client: { display_name: string }) => client.display_name === 'UI Client',
+  );
   assert.equal(matching.length, 1);
   assert.equal(matching[0].status, 'active');
 });
 
-test('Audit Log traces MCP activity by client, tool, result, and request id', async () => {
+void test('Audit Log traces MCP activity by client, tool, result, and request id', async () => {
   const repo = require('../src/repositories/mcpOAuthRepository');
-  const client = (await repo.listClients()).find((item: {display_name:string}) => item.display_name === 'UI Client');
+  const client = (await repo.listClients()).find(
+    (item: { display_name: string }) => item.display_name === 'UI Client',
+  );
   assert.ok(client);
 
   await repo.recordAudit({
@@ -131,8 +136,17 @@ test('Audit Log traces MCP activity by client, tool, result, and request id', as
     result: 'SUCCESS',
     httpStatus: 200,
     durationMs: 12,
-    requestPayload: JSON.stringify({ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'runtime_info', arguments: {} } }),
-    responsePayload: JSON.stringify({ jsonrpc: '2.0', id: 7, result: { content: [{ type: 'text', text: 'runtime ok' }] } })
+    requestPayload: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 7,
+      method: 'tools/call',
+      params: { name: 'runtime_info', arguments: {} },
+    }),
+    responsePayload: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 7,
+      result: { content: [{ type: 'text', text: 'runtime ok' }] },
+    }),
   });
   await repo.recordAudit({
     requestId: 'req_ui_audit_error',
@@ -142,10 +156,13 @@ test('Audit Log traces MCP activity by client, tool, result, and request id', as
     toolName: 'terminal_list',
     result: 'ERROR',
     httpStatus: 500,
-    durationMs: 31
+    durationMs: 31,
   });
 
-  const response = await fetch(`${baseUrl}/admin/audit?client_id=${encodeURIComponent(client.client_id)}&tool_name=runtime_info&result=SUCCESS`, { headers: { cookie } });
+  const response = await fetch(
+    `${baseUrl}/admin/audit?client_id=${encodeURIComponent(client.client_id)}&tool_name=runtime_info&result=SUCCESS`,
+    { headers: { cookie } },
+  );
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /Audit Log/);
@@ -157,7 +174,9 @@ test('Audit Log traces MCP activity by client, tool, result, and request id', as
   assert.match(html, /Audit Event Detail/);
   assert.doesNotMatch(html, /req_ui_audit_error/);
 
-  const detailResponse = await fetch(`${baseUrl}/admin/audit/aud_ui_audit_success`, { headers: { cookie } });
+  const detailResponse = await fetch(`${baseUrl}/admin/audit/aud_ui_audit_success`, {
+    headers: { cookie },
+  });
   assert.equal(detailResponse.status, 200);
   const detail = await detailResponse.json();
   assert.equal(detail.tool_name, 'runtime_info');
@@ -165,9 +184,11 @@ test('Audit Log traces MCP activity by client, tool, result, and request id', as
   assert.match(detail.response_payload, /runtime ok/);
 });
 
-test('Audit Log uses compact numbered pagination with configurable page size', async () => {
+void test('Audit Log uses compact numbered pagination with configurable page size', async () => {
   const repo = require('../src/repositories/mcpOAuthRepository');
-  const client = (await repo.listClients()).find((item: {display_name:string}) => item.display_name === 'UI Client');
+  const client = (await repo.listClients()).find(
+    (item: { display_name: string }) => item.display_name === 'UI Client',
+  );
   assert.ok(client);
   for (let index = 0; index < 25; index += 1) {
     await repo.recordAudit({
@@ -178,7 +199,7 @@ test('Audit Log uses compact numbered pagination with configurable page size', a
       toolName: 'repo_snapshot',
       result: 'SUCCESS',
       httpStatus: 200,
-      durationMs: 5 + index
+      durationMs: 5 + index,
     });
   }
 
@@ -202,7 +223,7 @@ test('Audit Log uses compact numbered pagination with configurable page size', a
   assert.match(fiftyHtml, /<option value="50" selected>50<\/option>/);
 });
 
-test('Admin SSH Profile is created through an active global Worker without SSH credentials', async () => {
+void test('Admin SSH Profile is created through an active global Worker without SSH credentials', async () => {
   const response = await fetch(`${baseUrl}/admin/terminals`, {
     method: 'POST',
     redirect: 'manual',
@@ -212,13 +233,15 @@ test('Admin SSH Profile is created through an active global Worker without SSH c
       name: 'UI-Terminal',
       description: 'Created from admin UI',
       worker_id: adminWorker.id,
-      enabled: 'true'
-    }).toString()
+      enabled: 'true',
+    }).toString(),
   });
   assert.equal(response.status, 302);
   assert.equal(response.headers.get('location'), '/admin/terminals');
   const workerRepo = require('../src/repositories/workerRepository');
-  const profile = (await workerRepo.listAdminProfiles()).find((item: {name:string}) => item.name === 'UI-Terminal');
+  const profile = (await workerRepo.listAdminProfiles()).find(
+    (item: { name: string }) => item.name === 'UI-Terminal',
+  );
   assert.ok(profile);
   assert.equal(profile.worker_id, adminWorker.id);
   assert.equal(profile.tmux_session, '');
@@ -230,9 +253,11 @@ test('Admin SSH Profile is created through an active global Worker without SSH c
   assert.doesNotMatch(html, /name="host"|name="port"|name="username"|name="password"/);
 });
 
-test('Admin SSH Profile edit keeps Worker-backed metadata only', async () => {
+void test('Admin SSH Profile edit keeps Worker-backed metadata only', async () => {
   const workerRepo = require('../src/repositories/workerRepository');
-  const profile = (await workerRepo.listAdminProfiles()).find((item: {name:string}) => item.name === 'UI-Terminal');
+  const profile = (await workerRepo.listAdminProfiles()).find(
+    (item: { name: string }) => item.name === 'UI-Terminal',
+  );
   assert.ok(profile);
   const response = await fetch(`${baseUrl}/admin/terminals/${profile.id}/update`, {
     method: 'POST',
@@ -243,8 +268,8 @@ test('Admin SSH Profile edit keeps Worker-backed metadata only', async () => {
       name: 'UI-Terminal-Edited',
       description: 'Updated from modal',
       worker_id: adminWorker.id,
-      enabled: 'true'
-    }).toString()
+      enabled: 'true',
+    }).toString(),
   });
   assert.equal(response.status, 302);
   const updated = await workerRepo.findAdminProfileById(profile.id);
@@ -257,14 +282,16 @@ test('Admin SSH Profile edit keeps Worker-backed metadata only', async () => {
   assert.equal('credential_envelope' in updated, false);
 });
 
-test('Admin SSH Profile tests direct Worker shell and exposes Attach Shell', async () => {
+void test('Admin SSH Profile tests direct Worker shell and exposes Attach Shell', async () => {
   const workerRepo = require('../src/repositories/workerRepository');
-  const profile = (await workerRepo.listAdminProfiles()).find((item: {name:string}) => item.name === 'UI-Terminal-Edited');
+  const profile = (await workerRepo.listAdminProfiles()).find(
+    (item: { name: string }) => item.name === 'UI-Terminal-Edited',
+  );
   assert.ok(profile);
 
   const workerExecution = require('../src/services/workerExecutionService');
   const originalTest = workerExecution.testConnection;
-  workerExecution.testConnection = async (workerProfile: {id:string;worker_id:string}) => {
+  workerExecution.testConnection = async (workerProfile: { id: string; worker_id: string }) => {
     assert.equal(workerProfile.id, profile.id);
     assert.equal(workerProfile.worker_id, adminWorker.id);
     return { pane_count: 1, target_pane: 'ui-terminal-edit:0.0', pane_current_command: 'bash' };
@@ -273,8 +300,12 @@ test('Admin SSH Profile tests direct Worker shell and exposes Attach Shell', asy
   try {
     const testResponse = await fetch(`${baseUrl}/admin/terminals/${profile.id}/test`, {
       method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json', cookie },
-      body: new URLSearchParams({ _csrf: csrf }).toString()
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        accept: 'application/json',
+        cookie,
+      },
+      body: new URLSearchParams({ _csrf: csrf }).toString(),
     });
     assert.equal(testResponse.status, 200);
     const result = await testResponse.json();
@@ -286,20 +317,36 @@ test('Admin SSH Profile tests direct Worker shell and exposes Attach Shell', asy
     const listHtml = await listPage.text();
     assert.match(listHtml, /Attach Shell/);
     assert.match(listHtml, /Test Shell/);
-    assert.doesNotMatch(listHtml, /name="tmux_session"|name="host"|name="username"|name="password"/);
+    assert.doesNotMatch(
+      listHtml,
+      /name="tmux_session"|name="host"|name="username"|name="password"/,
+    );
 
-    const legacyConsole = await fetch(`${baseUrl}/admin/terminals/${profile.id}/ssh`, { redirect: 'manual', headers: { cookie } });
+    const legacyConsole = await fetch(`${baseUrl}/admin/terminals/${profile.id}/ssh`, {
+      redirect: 'manual',
+      headers: { cookie },
+    });
     assert.equal(legacyConsole.status, 302);
     assert.equal(legacyConsole.headers.get('location'), `/admin/terminals/${profile.id}/shell`);
 
-    const consolePage = await fetch(`${baseUrl}/admin/terminals/${profile.id}/shell`, { headers: { cookie } });
+    const consolePage = await fetch(`${baseUrl}/admin/terminals/${profile.id}/shell`, {
+      headers: { cookie },
+    });
     assert.equal(consolePage.status, 200);
-    assert.match(await consolePage.text(), /Interactive PTY attached directly to the Worker OS shell/);
+    assert.match(
+      await consolePage.text(),
+      /Interactive PTY attached directly to the Worker OS shell/,
+    );
 
     const ticketResponse = await fetch(`${baseUrl}/admin/terminals/${profile.id}/session`, {
       method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json', origin: baseUrl, cookie },
-      body: new URLSearchParams({ _csrf: csrf }).toString()
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        accept: 'application/json',
+        origin: baseUrl,
+        cookie,
+      },
+      body: new URLSearchParams({ _csrf: csrf }).toString(),
     });
     assert.equal(ticketResponse.status, 201);
     const ticket = await ticketResponse.json();
@@ -310,7 +357,7 @@ test('Admin SSH Profile tests direct Worker shell and exposes Attach Shell', asy
   }
 });
 
-test('modern admin assets are served and Worker-backed SSH modal hooks are present', async () => {
+void test('modern admin assets are served and Worker-backed SSH modal hooks are present', async () => {
   const css = await fetch(`${baseUrl}/assets/admin.css`);
   const js = await fetch(`${baseUrl}/assets/admin.js`);
   assert.equal(css.status, 200);
@@ -325,7 +372,7 @@ test('modern admin assets are served and Worker-backed SSH modal hooks are prese
   assert.doesNotMatch(html, /id="terminal-modal"|terminal-host|terminal-password/);
 });
 
-test('Telegram config UI stores operational settings in DB and encrypts token with the application credential key', async () => {
+void test('Telegram config UI stores operational settings in DB and encrypts token with the application credential key', async () => {
   const dedicatedTelegramKey = process.env.TELEGRAM_CREDENTIAL_KEY;
   process.env.TELEGRAM_CREDENTIAL_KEY = 'legacy-telegram-key-is-not-used-for-new-data';
   const response = await fetch(`${baseUrl}/admin/settings/telegram`, {
@@ -336,8 +383,8 @@ test('Telegram config UI stores operational settings in DB and encrypts token wi
       _csrf: csrf,
       enabled: 'true',
       bot_token: '123456:ABCdef_TestToken',
-      chat_id: '987654321'
-    }).toString()
+      chat_id: '987654321',
+    }).toString(),
   });
   assert.equal(response.status, 302);
   assert.equal(response.headers.get('location'), '/admin/settings/telegram');
@@ -347,7 +394,10 @@ test('Telegram config UI stores operational settings in DB and encrypts token wi
   assert.notEqual(encrypted, '123456:ABCdef_TestToken');
   assert.equal(await settings.get('telegram.enabled'), 'true');
   assert.equal(await settings.get('telegram.chat_id'), '987654321');
-  assert.equal(require('../src/services/telegramSecretService').decrypt(encrypted), '123456:ABCdef_TestToken');
+  assert.equal(
+    require('../src/services/telegramSecretService').decrypt(encrypted),
+    '123456:ABCdef_TestToken',
+  );
 
   const page = await fetch(`${baseUrl}/admin/settings/telegram`, { headers: { cookie } });
   const html = await page.text();
@@ -357,16 +407,24 @@ test('Telegram config UI stores operational settings in DB and encrypts token wi
   else process.env.TELEGRAM_CREDENTIAL_KEY = dedicatedTelegramKey;
 });
 
-test('legacy Telegram v2 token is migrated to DB-backed v3 envelope without losing the token', async () => {
+void test('legacy Telegram v2 token is migrated to DB-backed v3 envelope without losing the token', async () => {
   const legacyKey = process.env.TELEGRAM_CREDENTIAL_KEY;
   assert.ok(legacyKey);
   const key = Buffer.from(legacyKey, 'base64');
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   cipher.setAAD(Buffer.from('bot_report:telegram-token:v2', 'utf8'));
-  const ciphertext = Buffer.concat([cipher.update('654321:LegacyTelegramToken', 'utf8'), cipher.final()]);
+  const ciphertext = Buffer.concat([
+    cipher.update('654321:LegacyTelegramToken', 'utf8'),
+    cipher.final(),
+  ]);
   const tag = cipher.getAuthTag();
-  const legacyEnvelope = ['enc:v2', iv.toString('base64url'), tag.toString('base64url'), ciphertext.toString('base64url')].join(':');
+  const legacyEnvelope = [
+    'enc:v2',
+    iv.toString('base64url'),
+    tag.toString('base64url'),
+    ciphertext.toString('base64url'),
+  ].join(':');
 
   const settings = require('../src/repositories/settingsRepository');
   await settings.delete('telegram.bot_token');
@@ -381,12 +439,15 @@ test('legacy Telegram v2 token is migrated to DB-backed v3 envelope without losi
       _csrf: csrf,
       enabled: 'true',
       bot_token: '',
-      chat_id: '1122334455'
-    }).toString()
+      chat_id: '1122334455',
+    }).toString(),
   });
   assert.equal(response.status, 302);
 
   const migrated = await settings.get('telegram.bot_token');
   assert.ok(migrated.startsWith('enc:v3:'));
-  assert.equal(require('../src/services/telegramSecretService').decrypt(migrated), '654321:LegacyTelegramToken');
+  assert.equal(
+    require('../src/services/telegramSecretService').decrypt(migrated),
+    '654321:LegacyTelegramToken',
+  );
 });

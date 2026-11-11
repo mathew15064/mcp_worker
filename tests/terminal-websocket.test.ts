@@ -25,7 +25,7 @@ async function rejected(url: string, options: ClientOptions = {}): Promise<numbe
   });
 }
 
-test('shell profile lookup preserves Admin/global and User ownership boundaries', async () => {
+void test('shell profile lookup preserves Admin/global and User ownership boundaries', async () => {
   const calls: string[][] = [];
   const repository = {
     async findAdminProfileById(id: string) {
@@ -67,7 +67,7 @@ test('shell profile lookup preserves Admin/global and User ownership boundaries'
   ]);
 });
 
-test('browser Worker shell WebSocket requires one-time nonce, owner session and same origin, then bridges PTY IO', async (t) => {
+void test('browser Worker shell WebSocket requires one-time nonce, owner session and same origin, then bridges PTY IO', async (t) => {
   const server = http.createServer((_req, res) => res.end('ok'));
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
