@@ -9,6 +9,7 @@ import workerRepository from '../repositories/workerRepository';
 import workerBroker from './workerConnectionBroker';
 import terminalNonceService from './terminalNonceService';
 import terminalOrigins from './terminalPublicOriginService';
+import { errorFields } from './workerProtocol';
 const { canonicalOrigin } = terminalOrigins;
 
 function rejectUpgrade(socket: Duplex, status = 401, code = 'WEBSOCKET_HANDSHAKE_FAILED') {
@@ -30,7 +31,9 @@ function parseSession(request: TerminalRequest, parser: RequestHandler): Promise
     // express-session also accepts the underlying IncomingMessage/ServerResponse
     // at runtime; this is the sole HTTP-to-Express middleware adapter boundary.
     parser(request as unknown as Request, response as unknown as Response, (error) =>
-      error ? reject(error) : resolve(),
+      error
+        ? reject(error instanceof Error ? error : new Error('Terminal session parsing failed'))
+        : resolve(),
     );
   });
 }
@@ -262,10 +265,7 @@ function attachTerminalWebSocket(server: HttpServer, overrides: Partial<Terminal
             },
           );
         } catch (error) {
-          const detail =
-            error && typeof error === 'object'
-              ? (error as { code?: string; message?: string })
-              : {};
+          const detail = errorFields(error);
           safeSend(ws, {
             type: 'error',
             code: detail.code || 'SHELL_ATTACH_FAILED',
@@ -295,7 +295,12 @@ function attachTerminalWebSocket(server: HttpServer, overrides: Partial<Terminal
       if (cleaned) return;
       let decoded: unknown;
       try {
-        decoded = JSON.parse(raw.toString('utf8'));
+        const bytes = Buffer.isBuffer(raw)
+          ? raw
+          : Array.isArray(raw)
+            ? Buffer.concat(raw)
+            : Buffer.from(raw);
+        decoded = JSON.parse(bytes.toString('utf8'));
       } catch {
         return;
       }

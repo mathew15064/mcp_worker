@@ -137,8 +137,11 @@ interface ApiError {
     item.className = `toast toast-${kind}`;
     item.setAttribute('role', kind === 'error' ? 'alert' : 'status');
     item.innerHTML = '<div><div class="toast-title"></div><div class="toast-message"></div></div>';
-    $('.toast-title', item)!.textContent = title;
-    $('.toast-message', item)!.textContent = message;
+    const titleNode = $('.toast-title', item);
+    const messageNode = $('.toast-message', item);
+    if (!titleNode || !messageNode) return;
+    titleNode.textContent = title;
+    messageNode.textContent = message;
     stack.appendChild(item);
     setTimeout(() => item.remove(), 4800);
   }
@@ -161,7 +164,7 @@ interface ApiError {
         }, 1200);
       }
       toast('success', 'Copied', 'Value copied to clipboard.');
-    } catch (_) {
+    } catch {
       toast('error', 'Copy failed', 'Clipboard access is unavailable.');
     }
   }
@@ -187,11 +190,18 @@ interface ApiError {
     if (raw === null || raw === undefined || raw === '')
       return 'Payload was not captured for this legacy audit event.';
     try {
-      const parsed = JSON.parse(raw);
-      if (parsed && parsed._audit_truncated && typeof parsed.preview === 'string')
+      const parsed: unknown = JSON.parse(raw);
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        '_audit_truncated' in parsed &&
+        parsed._audit_truncated &&
+        'preview' in parsed &&
+        typeof parsed.preview === 'string'
+      )
         return parsed.preview;
       return JSON.stringify(parsed, null, 2);
-    } catch (_) {
+    } catch {
       return String(raw);
     }
   }
@@ -211,25 +221,32 @@ interface ApiError {
         headers: { accept: 'application/json' },
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const detail = await response.json();
+      const payload: unknown = await response.json();
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload))
+        throw new Error('Invalid audit response');
+      const detail = payload as Record<string, unknown>;
+      const text = (value: unknown, fallback = '') =>
+        typeof value === 'string' ? value || fallback : fallback;
+      const scalar = (value: unknown) =>
+        typeof value === 'number' || typeof value === 'string' ? String(value) : '—';
       const set = (selector: string, value: string) => {
         const target = $(selector);
         if (target) target.textContent = value ?? '—';
       };
-      set('#audit-detail-request-id', detail.request_id || '—');
+      set('#audit-detail-request-id', text(detail.request_id, '—'));
       set(
         '#audit-detail-client',
-        detail.client_display_name || detail.client_id || 'Unknown client',
+        text(detail.client_display_name) || text(detail.client_id, 'Unknown client'),
       );
-      set('#audit-detail-method', detail.mcp_method || '—');
-      set('#audit-detail-tool', detail.tool_name || '—');
-      set('#audit-detail-result', detail.result || '—');
-      set('#audit-detail-http', `${detail.http_status ?? '—'} · ${detail.duration_ms ?? '—'} ms`);
-      requestPayload.textContent = prettyAuditPayload(detail.request_payload);
-      responsePayload.textContent = prettyAuditPayload(detail.response_payload);
+      set('#audit-detail-method', text(detail.mcp_method, '—'));
+      set('#audit-detail-tool', text(detail.tool_name, '—'));
+      set('#audit-detail-result', text(detail.result, '—'));
+      set('#audit-detail-http', `${scalar(detail.http_status)} · ${scalar(detail.duration_ms)} ms`);
+      requestPayload.textContent = prettyAuditPayload(text(detail.request_payload));
+      responsePayload.textContent = prettyAuditPayload(text(detail.response_payload));
       if (requestNote) requestNote.hidden = !detail.request_truncated;
       if (responseNote) responseNote.hidden = !detail.response_truncated;
-    } catch (_) {
+    } catch {
       requestPayload.textContent = 'Unable to load audit payload.';
       responsePayload.textContent = 'Unable to load audit payload.';
       toast(
@@ -462,7 +479,7 @@ interface ApiError {
             finishWorkerCheck();
           }
         }
-      } catch (_) {
+      } catch {
         if (checkingWorkerId && Date.now() >= checkDeadline) {
           toast(
             'error',
@@ -496,7 +513,7 @@ interface ApiError {
         workerEditForm.action = `${routeBase}/${encodeURIComponent(worker.id)}/edit`;
         const name = workerEditForm.elements.namedItem('name');
         if (name instanceof HTMLInputElement) name.value = worker.name || '';
-      } catch (_) {
+      } catch {
         toast('error', 'Unable to edit Worker', 'Worker data could not be loaded.');
       }
     }),
@@ -532,15 +549,14 @@ interface ApiError {
     button.addEventListener('click', () => {
       try {
         configureAccountSshForm(JSON.parse(button.dataset.accountSshEdit || '{}') as ProfileEdit);
-      } catch (_) {
+      } catch {
         toast('error', 'Unable to edit SSH Profile', 'Profile data could not be loaded.');
       }
     }),
   );
 
-  $$<HTMLFormElement>('form[data-terminal-test]').forEach((form) =>
-    form.addEventListener('submit', async (event) => {
-      event.preventDefault();
+  $$<HTMLFormElement>('form[data-terminal-test]').forEach((form) => {
+    const testConnection = async () => {
       const button = form.querySelector<HTMLButtonElement>('button[type="submit"]');
       const original = button?.innerHTML || '';
       if (button) {
@@ -573,8 +589,14 @@ interface ApiError {
           button.innerHTML = original || '';
         }
       }
-    }),
-  );
+    };
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      void testConnection().catch(() =>
+        toast('error', 'Connection test failed', 'Unable to verify the terminal connection.'),
+      );
+    });
+  });
 
   const sidebar = $('#admin-sidebar');
   const mobileMenu = $('[data-mobile-menu]');
@@ -637,9 +659,8 @@ interface ApiError {
     }
   });
 
-  $$<HTMLButtonElement>('[data-test-database]').forEach((button) =>
-    button.addEventListener('click', async (event) => {
-      event.preventDefault();
+  $$<HTMLButtonElement>('[data-test-database]').forEach((button) => {
+    const testDatabase = async () => {
       const form = button.form;
       if (!form) return;
       const original = button.innerHTML;
@@ -670,8 +691,14 @@ interface ApiError {
         button.disabled = false;
         button.innerHTML = original || '';
       }
-    }),
-  );
+    };
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      void testDatabase().catch(() =>
+        toast('error', 'MySQL connection failed', 'Unable to verify the database connection.'),
+      );
+    });
+  });
 
   $$<HTMLFormElement>('form[data-disable-on-submit]').forEach((form) =>
     form.addEventListener('submit', () => {

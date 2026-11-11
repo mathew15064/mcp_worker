@@ -3,9 +3,8 @@ import { rateLimit } from 'express-rate-limit';
 import authService from '../services/authService';
 import * as adminIdentity from '../services/adminIdentityService';
 import config from '../config/env';
-const {
-  loginPage,
-}: { loginPage(data: Record<string, unknown>): string } = require('../http/pages');
+import pages from '../http/pages';
+const { loginPage } = pages;
 
 const router = express.Router();
 const loginLimiter = rateLimit({
@@ -44,7 +43,7 @@ function sanitizeReturnTo(value: unknown) {
       return parsed.pathname + parsed.search;
     }
     return '/';
-  } catch (_) {
+  } catch {
     return '/';
   }
 }
@@ -79,8 +78,15 @@ router.get('/login', async (req, res, next) => {
 
 router.post('/login', loginLimiter, async (req, res, next) => {
   try {
-    const result = await authService.authenticate(req.body?.username, req.body?.password);
-    const requestedReturnTo = sanitizeReturnTo(req.body?.returnTo || req.session?.returnTo || '/');
+    const input: unknown = req.body;
+    const fields =
+      input && typeof input === 'object' && !Array.isArray(input)
+        ? (input as Record<string, unknown>)
+        : {};
+    const username = typeof fields.username === 'string' ? fields.username : '';
+    const password = typeof fields.password === 'string' ? fields.password : '';
+    const result = await authService.authenticate(username, password);
+    const requestedReturnTo = sanitizeReturnTo(fields.returnTo || req.session?.returnTo || '/');
     if (!result.success || !result.user) {
       return res
         .status(401)
@@ -89,13 +95,17 @@ router.post('/login', loginLimiter, async (req, res, next) => {
           loginPage({
             csrfToken: req.session?.csrfToken || '',
             error: result.message,
-            username: req.body?.username || '',
+            username,
             returnTo: requestedReturnTo,
           }),
         );
     }
     await new Promise<void>((resolve, reject) =>
-      req.session.regenerate((err) => (err ? reject(err) : resolve())),
+      req.session.regenerate((err: unknown) =>
+        err
+          ? reject(err instanceof Error ? err : new Error('Session regeneration failed'))
+          : resolve(),
+      ),
     );
     req.session.userId = result.user.id;
     req.session.username = result.user.username;
@@ -104,7 +114,9 @@ router.post('/login', loginLimiter, async (req, res, next) => {
     req.session.authSource =
       result.user.auth_source || (result.user.role === 'admin' ? 'env' : 'database');
     await new Promise<void>((resolve, reject) =>
-      req.session.save((err) => (err ? reject(err) : resolve())),
+      req.session.save((err: unknown) =>
+        err ? reject(err instanceof Error ? err : new Error('Session save failed')) : resolve(),
+      ),
     );
     return res.redirect(destinationFor(result.user, requestedReturnTo));
   } catch (error) {
