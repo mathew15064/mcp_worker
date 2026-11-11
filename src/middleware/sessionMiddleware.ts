@@ -1,5 +1,5 @@
 import session = require('express-session');
-declare module 'express-session' { interface SessionData { csrfToken?: string; userId?: string; role?: string; sessionVersion?: number; authSource?: string } }
+declare module 'express-session' { interface SessionData { csrfToken?: string; userId?: string; username?: string; role?: string; sessionVersion?: number; authSource?: string; returnTo?: string; flashError?: string; flashSuccess?: string; oauthOneTimeSecret?: string | null; workerEnrollment?: {token: string; expires_at?: string} | null } }
 import config = require('../config/env');
 import BoundedMemorySessionStore = require('../db/memorySessionStore');
 

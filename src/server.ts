@@ -1,17 +1,22 @@
-const app = require('./app');
-const config = require('./config/env');
-const mcpConfig = require('./config/mcpConfig');
-const databaseManager = require('./db/databaseManager');
-const runtimeSettings = require('./services/runtimeSettingsService');
-const sessionMiddleware = require('./middleware/sessionMiddleware');
-const { closeDb } = require('./db/connection');
+import app = require('./app');
+import type {Server} from 'node:http';
+import config = require('./config/env');
+import mcpConfig = require('./config/mcpConfig');
+import databaseManager = require('./db/databaseManager');
+import runtimeSettings = require('./services/runtimeSettingsService');
+import sessionMiddleware = require('./middleware/sessionMiddleware');
+import {closeDb} from './db/connection';
+import workerBrokerService = require('./services/workerConnectionBroker');
+interface Closable {close(): void}
+interface TerminalWebSocketModule {attachTerminalWebSocket(server: Server): Closable}
+const terminalWebSocketModule: TerminalWebSocketModule = require('./services/terminalWebSocketService');
 
-let server = null;
-let terminalWebSocket = null;
-let workerBroker = null;
+let server: Server | null = null;
+let terminalWebSocket: Closable | null = null;
+let workerBroker: typeof workerBrokerService | null = null;
 let closing = false;
 
-async function bootstrap() {
+async function bootstrap(): Promise<Server> {
   const storage = await databaseManager.initialize();
   if (databaseManager.isMysqlReady()) await runtimeSettings.seedDefaults(databaseManager.getAdapter());
   else if (databaseManager.isOperational()) await runtimeSettings.load(databaseManager.getAdapter());
@@ -25,13 +30,13 @@ async function bootstrap() {
     console.log(`[BOOT] Storage state: ${storage.state}`);
     if (databaseManager.isOperational()) console.log(`[BOOT] MCP resource: ${mcpConfig.resourceUrl}`);
   });
-  terminalWebSocket = require('./services/terminalWebSocketService').attachTerminalWebSocket(server);
-  workerBroker = require('./services/workerConnectionBroker');
+  terminalWebSocket = terminalWebSocketModule.attachTerminalWebSocket(server);
+  workerBroker = workerBrokerService;
   workerBroker.attach(server);
   return server;
 }
 
-async function shutdown(signal) {
+async function shutdown(signal: string): Promise<void> {
   if (closing) return;
   closing = true;
   console.log(`[SHUTDOWN] ${signal}`);
@@ -48,10 +53,11 @@ async function shutdown(signal) {
 process.on('SIGINT', () => { shutdown('SIGINT'); });
 process.on('SIGTERM', () => { shutdown('SIGTERM'); });
 
-const ready = bootstrap().catch(error => {
-  console.error('[BOOT_FATAL]', error?.code || error?.name || 'ERROR', error?.message || error);
+const ready = bootstrap().catch((error: unknown) => {
+  const fields = error && typeof error === 'object' ? error as {code?: string; name?: string; message?: string} : {};
+  console.error('[BOOT_FATAL]', fields.code || fields.name || 'ERROR', fields.message || error);
   process.exitCode = 1;
   throw error;
 });
 
-module.exports = { ready, get server() { return server; }, shutdown };
+export = { ready, get server() { return server; }, shutdown };

@@ -1,9 +1,9 @@
-const express = require('express');
-const path = require('path');
-const config = require('./config/env');
-const databaseManager = require('./db/databaseManager');
-const sessionMiddleware = require('./middleware/sessionMiddleware');
-const { csrfProtection } = require('./middleware/csrfMiddleware');
+import express, {type ErrorRequestHandler} from 'express';
+import path from 'node:path';
+import config = require('./config/env');
+import databaseManager = require('./db/databaseManager');
+import sessionMiddleware = require('./middleware/sessionMiddleware');
+import {csrfProtection} from './middleware/csrfMiddleware';
 
 const app = express();
 app.disable('x-powered-by');
@@ -34,10 +34,12 @@ app.use('/', require('./routes/mcpOAuthRoutes'));
 app.use('/', require('./mcp/transport').createMcpRouter().router);
 
 app.use((req, res) => res.status(404).json({ error: 'Endpoint not found', code: 'NOT_FOUND' }));
-app.use((err, req, res, next) => {
+const handleError: ErrorRequestHandler = (err: unknown, req, res, next) => {
+  const details = err && typeof err === 'object' ? err as {code?: string; name?: string; message?: string; status?: number} : {};
   if (res.headersSent) return next(err);
-  console.error('[HTTP_ERROR]', err?.code || err?.name || 'ERROR', err?.message || 'Unknown error');
-  return res.status(err?.status || 500).json({ error: 'Internal Server Error', code: err?.code || 'INTERNAL_ERROR' });
-});
+  console.error('[HTTP_ERROR]', details.code || details.name || 'ERROR', details.message || 'Unknown error');
+  return res.status(details.status || 500).json({ error: 'Internal Server Error', code: details.code || 'INTERNAL_ERROR' });
+};
+app.use(handleError);
 
-module.exports = app;
+export = app;

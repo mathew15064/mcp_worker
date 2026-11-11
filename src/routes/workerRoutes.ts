@@ -1,10 +1,10 @@
-const express = require('express');
-const fs = require('fs');
-const path = require('path');
-const rateLimit = require('express-rate-limit');
-const databaseManager = require('../db/databaseManager');
-const workerAuthService = require('../services/workerAuthService');
-const workerRepository = require('../repositories/workerRepository');
+import express, {type Request} from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
+import {rateLimit} from 'express-rate-limit';
+import databaseManager = require('../db/databaseManager');
+import workerAuthService = require('../services/workerAuthService');
+import workerRepository = require('../repositories/workerRepository');
 
 const router = express.Router();
 const WORKER_DIR = path.resolve(__dirname, '../../worker');
@@ -29,18 +29,18 @@ const enrollmentLimiter = rateLimit({
   legacyHeaders: false
 });
 
-function publicBaseUrl(req) {
+function publicBaseUrl(req: Request) {
   const value = `${req.protocol}://${req.get('host')}`;
   const parsed = new URL(value);
   if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Unsupported installer origin.');
   return parsed.origin;
 }
 
-function shellSingleQuote(value) {
+function shellSingleQuote(value: string) {
   return `'${String(value).replace(/'/g, `'"'"'`)}'`;
 }
 
-function unixInstallerScript(baseUrl, expectedOS) {
+function unixInstallerScript(baseUrl: string, expectedOS: string) {
   const base = shellSingleQuote(baseUrl);
   const osName = shellSingleQuote(expectedOS);
   return `#!/bin/sh
@@ -304,10 +304,10 @@ fi
 `;
 }
 
-function installerScript(baseUrl) { return unixInstallerScript(baseUrl, 'linux'); }
-function macInstallerScript(baseUrl) { return unixInstallerScript(baseUrl, 'darwin'); }
-function powershellSingleQuote(value) { return `'${String(value).replace(/'/g, "''")}'`; }
-function windowsInstallerScript(baseUrl) {
+function installerScript(baseUrl: string) { return unixInstallerScript(baseUrl, 'linux'); }
+function macInstallerScript(baseUrl: string) { return unixInstallerScript(baseUrl, 'darwin'); }
+function powershellSingleQuote(value: string) { return `'${String(value).replace(/'/g, "''")}'`; }
+function windowsInstallerScript(baseUrl: string) {
   const payloadUrl = powershellSingleQuote(`${baseUrl}/worker/install-windows.ps1`);
   return `$ErrorActionPreference = 'Stop'
 $InstallerUrl = ${payloadUrl}
@@ -324,7 +324,7 @@ try {
 `;
 }
 
-function windowsInstallerPayloadScript(baseUrl) {
+function windowsInstallerPayloadScript(baseUrl: string) {
   const base = powershellSingleQuote(baseUrl);
   return `$ErrorActionPreference = 'Stop'
 $BaseUrl = ${base}
@@ -440,12 +440,12 @@ try {
 `;
 }
 
-function normalizeProfileBase(value) {
+function normalizeProfileBase(value: unknown) {
   const clean = String(value || '').trim().replace(/[\x00-\x1f\x7f]/g, '').slice(0, 90);
   return clean || 'Worker';
 }
 
-async function createEnrollmentProfile(worker, { requestedName } = {}) {
+async function createEnrollmentProfile(worker: {id: string; name: string}, { requestedName }: {requestedName?: string} = {}) {
   const base = normalizeProfileBase(requestedName || worker.name);
   const suffix = worker.id.replace(/-/g, '').slice(0, 8);
   const candidates = [base, `${base}-${suffix}`];
@@ -458,7 +458,7 @@ async function createEnrollmentProfile(worker, { requestedName } = {}) {
         enabled: true
       });
     } catch (error) {
-      if (error.code === 'WORKER_PROFILE_NAME_CONFLICT') continue;
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'WORKER_PROFILE_NAME_CONFLICT') continue;
       throw error;
     }
   }
@@ -530,6 +530,7 @@ router.post('/worker/v1/enroll', enrollmentLimiter, async (req, res, next) => {
       publicKey: req.body?.public_key,
       capabilities: req.body?.capabilities
     });
+    if (!worker) throw Object.assign(new Error('Worker enrollment did not return an identity.'), {code: 'WORKER_ENROLLMENT_INVALID', status: 500});
     const wantsProfile = req.body?.create_profile === true;
     const profile = wantsProfile ? await createEnrollmentProfile(worker, {
       requestedName: req.body?.profile_name
@@ -542,19 +543,13 @@ router.post('/worker/v1/enroll', enrollmentLimiter, async (req, res, next) => {
       profile: profile ? { id: profile.id, name: profile.name } : null
     });
   } catch (error) {
-    if (error?.status) {
-      return res.status(error.status).json({ error: 'worker_enrollment_failed', code: error.code, message: error.message });
+    if (error instanceof Error && 'status' in error && typeof error.status === 'number') {
+      return res.status(error.status).json({ error: 'worker_enrollment_failed', code: 'code' in error ? error.code : undefined, message: error.message });
     }
     return next(error);
   }
 });
 
-module.exports = router;
-module.exports.DIST_FILES = DIST_FILES;
-module.exports.BINARY_DIST_FILES = BINARY_DIST_FILES;
-module.exports.LEGACY_DIST_FILES = LEGACY_DIST_FILES;
-module.exports.installerScript = installerScript;
-module.exports.macInstallerScript = macInstallerScript;
-module.exports.windowsInstallerScript = windowsInstallerScript;
-module.exports.windowsInstallerPayloadScript = windowsInstallerPayloadScript;
-module.exports.createEnrollmentProfile = createEnrollmentProfile;
+export = Object.assign(router, {DIST_FILES, BINARY_DIST_FILES, LEGACY_DIST_FILES,
+  installerScript, macInstallerScript, windowsInstallerScript,
+  windowsInstallerPayloadScript, createEnrollmentProfile});

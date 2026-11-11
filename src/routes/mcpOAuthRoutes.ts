@@ -1,11 +1,20 @@
-const express = require('express');
-const rateLimit = require('express-rate-limit');
-const mcpConfig = require('../config/mcpConfig');
-const mcpOAuthService = require('../services/mcpOAuthService');
-const mcpOAuthRepository = require('../repositories/mcpOAuthRepository');
-const databaseManager = require('../db/databaseManager');
-const { currentIdentity } = require('./authRoutes');
-const { oauthConsentPage, errorPage } = require('../http/pages');
+import express, {type Request} from 'express';
+import {rateLimit} from 'express-rate-limit';
+import mcpConfig = require('../config/mcpConfig');
+import mcpOAuthService = require('../services/mcpOAuthService');
+import mcpOAuthRepository = require('../repositories/mcpOAuthRepository');
+import databaseManager = require('../db/databaseManager');
+import authRoutes = require('./authRoutes');
+const { currentIdentity } = authRoutes;
+const {oauthConsentPage, errorPage}: {oauthConsentPage(data: Record<string, unknown>): string; errorPage(code: number, message: string): string} = require('../http/pages');
+interface OAuthIdentity {id: string; role: string}
+interface OwnedClient {owner_user_id: string | null}
+function queryString(value: unknown): string | undefined {return typeof value === 'string' ? value : undefined;}
+function oauthFailure(value: unknown): {status: number; error: string; message: string; description: string} {
+  const e = value && typeof value === 'object' ? value as {status?: number; error?: string; message?: string; error_description?: string} : {};
+  return {status: typeof e.status === 'number' ? e.status : 400, error: e.error || 'invalid_request', message: e.message || 'OAuth request failed', description: e.error_description || e.message || 'OAuth request failed'};
+}
+
 
 const router = express.Router();
 
@@ -18,8 +27,8 @@ router.use((req, res, next) => {
 });
 
 // Helper to determine if an authorization error can safely redirect
-async function isSafeErrorRedirect(clientId, redirectUri) {
-  if (!clientId || !redirectUri) return false;
+async function isSafeErrorRedirect(clientId: unknown, redirectUri: unknown) {
+  if (typeof clientId !== 'string' || typeof redirectUri !== 'string') return false;
   try {
     const client = await mcpOAuthRepository.findClientByClientId(clientId);
     if (!client || client.status !== 'active') return false;
@@ -29,7 +38,7 @@ async function isSafeErrorRedirect(clientId, redirectUri) {
   }
 }
 
-function canAuthorizeClient(identity, client) {
+function canAuthorizeClient(identity: OAuthIdentity | null, client: OwnedClient | null) {
   if (!identity || !client) return false;
   if (client.owner_user_id) return identity.role === 'user' && identity.id === client.owner_user_id;
   return identity.role === 'admin';
@@ -54,7 +63,7 @@ const authorizeRateLimiter = rateLimit({
 
 
 // Extract client credentials from Basic Auth or POST body
-function extractClientCredentials(req) {
+function extractClientCredentials(req: Request) {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.toLowerCase().startsWith('basic ')) {
     const b64 = authHeader.substring(6).trim();
@@ -158,14 +167,14 @@ router.get('/.well-known/oauth-authorization-server', (req, res) => {
 router.get('/oauth/authorize', authorizeRateLimiter, async (req, res) => {
   try {
     const validated = await mcpOAuthService.validateAuthorizeRequest({
-      clientId: req.query.client_id,
-      redirectUri: req.query.redirect_uri,
-      responseType: req.query.response_type,
-      scope: req.query.scope,
-      state: req.query.state,
-      codeChallenge: req.query.code_challenge,
-      codeChallengeMethod: req.query.code_challenge_method,
-      resource: req.query.resource
+      clientId: queryString(req.query.client_id),
+      redirectUri: queryString(req.query.redirect_uri),
+      responseType: queryString(req.query.response_type),
+      scope: queryString(req.query.scope),
+      state: queryString(req.query.state),
+      codeChallenge: queryString(req.query.code_challenge),
+      codeChallengeMethod: queryString(req.query.code_challenge_method),
+      resource: queryString(req.query.resource)
     });
 
     const user = await currentIdentity(req);
@@ -188,21 +197,22 @@ router.get('/oauth/authorize', authorizeRateLimiter, async (req, res) => {
       csrfToken: req.session?.csrfToken || ''
     }));
   } catch (err) {
-    const rawClientId = req.query.client_id;
-    const rawRedirectUri = req.query.redirect_uri;
+    const failure = oauthFailure(err);
+    const rawClientId = queryString(req.query.client_id);
+    const rawRedirectUri = queryString(req.query.redirect_uri);
 
-    if (await isSafeErrorRedirect(rawClientId, rawRedirectUri)) {
+    if (typeof rawRedirectUri === "string" && await isSafeErrorRedirect(rawClientId, rawRedirectUri)) {
       try {
         const u = new URL(rawRedirectUri);
-        u.searchParams.set('error', err.error || 'invalid_request');
-        u.searchParams.set('error_description', err.message);
-        if (req.query.state) u.searchParams.set('state', req.query.state);
+        u.searchParams.set('error', failure.error);
+        u.searchParams.set('error_description', failure.message);
+        if (queryString(req.query.state)) u.searchParams.set('state', queryString(req.query.state)!);
         u.searchParams.set('iss', mcpConfig.issuer);
         return res.redirect(u.toString());
       } catch (_) {}
     }
 
-    return res.status(err.status || 400).type('html').send(errorPage(err.status || 400, err.message));
+    return res.status(failure.status).type('html').send(errorPage(failure.status, failure.message));
   }
 });
 
@@ -265,18 +275,19 @@ router.post('/oauth/authorize', authorizeRateLimiter, async (req, res) => {
       return res.redirect(targetUrl.toString());
     }
   } catch (err) {
+    const failure = oauthFailure(err);
     if (await isSafeErrorRedirect(client_id, redirect_uri)) {
       try {
         const u = new URL(redirect_uri);
-        u.searchParams.set('error', err.error || 'invalid_request');
-        u.searchParams.set('error_description', err.message);
+        u.searchParams.set('error', failure.error);
+        u.searchParams.set('error_description', failure.message);
         if (state) u.searchParams.set('state', state);
         u.searchParams.set('iss', mcpConfig.issuer);
         return res.redirect(u.toString());
       } catch (_) {}
     }
 
-    return res.status(err.status || 400).type('html').send(errorPage(err.status || 400, err.message));
+    return res.status(failure.status).type('html').send(errorPage(failure.status, failure.message));
   }
 });
 
@@ -329,13 +340,14 @@ router.post('/oauth/token', tokenRateLimiter, async (req, res) => {
       error_description: `Grant type '${grantType}' is not supported. Supported grant types: authorization_code, refresh_token.`
     });
   } catch (err) {
-    const status = err.status || 400;
-    if (err.error === 'invalid_client') {
+    const failure = oauthFailure(err);
+    const status = failure.status;
+    if (failure.error === 'invalid_client') {
       res.setHeader('WWW-Authenticate', 'Basic realm="mcp_worker Gateway"');
     }
     return res.status(status).json({
-      error: err.error || 'invalid_request',
-      error_description: err.error_description || err.message
+      error: failure.error,
+      error_description: failure.description
     });
   }
 });
@@ -367,12 +379,13 @@ router.post('/oauth/revoke', async (req, res) => {
     });
     return res.status(200).json({});
   } catch (err) {
-    const status = err.status || 400;
+    const failure = oauthFailure(err);
+    const status = failure.status;
     return res.status(status).json({
-      error: err.error || 'invalid_request',
-      error_description: err.error_description || err.message
+      error: failure.error,
+      error_description: failure.description
     });
   }
 });
 
-module.exports = router;
+export = router;
