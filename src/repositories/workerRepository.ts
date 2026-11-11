@@ -1,6 +1,6 @@
 interface ProfileInput { name?: unknown; description?: unknown; workerId?: unknown; worker_id?: unknown; enabled?: unknown }
 interface WorkerRow { id: string; name: string; public_key: string; capabilities_json: string | null; enabled: number | boolean; status: string; owner_user_id: string | null; last_seen_at: string | null }
-interface ProfileRow { id: string; name: string; worker_id: string; enabled: number | boolean; worker_enabled?: number | boolean; owner_user_id?: string | null }
+interface ProfileRow { id: string; name: string; description?: string | null; worker_id: string; enabled: number | boolean; worker_enabled?: number | boolean; owner_user_id?: string | null }
 interface OwnerOptions { ownerUserId?: string | null }
 import crypto from 'node:crypto';
 import type { DatabaseAdapter } from '../db/contracts';

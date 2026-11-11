@@ -3,7 +3,8 @@ import { defineTool, type ToolResponse } from '../toolTypes';
 import type { TerminalToolService } from '../terminalServiceContract';
 import { assertPrincipal } from '../context';
 import { SCOPES } from '../../auth/principal';
-const terminalMcpService: TerminalToolService = require('../../services/terminalMcpService');
+import terminalMcpService = require('../../services/terminalMcpService');
+const checkedTerminalService: TerminalToolService = terminalMcpService;
 
 const profileSchema = z.string().trim().min(1).max(100).describe('Configured Terminal Profile name, for example dev2');
 
@@ -27,7 +28,7 @@ export const listTerminals = defineTool({
   domain: 'Terminals',
   requiredScope: 'bot_report.terminal',
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
-  async handler(args = {}, service = terminalMcpService) {
+  async handler(args = {}, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     return textResult({ terminals: await service.list({ actorId: principal.actor_id }) });
   }
@@ -40,7 +41,7 @@ export const terminalStatus = defineTool({
   domain: 'Terminals',
   requiredScope: 'bot_report.terminal',
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
-  async handler(args, service = terminalMcpService) {
+  async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     return textResult(await service.status(args.profile, { actorId: principal.actor_id }));
   }
@@ -56,7 +57,7 @@ export const terminalRead = defineTool({
   domain: 'Terminals',
   requiredScope: 'bot_report.terminal',
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
-  async handler(args, service = terminalMcpService) {
+  async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     return textResult(await service.read(args.profile, args.lines || 200, { actorId: principal.actor_id }));
   }
@@ -73,7 +74,7 @@ export const terminalSend = defineTool({
   domain: 'Terminals',
   requiredScope: 'bot_report.terminal',
   annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: true },
-  async handler(args, service = terminalMcpService) {
+  async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     const result = await service.send(args.profile, args.text, {
       submit: args.submit !== false,
@@ -96,7 +97,7 @@ export const workspaceExec = defineTool({
   domain: 'Terminals',
   requiredScope: 'bot_report.terminal',
   annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: true },
-  async handler(args, service = terminalMcpService) {
+  async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     const result = await service.workspaceExec(args.profile, args.command, {
       cwd: args.cwd,
@@ -116,7 +117,7 @@ export const terminalInterrupt = defineTool({
   domain: 'Terminals',
   requiredScope: 'bot_report.terminal',
   annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: true },
-  async handler(args, service = terminalMcpService) {
+  async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     const result = await service.interrupt(args.profile, {
       actorId: principal.actor_id
@@ -136,7 +137,7 @@ export const artifactCollect = defineTool({
   domain: 'Terminals',
   requiredScope: 'bot_report.terminal',
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
-  async handler(args, service = terminalMcpService) {
+  async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     const result = await service.artifactCollect(args.profile, args.path, {
       maxBytes: args.max_bytes || 2 * 1024 * 1024,

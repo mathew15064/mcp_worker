@@ -27,7 +27,7 @@ historical identifiers.
 - TS1: strict compiler, mixed build, typed principal/context/environment,
   compiled regression and browser tests, Docker and GitHub CI.
 - TS2: database contracts, adapters, all 13 migrations, all seven repositories, database manager/bootstrap, authentication, session stores, CSRF/session middleware and runtime settings.
-- TS3: MCP tools, OAuth, execution services and Worker message protocol.
+- TS3: MCP server/transport and all 19 Zod-typed tools, OAuth token issuance/refresh/revoke, audit capture, Ed25519 Worker authentication, WebSocket broker and execution services.
 - TS4: routes, browser scripts, legacy Node Worker and scripts.
 - TS5: all tests typed, lint, strict build, full regression, security scans
   and release candidate validation.
@@ -42,3 +42,13 @@ AES-GCM envelope and session cookie name unchanged. The OAuth issuance
 service, HTTP routes and other execution/transport services remain JS for TS3/TS4.
 The release harness compiles typed tests using the Docker builder and copies
 only the test output into an isolated test container.
+
+TS3 keeps the historical tool-schema fingerprint and all 19 tool names,
+`bot_report.*` OAuth scopes, Worker Ed25519 signature payload, job/stream wire
+fields, lifecycle rollback and revocation semantics. A typed bridge remains for
+the legacy SSH transport until TS4; it does not change the Go Worker.
+
+The TypeScript compiler uses `skipLibCheck: true` to work around upstream
+MCP SDK declaration-resolution errors under Node16 module mode. This does not
+disable `strict` checks for project TypeScript. Do not weaken `strict`, add
+`ts-nocheck` or use blanket `any` in newly migrated code.

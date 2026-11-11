@@ -1,4 +1,5 @@
 import workerRepository = require('./workerRepository');
+import type { ExecutionProfile } from '../services/executionContracts';
 type WorkerProfiles = Pick<typeof workerRepository, 'listProfilesByOwner' | 'listAdminProfiles'>;
 
 class ExecutionProfileRepository {
@@ -7,7 +8,7 @@ class ExecutionProfileRepository {
     this.workers = workers;
   }
 
-  async findAll({ ownerUserId = null }: {ownerUserId?: string | null} = {}) {
+  async findAll({ ownerUserId = null }: {ownerUserId?: string | null} = {}): Promise<ExecutionProfile[]> {
     let workerProfiles: Awaited<ReturnType<WorkerProfiles["listAdminProfiles"]>> = [];
     try {
       workerProfiles = ownerUserId
@@ -19,11 +20,11 @@ class ExecutionProfileRepository {
     }
     return workerProfiles
       .filter(profile => profile !== null)
-      .map(profile => ({ ...profile, transport: 'worker' }))
+      .map(profile => ({ ...profile, transport: 'worker' as const }))
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   }
 
-  async findWithCredentialById() {
+  async findWithCredentialById(_id: string): Promise<ExecutionProfile | null> {
     return null;
   }
 }

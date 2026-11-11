@@ -1,19 +1,37 @@
-const path = require('path');
-const executionProfileRepository = require('../repositories/executionProfileRepository');
-const terminalAuditRepository = require('../repositories/terminalAuditRepository');
-const terminalCredentialService = require('./terminalCredentialService');
-const terminalSshService = require('./terminalSshService');
-const workerExecutionService = require('./workerExecutionService');
+import path from 'node:path';
+import type { ExecutionProfile, ExecutionTransport } from './executionContracts';
+import {errorFields} from './workerProtocol';
+import executionProfileRepository = require('../repositories/executionProfileRepository');
+import terminalAuditRepository = require('../repositories/terminalAuditRepository');
+interface Credentials { decrypt(envelope: string | null | undefined): string }
+const terminalCredentialService: Credentials = require('./terminalCredentialService');
+const terminalSshService: ExecutionTransport = require('./terminalSshService');
+import workerExecutionService = require('./workerExecutionService');
+type ProfileRepository = Pick<typeof executionProfileRepository, 'findAll' | 'findWithCredentialById'>;
+type AuditRepository = Pick<typeof terminalAuditRepository, 'log'>;
+interface ActorOptions {actorId?: string | null}
+interface CwdOptions extends ActorOptions {cwd?: string | null; timeoutMs?: number}
+interface ReadOptions extends ActorOptions {maxBytes?: number; startLine?: number | null; endLine?: number | null; runAs?: string | null}
+interface WriteOptions extends ActorOptions {createDirs?: boolean; expectedSha256?: string | null; runAs?: string | null}
+interface PatchOptions extends ActorOptions {expectedCount?: number; expectedSha256?: string | null; maxBytes?: number; runAs?: string | null}
+interface StartOptions extends ActorOptions {cwd?: string | null; runAs?: string | null}
+interface StopOptions extends ActorOptions {force?: boolean; graceMs?: number; lines?: number}
+interface RepoOptions extends ActorOptions {runAs?: string | null; base?: string | null}
+interface DiffOptions extends ActorOptions {runAs?: string | null; base?: string; paths?: string[]; contextLines?: number; maxDiffBytes?: number}
+interface SearchOptions extends ActorOptions {runAs?: string | null; glob?: string | null; regex?: boolean; caseSensitive?: boolean; hidden?: boolean; maxResults?: number}
+interface CheckOptions extends ActorOptions {cwd?: string | null; runAs?: string | null; timeoutMs?: number; tailLines?: number}
+interface LogsOptions extends ActorOptions {cursor?: number; maxBytes?: number}
+interface TerminalOptions {profiles?: ProfileRepository; audit?: AuditRepository; credentials?: Credentials; ssh?: ExecutionTransport; worker?: ExecutionTransport}
+interface CheckSummary { tests: number | null; passed: number | null; failed: number | null; skipped: number | null; errors: number | null; assertions: number | null }
+interface DiffFile {path: string; status: string; additions: number | null; deletions: number | null}
+interface RipgrepMessage {type?: string; data?: {path?: {text?: string}; line_number?: number; submatches?: {start?: number}[]; lines?: {text?: string}}}
 
-function terminalServiceError(code, message) {
-  const error = new Error(message);
-  error.code = code;
-  return error;
-}
 
-function normalizeCapturedText(text, lines) {
+function terminalServiceError(code: string, message: string) { return Object.assign(new Error(message), {code}); }
+
+function normalizeCapturedText(text: unknown, lines: number) {
   const rows = String(text || '').split('\n');
-  while (rows.length && rows.at(-1).trim() === '') rows.pop();
+  while (rows.length && rows.at(-1)?.trim() === '') rows.pop();
   return {
     text: rows.slice(-lines).join('\n'),
     lines: Math.min(rows.length, lines)
@@ -21,7 +39,7 @@ function normalizeCapturedText(text, lines) {
 }
 
 
-function canonicalizeWorkspaceCwd(targetCwd) {
+function canonicalizeWorkspaceCwd(targetCwd: unknown) {
   if (targetCwd === null || targetCwd === undefined || targetCwd === '') return null;
   if (typeof targetCwd !== 'string') {
     throw terminalServiceError('INVALID_CWD', 'cwd must be a string.');
@@ -34,7 +52,7 @@ function canonicalizeWorkspaceCwd(targetCwd) {
   return path.posix.normalize(normalized);
 }
 
-function canonicalizeRunAs(runAs) {
+function canonicalizeRunAs(runAs: unknown) {
   if (runAs === null || runAs === undefined || runAs === '') return null;
   if (typeof runAs !== 'string' || !/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/.test(runAs.trim())) {
     throw terminalServiceError('INVALID_RUN_AS', 'run_as must be a valid local username.');
@@ -42,11 +60,11 @@ function canonicalizeRunAs(runAs) {
   return runAs.trim();
 }
 
-function shellQuote(value) {
+function shellQuote(value: unknown) {
   return "'" + String(value).replace(/'/g, "'\\''") + "'";
 }
 
-function canonicalizeGitRef(ref) {
+function canonicalizeGitRef(ref: unknown) {
   if (ref === null || ref === undefined || ref === '') return null;
   if (typeof ref !== 'string') throw terminalServiceError('INVALID_GIT_REF', 'Git ref must be a string.');
   const value = ref.trim();
@@ -56,16 +74,16 @@ function canonicalizeGitRef(ref) {
   return value;
 }
 
-function tailText(text, lines) {
+function tailText(text: unknown, lines: number) {
   const rows = String(text || '').replace(/\r\n/g, '\n').split('\n');
   if (rows.at(-1) === '') rows.pop();
   return rows.slice(-Math.max(1, Number(lines) || 200)).join('\n');
 }
 
-function parseCheckSummary(text) {
+function parseCheckSummary(text: unknown) {
   const value = String(text || '');
-  const summary = { tests: null, passed: null, failed: null, skipped: null, errors: null, assertions: null };
-  const set = (key, match) => { if (match) summary[key] = Number(match[1]); };
+  const summary: CheckSummary = { tests: null, passed: null, failed: null, skipped: null, errors: null, assertions: null };
+  const set = (key: keyof CheckSummary, match: RegExpMatchArray | null) => { if (match) summary[key] = Number(match[1]); };
 
   set('tests', value.match(/^# tests\s+(\d+)/m));
   set('passed', value.match(/^# pass\s+(\d+)/m));
@@ -85,7 +103,7 @@ function parseCheckSummary(text) {
   }
 
   if (summary.tests === null || summary.passed === null || summary.failed === null) {
-    const counts = {};
+    const counts: Record<string, number> = {};
     for (const match of value.matchAll(/(\d+)\s+(passed|failed|skipped|errors?|xfailed|xpassed)\b/gi)) {
       counts[match[2].toLowerCase()] = Number(match[1]);
     }
@@ -104,8 +122,8 @@ function parseCheckSummary(text) {
   return Object.values(summary).some(value => value !== null) ? summary : null;
 }
 
-function extractFailureLines(text, limit = 20) {
-  const failures = [];
+function extractFailureLines(text: unknown, limit = 20) {
+  const failures: string[] = [];
   for (const raw of String(text || '').replace(/\r\n/g, '\n').split('\n')) {
     const line = raw.trim();
     if (!line) continue;
@@ -117,7 +135,7 @@ function extractFailureLines(text, limit = 20) {
   return failures;
 }
 
-function canonicalizeArtifactPath(artifactPath) {
+function canonicalizeArtifactPath(artifactPath: unknown) {
   if (typeof artifactPath !== 'string' || !artifactPath.trim()) {
     throw terminalServiceError('INVALID_ARTIFACT_PATH', 'Artifact path must be a non-empty string.');
   }
@@ -128,8 +146,9 @@ function canonicalizeArtifactPath(artifactPath) {
 }
 
 class TerminalMcpService {
+  profiles: ProfileRepository; audit: AuditRepository; credentials: Credentials; ssh: ExecutionTransport; worker: ExecutionTransport;
   constructor({ profiles = executionProfileRepository, audit = terminalAuditRepository,
-    credentials = terminalCredentialService, ssh = terminalSshService, worker = workerExecutionService } = {}) {
+    credentials = terminalCredentialService, ssh = terminalSshService, worker = workerExecutionService }: TerminalOptions = {}) {
     this.profiles = profiles;
     this.audit = audit;
     this.credentials = credentials;
@@ -137,12 +156,12 @@ class TerminalMcpService {
     this.worker = worker;
   }
 
-  ownerUserIdForActor(actorId) {
+  ownerUserIdForActor(actorId: string | null) {
     const match = /^principal:user:([A-Za-z0-9_.-]{1,96})$/.exec(String(actorId || ''));
     return match ? match[1] : null;
   }
 
-  async list({ actorId = null } = {}) {
+  async list({ actorId = null }: ActorOptions = {}) {
     const ownerUserId = this.ownerUserIdForActor(actorId);
     return (await this.profiles.findAll({ ownerUserId })).map(profile => ({
       name: profile.name,
@@ -151,7 +170,7 @@ class TerminalMcpService {
     }));
   }
 
-  async findProfile(name, { actorId = null } = {}) {
+  async findProfile(name: string, { actorId = null }: ActorOptions = {}): Promise<ExecutionProfile> {
     if (typeof name !== 'string' || !name.trim()) {
       throw terminalServiceError('PROFILE_NOT_FOUND', 'Execution Profile not found.');
     }
@@ -167,16 +186,16 @@ class TerminalMcpService {
     return { ...privateProfile, transport: 'ssh' };
   }
 
-  passwordFor(profile) {
+  passwordFor(profile: ExecutionProfile) {
     if (profile.transport === 'worker') return null;
     return this.credentials.decrypt(profile.credential_envelope);
   }
 
-  executorFor(profile) {
+  executorFor(profile: ExecutionProfile): ExecutionTransport {
     return profile.transport === 'worker' ? this.worker : this.ssh;
   }
 
-  log(profile, actorId, eventType, outcome, detailCode = null) {
+  log(profile: ExecutionProfile, actorId: string | null, eventType: string, outcome: string, detailCode: string | null = null) {
     Promise.resolve(this.audit.log({
       profileId: profile.id,
       profileName: profile.name,
@@ -187,7 +206,7 @@ class TerminalMcpService {
     })).catch(() => {});
   }
 
-  async status(name, { actorId = null } = {}) {
+  async status(name: string, { actorId = null }: ActorOptions = {}) {
     const profile = await this.findProfile(name, { actorId });
     try {
       const inspection = await this.executorFor(profile).inspectProfile(profile, this.passwordFor(profile));
@@ -202,12 +221,12 @@ class TerminalMcpService {
         panes: inspection.panes
       };
     } catch (error) {
-      this.log(profile, actorId, 'MCP_STATUS_CHECK', 'FAILED', error.code || 'SSH_CONNECT_FAILED');
+      this.log(profile, actorId, 'MCP_STATUS_CHECK', 'FAILED', errorFields(error).code || 'SSH_CONNECT_FAILED');
       throw error;
     }
   }
 
-  async send(name, text, { submit = true, actorId = null } = {}) {
+  async send(name: string, text: string, { submit = true, actorId = null }: ActorOptions & {submit?: boolean} = {}) {
     const profile = await this.findProfile(name, { actorId });
     try {
       const result = await this.executorFor(profile).sendText(profile, this.passwordFor(profile), text, { submit });
@@ -219,12 +238,12 @@ class TerminalMcpService {
         pane_current_command: result.pane_current_command
       };
     } catch (error) {
-      this.log(profile, actorId, 'MCP_INPUT_SENT', 'FAILED', error.code || 'SSH_CONNECT_FAILED');
+      this.log(profile, actorId, 'MCP_INPUT_SENT', 'FAILED', errorFields(error).code || 'SSH_CONNECT_FAILED');
       throw error;
     }
   }
 
-  async read(name, lines = 200, { actorId = null } = {}) {
+  async read(name: string, lines = 200, { actorId = null }: ActorOptions = {}) {
     const profile = await this.findProfile(name, { actorId });
     try {
       // captureText already reads the full tmux history before slicing. Asking for
@@ -239,12 +258,12 @@ class TerminalMcpService {
         ...normalized
       };
     } catch (error) {
-      this.log(profile, actorId, 'MCP_OUTPUT_READ', 'FAILED', error.code || 'SSH_CONNECT_FAILED');
+      this.log(profile, actorId, 'MCP_OUTPUT_READ', 'FAILED', errorFields(error).code || 'SSH_CONNECT_FAILED');
       throw error;
     }
   }
 
-  async workspaceExec(name, command, { cwd = null, timeoutMs = 30000, actorId = null } = {}) {
+  async workspaceExec(name: string, command: string, { cwd = null, timeoutMs = 30000, actorId = null }: CwdOptions = {}) {
     const profile = await this.findProfile(name, { actorId });
     try {
       if (typeof command !== 'string' || !command.trim()) {
@@ -274,12 +293,12 @@ class TerminalMcpService {
         stderr_truncated: result.stderr_truncated
       };
     } catch (error) {
-      this.log(profile, actorId, 'MCP_WORKSPACE_EXEC', 'FAILED', error.code || 'SSH_CONNECT_FAILED');
+      this.log(profile, actorId, 'MCP_WORKSPACE_EXEC', 'FAILED', errorFields(error).code || 'SSH_CONNECT_FAILED');
       throw error;
     }
   }
 
-  async fileRead(name, filePath, { maxBytes = 512 * 1024, startLine = null, endLine = null, runAs = null, actorId = null } = {}) {
+  async fileRead(name: string, filePath: string, { maxBytes = 512 * 1024, startLine = null, endLine = null, runAs = null, actorId = null }: ReadOptions = {}) {
     const profile = await this.findProfile(name, { actorId });
     try {
       const resolvedPath = canonicalizeArtifactPath(filePath);
@@ -308,12 +327,12 @@ class TerminalMcpService {
         truncated: start > 1 || end < totalLines
       };
     } catch (error) {
-      this.log(profile, actorId, 'MCP_FILE_READ', 'FAILED', error.code || 'SSH_CONNECT_FAILED');
+      this.log(profile, actorId, 'MCP_FILE_READ', 'FAILED', errorFields(error).code || 'SSH_CONNECT_FAILED');
       throw error;
     }
   }
 
-  async fileWrite(name, filePath, content, { createDirs = false, expectedSha256 = null, runAs = null, actorId = null } = {}) {
+  async fileWrite(name: string, filePath: string, content: string, { createDirs = false, expectedSha256 = null, runAs = null, actorId = null }: WriteOptions = {}) {
     const profile = await this.findProfile(name, { actorId });
     try {
       const resolvedPath = canonicalizeArtifactPath(filePath);
@@ -341,12 +360,12 @@ class TerminalMcpService {
         created_dirs: Boolean(createDirs)
       };
     } catch (error) {
-      this.log(profile, actorId, 'MCP_FILE_WRITE', 'FAILED', error.code || 'SSH_CONNECT_FAILED');
+      this.log(profile, actorId, 'MCP_FILE_WRITE', 'FAILED', errorFields(error).code || 'SSH_CONNECT_FAILED');
       throw error;
     }
   }
 
-  async filePatch(name, filePath, oldText, newText, { expectedCount = 1, expectedSha256 = null, maxBytes = 2 * 1024 * 1024, runAs = null, actorId = null } = {}) {
+  async filePatch(name: string, filePath: string, oldText: string, newText: string, { expectedCount = 1, expectedSha256 = null, maxBytes = 2 * 1024 * 1024, runAs = null, actorId = null }: PatchOptions = {}) {
     const profile = await this.findProfile(name, { actorId });
     try {
       const resolvedPath = canonicalizeArtifactPath(filePath);
@@ -383,12 +402,12 @@ class TerminalMcpService {
         size: written.size
       };
     } catch (error) {
-      this.log(profile, actorId, 'MCP_FILE_PATCH', 'FAILED', error.code || 'SSH_CONNECT_FAILED');
+      this.log(profile, actorId, 'MCP_FILE_PATCH', 'FAILED', errorFields(error).code || 'SSH_CONNECT_FAILED');
       throw error;
     }
   }
 
-  async processStart(name, command, { cwd = null, runAs = null, actorId = null } = {}) {
+  async processStart(name: string, command: string, { cwd = null, runAs = null, actorId = null }: StartOptions = {}) {
     const profile = await this.findProfile(name, { actorId });
     try {
       if (typeof command !== 'string' || !command.trim() || command.length > 32000 || command.includes('\0')) {
@@ -400,36 +419,36 @@ class TerminalMcpService {
       this.log(profile, actorId, 'MCP_PROCESS_START', 'SUCCESS', result.process_id);
       return { profile: profile.name, cwd: resolvedCwd, ...result };
     } catch (error) {
-      this.log(profile, actorId, 'MCP_PROCESS_START', 'FAILED', error.code || 'SSH_CONNECT_FAILED');
+      this.log(profile, actorId, 'MCP_PROCESS_START', 'FAILED', errorFields(error).code || 'SSH_CONNECT_FAILED');
       throw error;
     }
   }
 
-  async processStatus(name, processId, { lines = 200, actorId = null } = {}) {
+  async processStatus(name: string, processId: string, { lines = 200, actorId = null }: ActorOptions & {lines?: number} = {}) {
     const profile = await this.findProfile(name, { actorId });
     try {
       const result = await this.executorFor(profile).getManagedProcessStatus(profile, this.passwordFor(profile), processId, { lines });
       this.log(profile, actorId, 'MCP_PROCESS_STATUS', 'SUCCESS', result.state);
       return { profile: profile.name, ...result };
     } catch (error) {
-      this.log(profile, actorId, 'MCP_PROCESS_STATUS', 'FAILED', error.code || 'SSH_CONNECT_FAILED');
+      this.log(profile, actorId, 'MCP_PROCESS_STATUS', 'FAILED', errorFields(error).code || 'SSH_CONNECT_FAILED');
       throw error;
     }
   }
 
-  async processStop(name, processId, { force = true, graceMs = 1000, lines = 200, actorId = null } = {}) {
+  async processStop(name: string, processId: string, { force = true, graceMs = 1000, lines = 200, actorId = null }: StopOptions = {}) {
     const profile = await this.findProfile(name, { actorId });
     try {
       const result = await this.executorFor(profile).stopManagedProcess(profile, this.passwordFor(profile), processId, { force, graceMs, lines });
       this.log(profile, actorId, 'MCP_PROCESS_STOP', 'SUCCESS', result.forced ? 'FORCED' : 'GRACEFUL');
       return { profile: profile.name, ...result };
     } catch (error) {
-      this.log(profile, actorId, 'MCP_PROCESS_STOP', 'FAILED', error.code || 'SSH_CONNECT_FAILED');
+      this.log(profile, actorId, 'MCP_PROCESS_STOP', 'FAILED', errorFields(error).code || 'SSH_CONNECT_FAILED');
       throw error;
     }
   }
 
-  async repoSnapshot(name, repo, { runAs = null, base = null, actorId = null } = {}) {
+  async repoSnapshot(name: string, repo: string, { runAs = null, base = null, actorId = null }: RepoOptions = {}) {
     const profile = await this.findProfile(name, { actorId });
     const resolvedRepo = canonicalizeWorkspaceCwd(repo);
     const resolvedRunAs = canonicalizeRunAs(runAs);
@@ -455,7 +474,7 @@ class TerminalMcpService {
       if (result.exit_code === 42) throw terminalServiceError('INVALID_GIT_REF', 'base Git ref could not be resolved.');
       if (result.exit_code !== 0) throw terminalServiceError('GIT_COMMAND_FAILED', result.stderr || 'Unable to inspect Git repository.');
       const [metaText, statusText = ''] = result.stdout.split('__BR_STATUS__\n', 2);
-      const meta = {};
+      const meta: Record<string, string> = {};
       for (const line of metaText.split(/\r?\n/)) {
         const tab = line.indexOf('\t');
         if (tab > 0) meta[line.slice(0, tab)] = line.slice(tab + 1);
@@ -485,12 +504,12 @@ class TerminalMcpService {
       this.log(profile, actorId, 'MCP_REPO_SNAPSHOT', 'SUCCESS', snapshot.dirty ? 'DIRTY' : 'CLEAN');
       return snapshot;
     } catch (error) {
-      this.log(profile, actorId, 'MCP_REPO_SNAPSHOT', 'FAILED', error.code || 'SSH_CONNECT_FAILED');
+      this.log(profile, actorId, 'MCP_REPO_SNAPSHOT', 'FAILED', errorFields(error).code || 'SSH_CONNECT_FAILED');
       throw error;
     }
   }
 
-  async gitDiff(name, repo, { runAs = null, base = 'HEAD', paths = [], contextLines = 5, maxDiffBytes = 512 * 1024, actorId = null } = {}) {
+  async gitDiff(name: string, repo: string, { runAs = null, base = 'HEAD', paths = [], contextLines = 5, maxDiffBytes = 512 * 1024, actorId = null }: DiffOptions = {}) {
     const profile = await this.findProfile(name, { actorId });
     const resolvedRepo = canonicalizeWorkspaceCwd(repo);
     const resolvedRunAs = canonicalizeRunAs(runAs);
@@ -527,8 +546,8 @@ class TerminalMcpService {
       const statMarker = '__BR_NUMSTAT__\n';
       const afterName = metaResult.stdout.split(nameMarker, 2)[1] || '';
       const [nameText, statText = ''] = afterName.split(statMarker, 2);
-      const files = [];
-      const byPath = new Map();
+      const files: DiffFile[] = [];
+      const byPath = new Map<string, DiffFile>();
       for (const line of nameText.split(/\r?\n/).filter(Boolean)) {
         const parts = line.split('\t');
         const code = parts[0] || '';
@@ -561,12 +580,12 @@ class TerminalMcpService {
       this.log(profile, actorId, 'MCP_GIT_DIFF', 'SUCCESS', `FILES_${files.length}`);
       return output;
     } catch (error) {
-      this.log(profile, actorId, 'MCP_GIT_DIFF', 'FAILED', error.code || 'SSH_CONNECT_FAILED');
+      this.log(profile, actorId, 'MCP_GIT_DIFF', 'FAILED', errorFields(error).code || 'SSH_CONNECT_FAILED');
       throw error;
     }
   }
 
-  async codeSearch(name, cwd, query, { runAs = null, glob = null, regex = false, caseSensitive = true, hidden = false, maxResults = 50, actorId = null } = {}) {
+  async codeSearch(name: string, cwd: string, query: string, { runAs = null, glob = null, regex = false, caseSensitive = true, hidden = false, maxResults = 50, actorId = null }: SearchOptions = {}) {
     const profile = await this.findProfile(name, { actorId });
     const resolvedCwd = canonicalizeWorkspaceCwd(cwd);
     const resolvedRunAs = canonicalizeRunAs(runAs);
@@ -593,17 +612,17 @@ class TerminalMcpService {
         }
         throw terminalServiceError('CODE_SEARCH_FAILED', result.stderr || 'ripgrep search failed.');
       }
-      const matches = [];
+      const matches: {file: string | null; line: number | null; column: number | null; text: string}[] = [];
       for (const line of result.stdout.split(/\r?\n/)) {
         if (!line) continue;
-        let item;
-        try { item = JSON.parse(line); } catch (_) { continue; }
+        let item: RipgrepMessage;
+        try { item = JSON.parse(line) as RipgrepMessage; } catch (_) { continue; }
         if (item.type !== 'match' || !item.data) continue;
         const submatch = Array.isArray(item.data.submatches) ? item.data.submatches[0] : null;
         matches.push({
           file: item.data.path?.text || null,
           line: item.data.line_number || null,
-          column: submatch && Number.isInteger(submatch.start) ? submatch.start + 1 : null,
+          column: submatch && typeof submatch.start === "number" && Number.isInteger(submatch.start) ? submatch.start + 1 : null,
           text: String(item.data.lines?.text || '').replace(/\r?\n$/, '')
         });
         if (matches.length >= limit) break;
@@ -619,12 +638,12 @@ class TerminalMcpService {
       this.log(profile, actorId, 'MCP_CODE_SEARCH', 'SUCCESS', `MATCHES_${matches.length}`);
       return output;
     } catch (error) {
-      this.log(profile, actorId, 'MCP_CODE_SEARCH', 'FAILED', error.code || 'SSH_CONNECT_FAILED');
+      this.log(profile, actorId, 'MCP_CODE_SEARCH', 'FAILED', errorFields(error).code || 'SSH_CONNECT_FAILED');
       throw error;
     }
   }
 
-  async checkRun(name, command, { cwd = null, runAs = null, timeoutMs = 120000, tailLines = 200, actorId = null } = {}) {
+  async checkRun(name: string, command: string, { cwd = null, runAs = null, timeoutMs = 120000, tailLines = 200, actorId = null }: CheckOptions = {}) {
     const profile = await this.findProfile(name, { actorId });
     const resolvedCwd = canonicalizeWorkspaceCwd(cwd);
     const resolvedRunAs = canonicalizeRunAs(runAs);
@@ -654,24 +673,24 @@ class TerminalMcpService {
       this.log(profile, actorId, 'MCP_CHECK_RUN', 'SUCCESS', output.status);
       return output;
     } catch (error) {
-      this.log(profile, actorId, 'MCP_CHECK_RUN', 'FAILED', error.code || 'SSH_CONNECT_FAILED');
+      this.log(profile, actorId, 'MCP_CHECK_RUN', 'FAILED', errorFields(error).code || 'SSH_CONNECT_FAILED');
       throw error;
     }
   }
 
-  async processLogs(name, processId, { cursor = 0, maxBytes = 64 * 1024, actorId = null } = {}) {
+  async processLogs(name: string, processId: string, { cursor = 0, maxBytes = 64 * 1024, actorId = null }: LogsOptions = {}) {
     const profile = await this.findProfile(name, { actorId });
     try {
       const result = await this.executorFor(profile).readManagedProcessLogs(profile, this.passwordFor(profile), processId, { cursor, maxBytes });
       this.log(profile, actorId, 'MCP_PROCESS_LOGS', 'SUCCESS', result.eof ? 'EOF' : 'MORE');
       return { profile: profile.name, ...result };
     } catch (error) {
-      this.log(profile, actorId, 'MCP_PROCESS_LOGS', 'FAILED', error.code || 'SSH_CONNECT_FAILED');
+      this.log(profile, actorId, 'MCP_PROCESS_LOGS', 'FAILED', errorFields(error).code || 'SSH_CONNECT_FAILED');
       throw error;
     }
   }
 
-  async interrupt(name, { actorId = null } = {}) {
+  async interrupt(name: string, { actorId = null }: ActorOptions = {}) {
     const profile = await this.findProfile(name, { actorId });
     try {
       const result = await this.executorFor(profile).sendInterrupt(profile, this.passwordFor(profile));
@@ -683,12 +702,12 @@ class TerminalMcpService {
         pane_current_command: result.pane_current_command
       };
     } catch (error) {
-      this.log(profile, actorId, 'MCP_TERMINAL_INTERRUPT', 'FAILED', error.code || 'SSH_CONNECT_FAILED');
+      this.log(profile, actorId, 'MCP_TERMINAL_INTERRUPT', 'FAILED', errorFields(error).code || 'SSH_CONNECT_FAILED');
       throw error;
     }
   }
 
-  async artifactCollect(name, artifactPath, { maxBytes = 2 * 1024 * 1024, actorId = null } = {}) {
+  async artifactCollect(name: string, artifactPath: string, { maxBytes = 2 * 1024 * 1024, actorId = null }: ActorOptions & {maxBytes?: number} = {}) {
     const profile = await this.findProfile(name, { actorId });
     try {
       const resolvedPath = canonicalizeArtifactPath(artifactPath);
@@ -701,16 +720,11 @@ class TerminalMcpService {
         ...result
       };
     } catch (error) {
-      this.log(profile, actorId, 'MCP_ARTIFACT_COLLECT', 'FAILED', error.code || 'SSH_CONNECT_FAILED');
+      this.log(profile, actorId, 'MCP_ARTIFACT_COLLECT', 'FAILED', errorFields(error).code || 'SSH_CONNECT_FAILED');
       throw error;
     }
   }
 }
 
-module.exports = new TerminalMcpService();
-module.exports.TerminalMcpService = TerminalMcpService;
-module.exports.terminalServiceError = terminalServiceError;
-module.exports.normalizeCapturedText = normalizeCapturedText;
-module.exports.canonicalizeWorkspaceCwd = canonicalizeWorkspaceCwd;
-module.exports.canonicalizeArtifactPath = canonicalizeArtifactPath;
-module.exports.canonicalizeRunAs = canonicalizeRunAs;
+const instance = Object.assign(new TerminalMcpService(), {TerminalMcpService, terminalServiceError, normalizeCapturedText, canonicalizeWorkspaceCwd, canonicalizeArtifactPath, canonicalizeRunAs});
+export = instance;

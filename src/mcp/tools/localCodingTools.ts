@@ -3,7 +3,8 @@ import { defineTool, type ToolResponse } from '../toolTypes';
 import type { TerminalToolService } from '../terminalServiceContract';
 import { assertPrincipal } from '../context';
 import { SCOPES } from '../../auth/principal';
-const terminalMcpService: TerminalToolService = require('../../services/terminalMcpService');
+import terminalMcpService = require('../../services/terminalMcpService');
+const checkedTerminalService: TerminalToolService = terminalMcpService;
 
 const profileSchema = z.string().trim().min(1).max(100).describe('Configured Terminal Profile name');
 const pathSchema = z.string().min(1).max(2000).describe('Path on the configured remote host');
@@ -36,7 +37,7 @@ export const fileRead = defineTool({
   domain: 'Local Development',
   requiredScope: 'bot_report.terminal',
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
-  async handler(args, service = terminalMcpService) {
+  async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     return textResult(await service.fileRead(args.profile, args.path, {
       maxBytes: args.max_bytes || 512 * 1024,
@@ -62,7 +63,7 @@ export const fileWrite = defineTool({
   domain: 'Local Development',
   requiredScope: 'bot_report.terminal',
   annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: true },
-  async handler(args, service = terminalMcpService) {
+  async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     return textResult({ success: true, ...(await service.fileWrite(args.profile, args.path, args.content, {
       createDirs: args.create_dirs === true,
@@ -89,7 +90,7 @@ export const filePatch = defineTool({
   domain: 'Local Development',
   requiredScope: 'bot_report.terminal',
   annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: true },
-  async handler(args, service = terminalMcpService) {
+  async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     return textResult({ success: true, ...(await service.filePatch(args.profile, args.path, args.old_text, args.new_text, {
       expectedCount: args.expected_count || 1,
@@ -113,7 +114,7 @@ export const processStart = defineTool({
   domain: 'Local Development',
   requiredScope: 'bot_report.terminal',
   annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: true },
-  async handler(args, service = terminalMcpService) {
+  async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     return textResult({ success: true, ...(await service.processStart(args.profile, args.command, {
       cwd: args.cwd,
@@ -134,7 +135,7 @@ export const processStatus = defineTool({
   domain: 'Local Development',
   requiredScope: 'bot_report.terminal',
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
-  async handler(args, service = terminalMcpService) {
+  async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     return textResult(await service.processStatus(args.profile, args.process_id, {
       lines: args.lines || 200,
@@ -156,7 +157,7 @@ export const processStop = defineTool({
   domain: 'Local Development',
   requiredScope: 'bot_report.terminal',
   annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: true },
-  async handler(args, service = terminalMcpService) {
+  async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     return textResult({ success: true, ...(await service.processStop(args.profile, args.process_id, {
       force: args.force !== false,
@@ -180,7 +181,7 @@ export const repoSnapshot = defineTool({
   domain: 'Local Development',
   requiredScope: 'bot_report.terminal',
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
-  async handler(args, service = terminalMcpService) {
+  async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     return textResult(await service.repoSnapshot(args.profile, args.repo, {
       runAs: args.run_as || null,
@@ -205,7 +206,7 @@ export const gitDiff = defineTool({
   domain: 'Local Development',
   requiredScope: 'bot_report.terminal',
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
-  async handler(args, service = terminalMcpService) {
+  async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     return textResult(await service.gitDiff(args.profile, args.repo, {
       runAs: args.run_as || null,
@@ -235,7 +236,7 @@ export const codeSearch = defineTool({
   domain: 'Local Development',
   requiredScope: 'bot_report.terminal',
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
-  async handler(args, service = terminalMcpService) {
+  async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     return textResult(await service.codeSearch(args.profile, args.cwd, args.query, {
       runAs: args.run_as || null,
@@ -263,7 +264,7 @@ export const checkRun = defineTool({
   domain: 'Local Development',
   requiredScope: 'bot_report.terminal',
   annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: false },
-  async handler(args, service = terminalMcpService) {
+  async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     return textResult(await service.checkRun(args.profile, args.command, {
       cwd: args.cwd || null,
@@ -287,7 +288,7 @@ export const processLogs = defineTool({
   domain: 'Local Development',
   requiredScope: 'bot_report.terminal',
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
-  async handler(args, service = terminalMcpService) {
+  async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     return textResult(await service.processLogs(args.profile, args.process_id, {
       cursor: args.cursor || 0,
