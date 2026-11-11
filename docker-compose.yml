@@ -1,0 +1,59 @@
+services:
+  bot-report:
+    build:
+      context: .
+      args:
+        BOT_REPORT_GIT_SHA: ${BOT_REPORT_GIT_SHA:-unknown}
+        BOT_REPORT_BUILD_TIME: ${BOT_REPORT_BUILD_TIME:-unknown}
+    image: ${COMPOSE_PROJECT_NAME:-bot-report}-app:local
+    restart: unless-stopped
+    init: true
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: "0"
+    environment:
+      NODE_ENV: production
+      PORT: "80"
+      HOST: 0.0.0.0
+      TRUST_PROXY: "false"
+      COOKIE_SECURE: "false"
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?run setup.sh}
+      SESSION_SECRET: ${SESSION_SECRET:?run setup.sh}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?run setup.sh}
+      BUNDLED_MYSQL_PASSWORD: ${MYSQL_PASSWORD:?run setup.sh}
+      MCP_PUBLIC_BASE_URL: http://127.0.0.1:${BOT_REPORT_PORT:-3333}
+    ports:
+      - "127.0.0.1:${BOT_REPORT_PORT:-3333}:80"
+    volumes:
+      - app-data:/app/data
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks: [app-net, db-net]
+  mysql:
+    build:
+      context: .
+      dockerfile: Dockerfile.mysql
+    image: ${COMPOSE_PROJECT_NAME:-bot-report}-mysql:local
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?run setup.sh}
+      MYSQL_DATABASE: bot_report
+      MYSQL_USER: bot_report
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?run setup.sh}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks: [db-net]
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_PASSWORD\" mysql -h 127.0.0.1 -u bot_report -D bot_report -Nse 'SELECT 1' >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 30s
+volumes:
+  app-data:
+  mysql-data:
+networks:
+  app-net:
+  db-net:
+    internal: true

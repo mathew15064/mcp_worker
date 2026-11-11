@@ -1,0 +1,40 @@
+# Version Control
+.git
+.gitignore
+
+# Host Dependencies
+node_modules
+npm-debug.log*
+
+# Environment and Secrets
+.env
+.env.*
+!.env.docker.example
+
+# Production Database and Locks
+data/*.sqlite*
+data/*.db*
+data/backups/
+backups/
+
+# Test Suites, Fixtures, and Coverage
+tests/
+playwright.config.js
+playwright-report/
+test-results/
+coverage/
+
+# Transient logs and temporary scratch files
+*.log
+tmp/
+temp/
+reports/
+
+# Never send local runtime state or installer credentials to build context
+data/
+backups/
+*.pem
+*.key
+*.orig
+*.rej
+.setup*

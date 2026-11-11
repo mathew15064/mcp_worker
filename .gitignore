@@ -1,0 +1,38 @@
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.docker.example
+
+# Node.js dependencies
+node_modules/
+
+# Local data directories
+data/
+
+# Test runner output directories
+/playwright-report/
+/test-results/
+
+# Generated E2E report artifacts
+/reports/BOT-REPORT-UI-E2E-002/after-screenshots/
+/reports/BOT-REPORT-UI-E2E-002/before-screenshots/
+
+# Generated standalone worker binaries
+worker/bin/bot-report-worker-*
+worker/bin/SHA256SUMS
+worker/bin/SHA256SUMS.sig
+worker/bin/WORKER_RELEASE
+
+# Private operational evidence and generated reports
+/reports/
+/docs/performance/
+/scripts/performance/
+
+# Installer state and private material
+.env.setup*
+.setup*
+*.pem
+*.key
+*.orig
+*.rej

@@ -1,0 +1,100 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - main-2.0.0
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # Playwright 1.58.2 supports Ubuntu 24.04; ubuntu-latest currently resolves to 26.04.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8.4@sha256:a81d043930e51745522bd5c430961cf8286f0a23f0a9a2a6e0108f7ea71b0902
+        env:
+          MYSQL_ROOT_PASSWORD: botreporttest
+          MYSQL_DATABASE: bot_report_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pbotreporttest --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      MYSQL_TEST_HOST: 127.0.0.1
+      MYSQL_TEST_PORT: 3306
+      MYSQL_TEST_DATABASE: bot_report_test
+      MYSQL_TEST_USERNAME: root
+      MYSQL_TEST_PASSWORD: botreporttest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 26.13.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '26.13.0'
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm --prefix worker ci
+
+      - name: Install worker host prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux
+
+      - name: Audit production dependencies
+        run: |
+          npm audit --omit=dev --audit-level=high
+          npm --prefix worker audit --omit=dev --audit-level=high
+
+      - name: Run MCP-only tests
+        run: npm test
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Admin UI Playwright tests
+        run: npm run test:e2e
+
+  worker-go:
+    name: worker-go (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Go from worker module
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.10'
+          cache-dependency-path: worker-go/go.sum
+
+      - name: Run standalone Worker tests
+        working-directory: worker-go
+        run: go test ./...
+
+      - name: Race and vet (Linux)
+        if: runner.os == 'Linux'
+        working-directory: worker-go
+        run: go test -race ./... && go vet ./...
+
+      - name: Build native Worker binary
+        working-directory: worker-go
+        run: go build -trimpath ./...

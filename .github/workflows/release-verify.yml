@@ -1,0 +1,50 @@
+name: release verification (no publishing)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - 'Dockerfile.mysql'
+      - 'docker-compose.yml'
+      - 'setup.sh'
+      - 'scripts/**'
+      - 'src/**'
+      - 'worker-go/**'
+      - 'worker/**'
+      - 'tests/**'
+      - '.github/workflows/release-verify.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  local-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      BOT_REPORT_RELEASE_OUT: ${{ github.workspace }}/reports/release
+    steps:
+      - uses: actions/checkout@v4
+      - name: Isolated fresh install, persistence and Worker regression
+        run: ./scripts/release-verify.sh
+      - name: Image SBOM and vulnerability gate
+        run: ./scripts/release-scan.sh "$(cat reports/release/image.txt)" "$(cat reports/release/mysql-image.txt)" reports/release
+      - name: Collect unsigned Worker artifacts
+        if: success()
+        run: |
+          id=$(docker create "$(cat reports/release/image.txt)")
+          trap 'docker rm -v "$id" >/dev/null' EXIT
+          mkdir -p reports/release/worker
+          docker cp "$id":/app/worker/bin/. reports/release/worker/
+          (cd reports/release/worker && sha256sum -c SHA256SUMS)
+      - name: Upload verification evidence (not a public release)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-verification-${{ github.sha }}
+          path: reports/release/
+          retention-days: 7
+          if-no-files-found: warn

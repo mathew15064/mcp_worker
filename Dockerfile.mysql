@@ -1,0 +1,17 @@
+# Bundled database: keep the upstream MySQL server/entrypoint, remove optional
+# MySQL Shell and rebuild its privilege-drop helper with a patched Go compiler.
+FROM golang:1.26.10-alpine@sha256:87c65a688975c0b1d4585d204874c45ca78354670e3a5f11368c5a492303d696 AS gosu-builder
+RUN apk add --no-cache git
+WORKDIR /src
+RUN git clone --depth 1 --branch 1.19 https://github.com/tianon/gosu.git . \
+    && test "$(git rev-parse HEAD)" = 6456aaa0f3c854d199d0f037f068eb97515b7513 \
+    && go mod download && go mod verify \
+    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /gosu .
+FROM mysql:8.4@sha256:a81d043930e51745522bd5c430961cf8286f0a23f0a9a2a6e0108f7ea71b0902
+USER root
+RUN rpm -e mysql-shell && test ! -e /usr/bin/mysqlsh
+COPY --from=gosu-builder /gosu /usr/local/bin/gosu
+COPY --from=gosu-builder /src/LICENSE /usr/share/doc/gosu/LICENSE
+RUN gosu --version && gosu mysql id && mysqld --version && mysql --version
+LABEL org.bot-report.mysql-base="mysql:8.4@sha256:a81d043930e51745522bd5c430961cf8286f0a23f0a9a2a6e0108f7ea71b0902" \
+      org.bot-report.gosu-source="6456aaa0f3c854d199d0f037f068eb97515b7513"

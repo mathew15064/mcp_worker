@@ -1,0 +1,67 @@
+# ==============================================================================
+# Bot Report Production Docker Compose Configuration
+# Topology: Single application container attached to existing external Nginx network
+# Internal Listening Port: 0.0.0.0:80 (zero published host ports)
+# ==============================================================================
+
+services:
+  bot-report:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BOT_REPORT_GIT_SHA: ${BOT_REPORT_GIT_SHA:-unknown}
+        BOT_REPORT_BUILD_TIME: ${BOT_REPORT_BUILD_TIME:-unknown}
+    image: bot-report:latest
+    container_name: bot-report
+    restart: unless-stopped
+    init: true
+
+    # Non-root unprivileged port binding support for port 80
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: "0"
+
+    # FIX-02: Mandatory runtime configuration file (fails closed if .env.docker is missing)
+    env_file:
+      - .env.docker
+
+    # Runtime bootstrap values. MySQL connection details are configured from the Admin UI
+    # and encrypted into /app/data/bootstrap-config.json. DATABASE_PATH remains only as
+    # the transitional legacy SQLite source used by the one-time import flow.
+    environment:
+      - NODE_ENV=production
+      - PORT=80
+      - HOST=0.0.0.0
+      - DATABASE_PATH=/app/data/bot_report.sqlite
+
+    # Persistent bootstrap + legacy migration data
+    volumes:
+      - type: bind
+        source: ./data
+        target: /app/data
+        bind:
+          create_host_path: false
+
+    # Container health monitoring
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:80/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # Shared external proxy network attachment (discoverable as http://bot-report:80)
+    networks:
+      proxy-network:
+        aliases:
+          - bot-report
+
+    # CRITICAL SECURITY REQUIREMENTS:
+    # 1. No ports: section (no host ports published)
+    # 2. No expose: section (unnecessary on internal bridge)
+    # 3. No secondary proxy or mock services
+
+networks:
+  proxy-network:
+    external: true
+    name: ${BOT_REPORT_EXTERNAL_NETWORK:?BOT_REPORT_EXTERNAL_NETWORK is required}

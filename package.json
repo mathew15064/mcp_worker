@@ -1,0 +1,49 @@
+{
+  "name": "bot_report",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Deterministic MCP coding execution harness with outbound worker and SSH compatibility transports",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "init-db": "node scripts/init-db.js",
+    "test": "node --test --test-concurrency=1 tests/*.test.js",
+    "test:e2e": "playwright test",
+    "backup-db": "node scripts/backup-db.js",
+    "rotate-admin-password": "node scripts/rotate-admin-password.js",
+    "terminal-profile": "node scripts/terminal-profile.js",
+    "mcp-client": "node scripts/mcp-client.js",
+    "worker": "node worker/agent.js",
+    "migrate": "node scripts/migrate.js migrate",
+    "migrate:status": "node scripts/migrate.js status",
+    "migrate:rollback": "node scripts/migrate.js rollback",
+    "migrate:reset": "node scripts/migrate.js reset",
+    "migrate:fresh": "node scripts/migrate.js fresh"
+  },
+  "keywords": [
+    "mcp",
+    "worker",
+    "ssh",
+    "coding-harness",
+    "mysql"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@xterm/addon-fit": "0.10.0",
+    "@xterm/xterm": "5.5.0",
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^12.6.2",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.3.0",
+    "express-session": "^1.19.0",
+    "mysql2": "^3.24.6",
+    "ssh2": "1.16.0",
+    "ws": "8.21.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
+  }
+}

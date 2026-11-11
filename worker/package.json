@@ -1,0 +1,21 @@
+{
+  "name": "bot-report-worker",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Outbound-only Bot Report v2 execution worker",
+  "main": "agent.js",
+  "scripts": {
+    "start": "node agent.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "mime-types": "3.0.2",
+    "ws": "8.21.0"
+  },
+  "bin": {
+    "bot-report-worker": "cli.js"
+  },
+  "license": "MIT"
+}
