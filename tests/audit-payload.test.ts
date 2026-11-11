@@ -1,11 +1,11 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const {
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
   sanitize,
   serializePayload,
   normalizeResponseBody,
   REQUEST_LIMIT_BYTES
-} = require('../src/services/auditPayloadService');
+} from '../src/services/auditPayloadService';
 
 test('audit payload sanitizer redacts sensitive keys and common inline secrets', () => {
   const sanitized = sanitize({
@@ -18,7 +18,7 @@ test('audit payload sanitizer redacts sensitive keys and common inline secrets',
         nested: { client_secret: 'never-store-me', safe: 'visible' }
       }
     }
-  });
+  }) as {params: {arguments: {token: string; nested: {client_secret: string; safe: string}; command: string}}};
 
   assert.equal(sanitized.params.arguments.token, '[REDACTED]');
   assert.equal(sanitized.params.arguments.nested.client_secret, '[REDACTED]');

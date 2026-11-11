@@ -1,9 +1,9 @@
-const { expect } = require('@playwright/test');
+import {expect, type Page} from '@playwright/test';
 
 const ADMIN_USERNAME = 'admin';
 const ADMIN_PASSWORD = 'PlaywrightAdmin2026!';
 
-async function login(page) {
+async function login(page: Page) {
   await page.goto('/login');
   await page.getByLabel('Username').fill(ADMIN_USERNAME);
   await page.getByLabel('Password').fill(ADMIN_PASSWORD);
@@ -14,8 +14,8 @@ async function login(page) {
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
 }
 
-function captureConsoleErrors(page) {
-  const errors = [];
+function captureConsoleErrors(page: Page): string[] {
+  const errors: string[] = [];
   page.on('console', message => {
     if (message.type() === 'error') errors.push(message.text());
   });
@@ -23,4 +23,4 @@ function captureConsoleErrors(page) {
   return errors;
 }
 
-module.exports = { login, captureConsoleErrors };
+export = {login, captureConsoleErrors};

@@ -1,10 +1,13 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { createMcpServer } = require('../src/mcp/server');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createMcpServer} from '../src/mcp/server';
+import type {ListToolsResult} from '@modelcontextprotocol/sdk/types.js';
 
-function listTools(server) {
-  const handler = server.server._requestHandlers.get('tools/list');
+function listTools(server: ReturnType<typeof createMcpServer>): Promise<ListToolsResult> {
+  const internal = server.server as unknown as {_requestHandlers: Map<string,(request: unknown, extra: unknown) => Promise<ListToolsResult>>};
+  const handler = internal._requestHandlers.get('tools/list');
   assert.equal(typeof handler, 'function');
+  if (!handler) throw new Error('MCP list handler missing');
   return handler({ jsonrpc: '2.0', id: 7, method: 'tools/list', params: {} }, {});
 }
 
@@ -26,7 +29,8 @@ test('cache respects per-server disabled tools and can be disabled entirely', as
   const standard = createMcpServer();
   const cached = await listTools(standard);
   const modified = createMcpServer();
-  modified._registeredTools.runtime_info.enabled = false;
+  const registered = modified as unknown as {_registeredTools: Record<string,{enabled: boolean}>};
+  registered._registeredTools.runtime_info.enabled = false;
   const list = await listTools(modified);
   assert.equal(list.tools.length, 18);
   assert.ok(!list.tools.some(tool => tool.name === 'runtime_info'));

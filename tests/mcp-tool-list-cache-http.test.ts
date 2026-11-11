@@ -1,25 +1,28 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const crypto = require('node:crypto');
-const http = require('node:http');
-const { setupEnv, cleanup, initDb, issueToken, parseMcpResponse } = require('./helper');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import http from 'node:http';
+import helper = require('./helper');
+import app = require('../src/app');
+import oauth = require('../src/repositories/mcpOAuthRepository');
+const {setupEnv, cleanup, initDb, issueToken, parseMcpResponse} = helper;
 
 const fixture = setupEnv('mcp-tool-cache-http');
 initDb();
-const app = require('../src/app');
-const oauth = require('../src/repositories/mcpOAuthRepository');
 
 test.after(() => cleanup(fixture.dir));
 
 test('cached tools/list preserves per-client OAuth revocation and separate audit records', async t => {
   const server = http.createServer(app);
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  t.after(() => new Promise(resolve => server.close(resolve)));
-  const endpoint = `http://127.0.0.1:${server.address().port}/mcp`;
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Test listener missing');
+  const endpoint = `http://127.0.0.1:${address.port}/mcp`;
 
   const a = await issueToken({ principalId: 'principal:client_a' });
   const b = await issueToken({ principalId: 'principal:client_b' });
-  async function list(accessToken, id) {
+  async function list(accessToken: string, id: number) {
     return fetch(endpoint, {
       method: 'POST',
       headers: {
@@ -31,14 +34,15 @@ test('cached tools/list preserves per-client OAuth revocation and separate audit
     });
   }
 
+  if (!a.client || !b.client) throw new Error('Fixture OAuth client missing');
   const first = await list(a.token.access_token, 100);
   const second = await list(b.token.access_token, 101);
   assert.equal(first.status, 200);
   assert.equal(second.status, 200);
   const one = await parseMcpResponse(first);
   const two = await parseMcpResponse(second);
-  assert.deepEqual(one.result.tools, two.result.tools);
-  assert.equal(one.result.tools.length, 19);
+  assert.deepEqual(one.result?.tools, two.result?.tools);
+  assert.equal(one.result?.tools?.length, 19);
 
   for (let i = 0; i < 30; i += 1) {
     const recordsA = await oauth.listAuditLogs({ clientId: a.client.client_id, limit: 10 });
@@ -61,5 +65,5 @@ test('cached tools/list preserves per-client OAuth revocation and separate audit
   const retained = await list(b.token.access_token, 103);
   assert.equal(retained.status, 200);
   const stillAllowed = await parseMcpResponse(retained);
-  assert.equal(stillAllowed.result.tools.length, 19);
+  assert.equal(stillAllowed.result?.tools?.length, 19);
 });

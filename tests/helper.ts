@@ -1,9 +1,9 @@
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const crypto = require('crypto');
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
 
-function setupEnv(prefix = 'bot_report_mcp_test') {
+function setupEnv(prefix: string = 'bot_report_mcp_test') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}_`));
   process.env.NODE_ENV = 'test';
   process.env.DATABASE_PATH = path.join(dir, 'test.sqlite');
@@ -22,7 +22,7 @@ function setupEnv(prefix = 'bot_report_mcp_test') {
   return { dir, dbPath: process.env.DATABASE_PATH };
 }
 
-function cleanup(dir) {
+function cleanup(dir: string) {
   try { require('../src/db/databaseManager').resetForTests(); } catch (_) {}
   try { require('../src/services/runtimeSettingsService').resetForTests(); } catch (_) {}
   try { require('../src/db/connection').closeDb(); } catch (_) {}
@@ -38,11 +38,11 @@ function initDb() {
   databaseManager.useLegacyForTests(getDb());
 }
 
-function pkce(verifier) {
+function pkce(verifier: string) {
   return crypto.createHash('sha256').update(verifier).digest('base64url');
 }
 
-async function issueToken({ principalId = 'principal:gpt_client', scopes = ['bot_report.read', 'bot_report.terminal', 'offline_access'] } = {}) {
+async function issueToken({ principalId = 'principal:gpt_client', scopes = ['bot_report.read', 'bot_report.terminal', 'offline_access'] }: {principalId?: string; scopes?: string[]} = {}) {
   const service = require('../src/services/mcpOAuthService');
   const config = require('../src/config/mcpConfig');
   const verifier = 'mcp-test-verifier-abcdefghijklmnopqrstuvwxyz-0123456789';
@@ -50,21 +50,22 @@ async function issueToken({ principalId = 'principal:gpt_client', scopes = ['bot
   const registered = await service.registerClient({
     displayName: 'MCP Test Client', principalId, redirectUris: [redirectUri], allowedScopes: scopes
   });
+  if (!registered.client) throw new Error('OAuth client fixture missing');
   const code = await service.issueAuthorizationCode({
-    clientId: registered.client.client_id,
+    clientId: registered.client!.client_id,
     userId: 'env-admin', principalId,
     redirectUri, resource: config.resourceUrl, scopes,
     codeChallenge: pkce(verifier), codeChallengeMethod: 'S256'
   });
   const token = await service.exchangeAuthorizationCode({
-    clientId: registered.client.client_id,
+    clientId: registered.client!.client_id,
     clientSecret: registered.rawSecret,
     code, redirectUri, resource: config.resourceUrl, codeVerifier: verifier
   });
   return { ...registered, token, verifier, redirectUri };
 }
 
-async function parseMcpResponse(response) {
+async function parseMcpResponse(response: Response): Promise<{result?: {tools?: Array<{name: string}>; structuredContent?: Record<string, unknown>; isError?: boolean}; error?: unknown}> {
   const text = await response.text();
   for (const line of text.split('\n')) {
     if (line.startsWith('data:')) return JSON.parse(line.slice(5).trim());
@@ -72,4 +73,4 @@ async function parseMcpResponse(response) {
   return JSON.parse(text);
 }
 
-module.exports = { setupEnv, cleanup, initDb, issueToken, pkce, parseMcpResponse };
+export = { setupEnv, cleanup, initDb, issueToken, pkce, parseMcpResponse };
