@@ -1,16 +1,28 @@
-const databaseManager = require('../db/databaseManager');
-const settingsRepo = require('../repositories/settingsRepository');
-const telegramSecrets = require('./telegramSecretService');
-const telegramService = require('./telegramService');
+import databaseManager = require('../db/databaseManager');
+import settingsRepo = require('../repositories/settingsRepository');
+import telegramSecrets = require('./telegramSecretService');
+import telegramService = require('./telegramService');
 
-function number(value, fallback = 0) {
+function number(value: unknown, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
-function mb(bytes) { return Math.max(0, Math.round(number(bytes) / (1024 * 1024))); }
+function mb(bytes: unknown) { return Math.max(0, Math.round(number(bytes) / (1024 * 1024))); }
 
+interface ResourceAlert {code: string; phase?: string; workerName?: string; workerId?: string; memoryUsedPercent?: number; memoryAvailableBytes?: number; memoryTotalBytes?: number; thresholdPercent?: number; stopped?: {workspace_commands?: number; managed_processes?: number}}
+interface NotificationOptions {
+  settings?: Pick<typeof settingsRepo, 'get'>;
+  secrets?: Pick<typeof telegramSecrets, 'decrypt'>;
+  telegram?: Pick<typeof telegramService, 'sendMessage'>;
+  database?: Pick<typeof databaseManager, 'isOperational'>;
+}
 class OwnerNotificationService {
-  constructor({ settings = settingsRepo, secrets = telegramSecrets, telegram = telegramService, database = databaseManager } = {}) {
+  settings: NonNullable<NotificationOptions['settings']>;
+  secrets: NonNullable<NotificationOptions['secrets']>;
+  telegram: NonNullable<NotificationOptions['telegram']>;
+  database: NonNullable<NotificationOptions['database']>;
+
+  constructor({ settings = settingsRepo, secrets = telegramSecrets, telegram = telegramService, database = databaseManager }: NotificationOptions = {}) {
     this.settings = settings;
     this.secrets = secrets;
     this.telegram = telegram;
@@ -33,7 +45,7 @@ class OwnerNotificationService {
     return { token: this.secrets.decrypt(encrypted), chatId: String(chatId) };
   }
 
-  formatWorkerResourceAlert(alert) {
+  formatWorkerResourceAlert(alert: ResourceAlert) {
     const name = String(alert.workerName || alert.workerId || 'unknown').slice(0, 120);
     const used = number(alert.memoryUsedPercent).toFixed(1);
     const available = mb(alert.memoryAvailableBytes);
@@ -49,7 +61,7 @@ class OwnerNotificationService {
     return `🚨 mcp_worker Worker task stopped by RAM guard\nWorker: ${name}\nRAM used: ${used}% (hard limit ${limit}%)\nAvailable: ${available} MiB / ${total} MiB\nStopped active Worker workloads: workspace=${number(stopped.workspace_commands)}, process=${number(stopped.managed_processes)}\nThe guard is task-scoped; idle host memory is not managed.`;
   }
 
-  async sendWorkerResourceAlert(alert) {
+  async sendWorkerResourceAlert(alert: ResourceAlert) {
     const credentials = await this.adminTelegramCredentials();
     if (!credentials) return { sent: false, reason: 'telegram_not_configured' };
     const result = await this.telegram.sendMessage(credentials.token, credentials.chatId, this.formatWorkerResourceAlert(alert));
@@ -57,5 +69,4 @@ class OwnerNotificationService {
   }
 }
 
-module.exports = new OwnerNotificationService();
-module.exports.OwnerNotificationService = OwnerNotificationService;
+export = Object.assign(new OwnerNotificationService(), {OwnerNotificationService});

@@ -1,14 +1,17 @@
-const http = require('http');
-const { StringDecoder } = require('string_decoder');
-const { WebSocketServer, WebSocket } = require('ws');
-const sessionMiddleware = require('../middleware/sessionMiddleware');
-const authService = require('./authService');
-const workerRepository = require('../repositories/workerRepository');
-const workerBroker = require('./workerConnectionBroker');
-const terminalNonceService = require('./terminalNonceService');
-const { canonicalOrigin } = require('./terminalPublicOriginService');
+import http, {type Server as HttpServer, type IncomingMessage} from 'node:http';
+import type {Duplex} from 'node:stream';
+import type {Request, Response, RequestHandler} from 'express';
+import {StringDecoder} from 'node:string_decoder';
+import {WebSocketServer, WebSocket} from 'ws';
+import sessionMiddleware = require('../middleware/sessionMiddleware');
+import authService = require('./authService');
+import workerRepository = require('../repositories/workerRepository');
+import workerBroker = require('./workerConnectionBroker');
+import terminalNonceService = require('./terminalNonceService');
+import terminalOrigins = require('./terminalPublicOriginService');
+const {canonicalOrigin} = terminalOrigins;
 
-function rejectUpgrade(socket, status = 401, code = 'WEBSOCKET_HANDSHAKE_FAILED') {
+function rejectUpgrade(socket: Duplex, status = 401, code = 'WEBSOCKET_HANDSHAKE_FAILED') {
   const reason = http.STATUS_CODES[status] || 'Rejected';
   try {
     socket.end(`HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Type: application/json\r\nCache-Control: no-store\r\n\r\n${JSON.stringify({ code })}`);
@@ -17,25 +20,47 @@ function rejectUpgrade(socket, status = 401, code = 'WEBSOCKET_HANDSHAKE_FAILED'
   }
 }
 
-function parseSession(request, parser) {
+function parseSession(request: TerminalRequest, parser: RequestHandler): Promise<void> {
   return new Promise((resolve, reject) => {
     const response = new http.ServerResponse(request);
-    parser(request, response, error => error ? reject(error) : resolve());
+    // express-session also accepts the underlying IncomingMessage/ServerResponse
+    // at runtime; this is the sole HTTP-to-Express middleware adapter boundary.
+    parser(request as unknown as Request, response as unknown as Response, error => error ? reject(error) : resolve());
   });
 }
 
-function safeSend(ws, message) {
+function safeSend(ws: TerminalSocket, message: Record<string, unknown>) {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
 }
 
-async function profileForIdentity(repository, identity, profileId) {
+type Identity = NonNullable<Awaited<ReturnType<typeof authService.currentIdentity>>>;
+type WorkerProfile = NonNullable<Awaited<ReturnType<typeof workerRepository.findAdminProfileById>>>;
+interface TerminalRequest extends IncomingMessage {
+  session?: Request['session']; sessionID?: string;
+  terminalAuth?: { identity: Identity; sessionVersion: number; sessionKey: string; profile: WorkerProfile };
+}
+interface TerminalSocket extends WebSocket {
+  revalidate?: () => Promise<boolean>;
+  isAlive?: boolean; startedAt?: number; lastActivityAt?: number;
+}
+interface WorkerStream {input(data: string): void; resize(cols: number, rows: number): void; close(): void}
+interface TerminalDeps {
+  sessionMiddleware: RequestHandler;
+  authService: Pick<typeof authService, 'currentIdentity'>;
+  workerRepository: Pick<typeof workerRepository, 'findAdminProfileById' | 'findProfileByIdForOwner'>;
+  workerBroker: Pick<typeof workerBroker, 'isOnline' | 'openStream'>;
+  nonceService: Pick<typeof terminalNonceService, 'claim' | 'matchesSession'>;
+  idleTimeoutMs: number;
+  maxSessionMs: number;
+}
+async function profileForIdentity(repository: TerminalDeps['workerRepository'], identity: Identity | null, profileId: string) {
   if (identity?.role === 'admin') return repository.findAdminProfileById(profileId);
   if (identity?.role === 'user') return repository.findProfileByIdForOwner(profileId, identity.id);
   return null;
 }
 
-function attachTerminalWebSocket(server, overrides = {}) {
-  const deps = {
+function attachTerminalWebSocket(server: HttpServer, overrides: Partial<TerminalDeps> = {}) {
+  const deps: TerminalDeps = {
     sessionMiddleware,
     authService,
     workerRepository,
@@ -46,23 +71,24 @@ function attachTerminalWebSocket(server, overrides = {}) {
     ...overrides
   };
   const wss = new WebSocketServer({ noServer: true, maxPayload: 70 * 1024 });
-  const activeBySession = new Map();
+  const activeBySession = new Map<string, number>();
   const maxTabsPerSession = 20;
   const maxConnections = 32;
 
   server.on('upgrade', async (request, socket, head) => {
     try {
-      const url = new URL(request.url, 'http://terminal.invalid');
+      const terminalRequest = request as TerminalRequest;
+      const url = new URL(request.url || '', 'http://terminal.invalid');
       if (url.pathname !== '/terminal/ws') return;
       const claimed = deps.nonceService.claim(url.searchParams.get('attempt_id'), url.searchParams.get('nonce'));
       const record = claimed.record;
-      if (claimed.code) return rejectUpgrade(socket, 401, claimed.code);
+      if (claimed.code || !record) return rejectUpgrade(socket, 401, claimed.code || 'NONCE_INVALID');
 
-      await parseSession(request, deps.sessionMiddleware);
-      const identity = await deps.authService.currentIdentity(request.session);
-      const sessionVersion = Number(request.session?.sessionVersion || 1);
-      if (!identity || !request.sessionID) return rejectUpgrade(socket, 401, 'SESSION_MISSING');
-      if (record.userId !== identity.id || record.sessionVersion !== sessionVersion || !deps.nonceService.matchesSession(record, request.sessionID)) {
+      await parseSession(terminalRequest, deps.sessionMiddleware);
+      const identity = await deps.authService.currentIdentity(terminalRequest.session);
+      const sessionVersion = Number(terminalRequest.session?.sessionVersion || 1);
+      if (!identity || !terminalRequest.sessionID) return rejectUpgrade(socket, 401, 'SESSION_MISSING');
+      if (record.userId !== identity.id || record.sessionVersion !== sessionVersion || !deps.nonceService.matchesSession(record, terminalRequest.sessionID)) {
         return rejectUpgrade(socket, 401, 'SESSION_MISMATCH');
       }
       const requestOrigin = canonicalOrigin(request.headers.origin);
@@ -77,18 +103,22 @@ function attachTerminalWebSocket(server, overrides = {}) {
       if ((activeBySession.get(sessionKey) || 0) >= maxTabsPerSession) return rejectUpgrade(socket, 429, 'TAB_LIMIT_REACHED');
       if (wss.clients.size >= maxConnections) return rejectUpgrade(socket, 503, 'GLOBAL_CONNECTION_LIMIT');
 
-      request.terminalAuth = { identity, sessionVersion, sessionKey, profile };
+      terminalRequest.terminalAuth = { identity, sessionVersion, sessionKey, profile };
       wss.handleUpgrade(request, socket, head, ws => wss.emit('connection', ws, request));
     } catch (_) {
       rejectUpgrade(socket, 503, 'WEBSOCKET_HANDSHAKE_FAILED');
     }
   });
 
-  wss.on('connection', (ws, request) => {
-    const { identity, sessionVersion, sessionKey, profile } = request.terminalAuth;
+  wss.on('connection', (socket, request) => {
+    const ws = socket as TerminalSocket;
+    const terminalRequest = request as TerminalRequest;
+    const authorization = terminalRequest.terminalAuth;
+    if (!authorization) {ws.close(1008, 'missing-auth');return;}
+    const {identity, sessionVersion, sessionKey, profile} = authorization;
     activeBySession.set(sessionKey, (activeBySession.get(sessionKey) || 0) + 1);
     const decoder = new StringDecoder('utf8');
-    let workerStream = null;
+    let workerStream: WorkerStream | null = null;
     let cleaned = false;
     let cols = 80;
     let rows = 24;
@@ -104,17 +134,17 @@ function attachTerminalWebSocket(server, overrides = {}) {
       else activeBySession.delete(sessionKey);
     };
 
-    const revalidate = () => new Promise(resolve => {
-      const finish = async error => {
+    const revalidate = () => new Promise<boolean>(resolve => {
+      const finish = async (error?: unknown) => {
         if (error) return resolve(false);
         try {
-          const current = await deps.authService.currentIdentity(request.session);
-          if (!current || current.id !== identity.id || current.role !== identity.role || Number(request.session?.sessionVersion || 1) !== sessionVersion) return resolve(false);
+          const current = await deps.authService.currentIdentity(terminalRequest.session);
+          if (!current || current.id !== identity.id || current.role !== identity.role || Number(terminalRequest.session?.sessionVersion || 1) !== sessionVersion) return resolve(false);
           const currentProfile = await profileForIdentity(deps.workerRepository, current, profile.id);
           resolve(Boolean(currentProfile?.enabled && currentProfile.worker_id === profile.worker_id && deps.workerBroker.isOnline(profile.worker_id)));
         } catch (_) { resolve(false); }
       };
-      if (request.session?.reload) request.session.reload(finish);
+      if (terminalRequest.session?.reload) terminalRequest.session.reload(finish);
       else finish();
     });
     ws.revalidate = revalidate;
@@ -135,7 +165,7 @@ function attachTerminalWebSocket(server, overrides = {}) {
             if (output) safeSend(ws, { type: 'output', data: output });
           },
           onError: error => {
-            safeSend(ws, { type: 'error', code: error.code || 'SHELL_ATTACH_FAILED', message: error.message || 'Shell attach failed.' });
+            safeSend(ws, {type: 'error', code: 'code' in error ? error.code || 'SHELL_ATTACH_FAILED' : 'SHELL_ATTACH_FAILED', message: error.message || 'Shell attach failed.'});
             cleanup();
             try { ws.close(); } catch (_) {}
           },
@@ -148,7 +178,8 @@ function attachTerminalWebSocket(server, overrides = {}) {
           }
         });
       } catch (error) {
-        safeSend(ws, { type: 'error', code: error.code || 'SHELL_ATTACH_FAILED', message: error.message || 'Unable to attach shell.' });
+        const detail = error && typeof error === 'object' ? error as {code?: string; message?: string} : {};
+        safeSend(ws, { type: 'error', code: detail.code || 'SHELL_ATTACH_FAILED', message: detail.message || 'Unable to attach shell.' });
         cleanup();
         try { ws.close(); } catch (_) {}
       }
@@ -190,9 +221,10 @@ function attachTerminalWebSocket(server, overrides = {}) {
   });
 
   const heartbeat = setInterval(async () => {
-    for (const ws of wss.clients) {
+    for (const peer of wss.clients) {
+      const ws = peer as TerminalSocket;
       const now = Date.now();
-      if (now - ws.startedAt > deps.maxSessionMs || now - ws.lastActivityAt > deps.idleTimeoutMs || ws.isAlive === false) {
+      if (now - (ws.startedAt || now) > deps.maxSessionMs || now - (ws.lastActivityAt || now) > deps.idleTimeoutMs || ws.isAlive === false) {
         ws.terminate();
         continue;
       }
@@ -217,4 +249,4 @@ function attachTerminalWebSocket(server, overrides = {}) {
   };
 }
 
-module.exports = { attachTerminalWebSocket, rejectUpgrade, parseSession, profileForIdentity };
+export = {attachTerminalWebSocket, rejectUpgrade, parseSession, profileForIdentity};

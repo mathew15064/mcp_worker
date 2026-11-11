@@ -1,6 +1,11 @@
-const Database = require('better-sqlite3');
-const fs = require('fs');
-const config = require('../config/env');
+import Database = require('better-sqlite3');
+import type { DatabaseAdapter, SqlValue } from '../db/contracts';
+interface TableSpec {name: string; columns: string[]}
+type LegacyRow = Record<string, SqlValue>;
+interface Counter {count: number}
+
+import fs from 'node:fs';
+import config = require('../config/env');
 
 const TABLES = Object.freeze([
   { name: 'terminal_profiles', columns: ['id','name','description','host','port','username','credential_envelope','host_key_fingerprint','tmux_session','enabled','created_at','updated_at'] },
@@ -12,16 +17,16 @@ const TABLES = Object.freeze([
   { name: 'mcp_request_audit', columns: ['id','request_id','client_id','principal_id','actor_id','mcp_method','tool_name','result','http_status','duration_ms','created_at'] }
 ]);
 
-function tableExists(db, name) {
+function tableExists(db: Database.Database, name: string) {
   return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?").get(name));
 }
 
-function rowsFor(db, spec) {
+function rowsFor(db: Database.Database, spec: TableSpec): LegacyRow[] {
   if (!tableExists(db, spec.name)) return [];
-  const existingColumns = new Set(db.prepare(`PRAGMA table_info(${spec.name})`).all().map(row => row.name));
+  const existingColumns = new Set(db.prepare<[], {name: string}>(`PRAGMA table_info(${spec.name})`).all().map(row => row.name));
   const cols = spec.columns.filter(column => existingColumns.has(column));
   if (!cols.length) return [];
-  return db.prepare(`SELECT ${cols.map(column => `\"${column}\"`).join(', ')} FROM \"${spec.name}\"`).all();
+  return db.prepare<[], LegacyRow>(`SELECT ${cols.map(column => `\"${column}\"`).join(', ')} FROM \"${spec.name}\"`).all();
 }
 
 class LegacySqliteImportService {
@@ -33,27 +38,26 @@ class LegacySqliteImportService {
     if (!this.available()) return { available: false, path: config.DATABASE_PATH, counts: {} };
     const db = new Database(config.DATABASE_PATH, { readonly: true, fileMustExist: true });
     try {
-      const counts = {};
-      for (const spec of TABLES) counts[spec.name] = tableExists(db, spec.name) ? Number(db.prepare(`SELECT COUNT(*) AS count FROM \"${spec.name}\"`).get().count) : 0;
-      counts.system_settings = tableExists(db, 'system_settings') ? Number(db.prepare('SELECT COUNT(*) AS count FROM system_settings').get().count) : 0;
+      const counts: Record<string, number> = {};
+      for (const spec of TABLES) counts[spec.name] = tableExists(db, spec.name) ? Number(db.prepare<[], Counter>(`SELECT COUNT(*) AS count FROM \"${spec.name}\"`).get()?.count || 0) : 0;
+      counts.system_settings = tableExists(db, 'system_settings') ? Number(db.prepare<[], Counter>('SELECT COUNT(*) AS count FROM system_settings').get()?.count || 0) : 0;
       return { available: true, path: config.DATABASE_PATH, counts };
     } finally { db.close(); }
   }
 
-  async importTo(mysqlAdapter) {
+  async importTo(mysqlAdapter: DatabaseAdapter) {
     if (!this.available()) return { imported: false, reason: 'NO_LEGACY_DATABASE', counts: {} };
     const source = new Database(config.DATABASE_PATH, { readonly: true, fileMustExist: true });
     try {
       const sourceRows = new Map(TABLES.map(spec => [spec.name, rowsFor(source, spec)]));
       const counts = Object.fromEntries(TABLES.map(spec => [spec.name, (sourceRows.get(spec.name) || []).length]));
-      const alreadyImported = await mysqlAdapter.queryOne("SELECT `value` FROM system_settings WHERE `key` = 'storage.legacy_imported_at' LIMIT 1");
+      const alreadyImported = await mysqlAdapter.queryOne<{value: string}>("SELECT `value` FROM system_settings WHERE `key` = 'storage.legacy_imported_at' LIMIT 1");
 
       if (alreadyImported) {
         for (const spec of TABLES) {
-          const target = await mysqlAdapter.queryOne(`SELECT COUNT(*) AS count FROM \`${spec.name}\``);
+          const target = await mysqlAdapter.queryOne<Counter>(`SELECT COUNT(*) AS count FROM \`${spec.name}\``);
           if (Number(target?.count || 0) !== counts[spec.name]) {
-            const error = new Error(`Existing legacy-import marker does not match '${spec.name}' row count.`);
-            error.code = 'LEGACY_IMPORT_VERIFY_FAILED';
+            const error = Object.assign(new Error(`Existing legacy-import marker does not match '${spec.name}' row count.`), {code: 'LEGACY_IMPORT_VERIFY_FAILED'});
             throw error;
           }
         }
@@ -61,16 +65,15 @@ class LegacySqliteImportService {
       }
 
       for (const spec of TABLES) {
-        const targetCount = await mysqlAdapter.queryOne(`SELECT COUNT(*) AS count FROM \`${spec.name}\``);
+        const targetCount = await mysqlAdapter.queryOne<Counter>(`SELECT COUNT(*) AS count FROM \`${spec.name}\``);
         if (Number(targetCount?.count || 0) > 0) {
-          const error = new Error(`Target MySQL table '${spec.name}' is not empty. Refusing automatic legacy import.`);
-          error.code = 'MYSQL_TARGET_NOT_EMPTY';
+          const error = Object.assign(new Error(`Target MySQL table '${spec.name}' is not empty. Refusing automatic legacy import.`), {code: 'MYSQL_TARGET_NOT_EMPTY'});
           throw error;
         }
       }
 
       const legacySettings = tableExists(source, 'system_settings')
-        ? source.prepare('SELECT key, value FROM system_settings').all()
+        ? source.prepare<[], {key: string; value: string | null}>('SELECT key, value FROM system_settings').all()
         : [];
       const legacySettingMap = new Map(legacySettings.map(row => [String(row.key), String(row.value ?? '')]));
       const now = new Date().toISOString();
@@ -102,10 +105,9 @@ class LegacySqliteImportService {
         }
 
         for (const spec of TABLES) {
-          const target = await tx.queryOne(`SELECT COUNT(*) AS count FROM \`${spec.name}\``);
+          const target = await tx.queryOne<Counter>(`SELECT COUNT(*) AS count FROM \`${spec.name}\``);
           if (Number(target?.count || 0) !== counts[spec.name]) {
-            const error = new Error(`Legacy import verification failed for '${spec.name}'.`);
-            error.code = 'LEGACY_IMPORT_VERIFY_FAILED';
+            const error = Object.assign(new Error(`Legacy import verification failed for '${spec.name}'.`), {code: 'LEGACY_IMPORT_VERIFY_FAILED'});
             throw error;
           }
         }
@@ -116,6 +118,4 @@ class LegacySqliteImportService {
   }
 }
 
-module.exports = new LegacySqliteImportService();
-module.exports.LegacySqliteImportService = LegacySqliteImportService;
-module.exports.TABLES = TABLES;
+export = Object.assign(new LegacySqliteImportService(), {LegacySqliteImportService, TABLES});
