@@ -1,4 +1,5 @@
 import workerConnectionBroker from './workerConnectionBroker';
+import type { ExecutionDispatchPort } from '../deployment/ports';
 import type {
   ExecutionRecord,
   ShellInspection,
@@ -16,7 +17,7 @@ interface WorkerProfileRef {
   worker_id?: string | null;
 }
 type Profile = WorkerProfileRef | null | undefined;
-type Broker = Pick<typeof workerConnectionBroker, 'dispatch'>;
+type Broker = ExecutionDispatchPort;
 interface ExecOptions {
   cwd?: string | null;
   runAs?: string | null;
