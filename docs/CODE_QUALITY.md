@@ -55,3 +55,24 @@ PKCE, refresh, scopes, redirects and the 19-tool catalog remain covered by tests
 The CommonJS runtime layout is preserved. Typed default imports replace import
 assignment where safe; configuration-sensitive test fixtures retain their lazy
 loading order. Remaining lint debt is recorded explicitly, not suppressed.
+
+## TS6.3 HTTP DTO, domain error and repository contracts
+
+The Admin and Account HTML form routes now read body fields through
+`src/http/requestContracts.ts`. Only scalar strings are accepted for form
+fields; invalid array/object/number inputs are rejected rather than being
+stringified into identifiers or credentials. Repeated scope fields accept only
+strings. `src/http/domainErrors.ts` reads throwable metadata from `unknown`
+and permits only 400–599 status codes and string messages/codes.
+
+Presentation DTOs now surface nullable repository fields and explicitly
+filter nullable rows before rendering. SQL audit rows are normalized at the
+view boundary; Worker capabilities remain untrusted until inspected.
+
+`OAuthConfig` and the OAuth/Worker identity repository contracts are
+compile-time application ports, not a new runtime persistence or protocol
+layer. OAuth policy injection is covered by a regression that verifies
+unsupported scopes cannot be broadened. Test modules use lazy typed imports
+after their isolated environment is configured, so the previous SQLite/MySQL
+fixture boot order remains intact. Tests for malformed forms and status
+metadata exercise rejection behavior without changing valid HTML workflows.

@@ -4,12 +4,22 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import type { DatabaseAdapter, SqlValue } from '../src/db/contracts';
+async function requireRow<T extends object>(
+  adapter: DatabaseAdapter,
+  sql: string,
+  params: SqlValue[] = [],
+): Promise<T> {
+  const row = await adapter.queryOne<T>(sql, params);
+  assert.ok(row, 'Missing SQL query result for integration assertion');
+  return row;
+}
 
 const enabled = Boolean(process.env.MYSQL_TEST_HOST);
 
 function mysqlConfig() {
   return {
-    host: process.env.MYSQL_TEST_HOST,
+    host: process.env.MYSQL_TEST_HOST || '127.0.0.1',
     port: Number(process.env.MYSQL_TEST_PORT || 3306),
     database: process.env.MYSQL_TEST_DATABASE || 'bot_report_test',
     username: process.env.MYSQL_TEST_USERNAME || 'root',
@@ -31,17 +41,18 @@ void test(
     process.env.TERMINAL_CREDENTIAL_KEY ||= process.env.APP_ENCRYPTION_KEY;
     process.env.MCP_PUBLIC_BASE_URL = 'http://127.0.0.1:3333';
 
-    const { MysqlAdapter } = require('../src/db/adapters/mysqlAdapter');
-    const { MigrationRunner } = require('../src/db/migrationRunner');
-    const { SettingsRepository } = require('../src/repositories/settingsRepository');
-    const { TerminalProfileRepository } = require('../src/repositories/terminalProfileRepository');
-    const { WorkerRepository } = require('../src/repositories/workerRepository');
-    const { WorkerAuthService } = require('../src/services/workerAuthService');
-    const { McpOAuthRepository } = require('../src/repositories/mcpOAuthRepository');
-    const { McpOAuthService } = require('../src/services/mcpOAuthService');
-    const legacyImporter = require('../src/services/legacySqliteImportService');
-    const Database = require('better-sqlite3');
-    const { runMigrations: runLegacySchema } = require('../src/db/migrations');
+    const { MysqlAdapter } = await import('../src/db/adapters/mysqlAdapter.js');
+    const { MigrationRunner } = await import('../src/db/migrationRunner.js');
+    const { SettingsRepository } = await import('../src/repositories/settingsRepository.js');
+    const { TerminalProfileRepository } =
+      await import('../src/repositories/terminalProfileRepository.js');
+    const { WorkerRepository } = await import('../src/repositories/workerRepository.js');
+    const { WorkerAuthService } = await import('../src/services/workerAuthService.js');
+    const { McpOAuthRepository } = await import('../src/repositories/mcpOAuthRepository.js');
+    const { McpOAuthService } = await import('../src/services/mcpOAuthService.js');
+    const legacyImporter = (await import('../src/services/legacySqliteImportService.js')).default;
+    const Database = (await import('better-sqlite3')).default;
+    const { runMigrations: runLegacySchema } = await import('../src/db/migrations.js');
 
     const adapter = MysqlAdapter.create(mysqlConfig());
     t.after(async () => {
@@ -55,7 +66,7 @@ void test(
     const info = await adapter.serverInfo();
     assert.match(String(info.version), /^8\./);
 
-    const { migrationFiles } = require('../src/db/migrationRunner');
+    const { migrationFiles } = await import('../src/db/migrationRunner.js');
     const expectedCount = migrationFiles().length;
     const runner = new MigrationRunner(adapter);
     const fresh = await runner.fresh({ allowDestructive: true });
@@ -97,11 +108,16 @@ void test(
       publicKey: workerKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
       capabilities: ['workspace.exec', 'tmux.inspect', 'not.allowed'],
     });
+    assert.ok(worker);
     assert.equal(worker.name, 'Integration Worker');
     assert.equal(worker.enabled, true);
     assert.deepEqual(worker.capabilities, ['tmux.inspect', 'workspace.exec']);
-    assert.equal((await workerRepo.setWorkerEnabled(worker.id, false)).enabled, false);
-    assert.equal((await workerRepo.setWorkerEnabled(worker.id, true)).enabled, true);
+    const disabledWorker = await workerRepo.setWorkerEnabled(worker.id, false);
+    assert.ok(disabledWorker);
+    assert.equal(disabledWorker.enabled, false);
+    const enabledWorker = await workerRepo.setWorkerEnabled(worker.id, true);
+    assert.ok(enabledWorker);
+    assert.equal(enabledWorker.enabled, true);
     await assert.rejects(
       () =>
         workerAuth.enroll({
@@ -117,11 +133,14 @@ void test(
       name: 'Worker Dev',
       description: 'outbound transport',
       workerId: worker.id,
-      tmuxSession: 'main',
       enabled: true,
     });
+    assert.ok(workerProfile);
     assert.equal(workerProfile.transport, 'worker');
-    assert.equal(workerProfile.worker_name, 'Integration Worker');
+    assert.equal(
+      'worker_name' in workerProfile ? workerProfile.worker_name : undefined,
+      'Integration Worker',
+    );
 
     const settings = new SettingsRepository(adapter);
     await settings.set('mcp.enabled', 'true');
@@ -140,7 +159,10 @@ void test(
       },
       'enc:test-envelope',
     );
-    assert.equal((await terminals.findById(terminal.id)).name, 'Mysql Dev');
+    assert.ok(terminal);
+    const storedTerminal = await terminals.findById(terminal.id);
+    assert.ok(storedTerminal);
+    assert.equal(storedTerminal.name, 'Mysql Dev');
     await assert.rejects(
       () =>
         terminals.create(
@@ -174,6 +196,7 @@ void test(
       redirectUris: ['https://chatgpt.com/connector_platform_oauth_redirect'],
       allowedScopes: oauthConfig.supportedScopes,
     });
+    assert.ok(registered.client);
     const verifier = 'mysql-integration-verifier-abcdefghijklmnopqrstuvwxyz-0123456789';
     const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
     const code = await oauth.issueAuthorizationCode({
@@ -195,6 +218,7 @@ void test(
       codeVerifier: verifier,
     });
     assert.match(token.access_token, /^br_at_/);
+    assert.ok(token.refresh_token);
     assert.match(token.refresh_token, /^br_rt_/);
     assert.ok(await oauthRepo.findAccessTokenByHash(oauth.hash(token.access_token)));
     await oauthRepo.recordAudit({
@@ -284,18 +308,27 @@ void test(
     try {
       const imported = await legacyImporter.importTo(adapter);
       assert.equal(imported.imported, true);
-      assert.equal(imported.counts.terminal_profiles, 1);
-      assert.equal(imported.counts.mcp_oauth_clients, 1);
-      assert.equal(imported.counts.mcp_request_audit, 1);
+      assert.ok('counts' in imported && imported.counts);
+      const importedCounts: Record<string, number> = imported.counts;
+      assert.equal(importedCounts.terminal_profiles, 1);
+      assert.equal(importedCounts.mcp_oauth_clients, 1);
+      assert.equal(importedCounts.mcp_request_audit, 1);
       assert.equal(
-        (await adapter.queryOne('SELECT COUNT(*) AS count FROM terminal_profiles')).count,
+        (
+          await requireRow<{ count: number }>(
+            adapter,
+            'SELECT COUNT(*) AS count FROM terminal_profiles',
+          )
+        ).count,
         1,
       );
       assert.equal(
         (
-          await adapter.queryOne('SELECT value FROM system_settings WHERE `key` = ?', [
-            'telegram.chat_id',
-          ])
+          await requireRow<{ value: string }>(
+            adapter,
+            'SELECT value FROM system_settings WHERE `key` = ?',
+            ['telegram.chat_id'],
+          )
         ).value,
         '998877',
       );
@@ -304,12 +337,18 @@ void test(
       assert.equal(retried.reused, true);
       assert.deepEqual(retried.counts, imported.counts);
       assert.equal(
-        (await adapter.queryOne('SELECT COUNT(*) AS count FROM terminal_profiles')).count,
+        (
+          await requireRow<{ count: number }>(
+            adapter,
+            'SELECT COUNT(*) AS count FROM terminal_profiles',
+          )
+        ).count,
         1,
       );
       assert.equal(
         (
-          await adapter.queryOne(
+          await requireRow<{ count: number }>(
+            adapter,
             'SELECT COUNT(*) AS count FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?',
             ['users'],
           )
@@ -317,13 +356,14 @@ void test(
         1,
       );
       assert.equal(
-        (await adapter.queryOne('SELECT COUNT(*) AS count FROM users')).count,
+        (await requireRow<{ count: number }>(adapter, 'SELECT COUNT(*) AS count FROM users')).count,
         0,
         'legacy SQLite users must not be imported into MySQL users',
       );
       assert.equal(
         (
-          await adapter.queryOne(
+          await requireRow<{ count: number }>(
+            adapter,
             'SELECT COUNT(*) AS count FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?',
             ['sessions'],
           )

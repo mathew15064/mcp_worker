@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import oauthResourceServer from '../src/auth/oauthResourceServer';
 import { AuthenticatedPrincipal } from '../src/auth/principal';
 import oauthService from '../src/services/mcpOAuthService';
+import type { OAuthConfig } from '../src/services/contracts/oauthContracts';
 const { setupEnv, cleanup, initDb, issueToken } = require('./helper') as {
   setupEnv(name: string): { dir: string };
   cleanup(dir: string): void;
@@ -45,4 +46,22 @@ void test('admin OAuth client principal is generated from its immutable client i
   });
   assert.ok(registered.client);
   assert.equal(registered.client.principal_id, `principal:client:${registered.client.client_id}`);
+});
+
+void test('OAuth config can be injected as a narrow policy without widening scopes', async () => {
+  const policy: OAuthConfig = {
+    supportedScopes: ['bot_report.read'],
+    resourceUrl: 'http://127.0.0.1:3333/mcp',
+    accessTokenTtlSeconds: 900,
+    refreshTokenTtlSeconds: 2592000,
+    authCodeTtlSeconds: 300,
+  };
+  const service = new oauthService.McpOAuthService(oauthService.repo, policy);
+  const created = await service.registerClient({
+    displayName: 'Policy constrained client',
+    redirectUris: ['https://chatgpt.com/connector_platform_oauth_redirect'],
+    allowedScopes: ['bot_report.read', 'bot_report.terminal', 'offline_access'],
+  });
+  assert.ok(created.client);
+  assert.deepEqual(created.client.allowed_scopes, ['bot_report.read']);
 });

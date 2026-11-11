@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type { IncomingHttpHeaders } from 'node:http';
 import type { WorkerConnectRequest } from './workerProtocol';
 import workerRepository from '../repositories/workerRepository';
+import type { WorkerIdentityRepositoryContract } from './contracts/repositoryContracts';
 const { workerError } = workerRepository;
 
 const WORKER_CONNECT_PATH = '/worker/v1/connect';
@@ -33,14 +34,14 @@ function canonicalConnectMessage({ workerId, timestamp, nonce }: WorkerConnectRe
 }
 
 class WorkerAuthService {
-  repository: InstanceType<typeof workerRepository.WorkerRepository>;
+  repository: WorkerIdentityRepositoryContract;
   now: () => number;
   seenNonces: Map<string, number>;
   constructor({
     repository = workerRepository,
     now = () => Date.now(),
   }: {
-    repository?: InstanceType<typeof workerRepository.WorkerRepository>;
+    repository?: WorkerIdentityRepositoryContract;
     now?: () => number;
   } = {}) {
     this.repository = repository;

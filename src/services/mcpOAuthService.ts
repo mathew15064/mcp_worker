@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import mcpConfig from '../config/mcpConfig';
 import mcpOAuthRepository from '../repositories/mcpOAuthRepository';
+import type { OAuthConfig } from './contracts/oauthContracts';
+import type { OAuthRepositoryContract } from './contracts/repositoryContracts';
 
 interface RegisterInput {
   displayName: string;
@@ -66,12 +68,9 @@ class OAuthError extends Error {
 }
 
 class McpOAuthService {
-  repo: InstanceType<typeof mcpOAuthRepository.McpOAuthRepository>;
-  config: InstanceType<typeof mcpConfig.McpConfig>;
-  constructor(
-    repo: InstanceType<typeof mcpOAuthRepository.McpOAuthRepository> = mcpOAuthRepository,
-    config: InstanceType<typeof mcpConfig.McpConfig> = mcpConfig,
-  ) {
+  repo: OAuthRepositoryContract;
+  config: OAuthConfig;
+  constructor(repo: OAuthRepositoryContract = mcpOAuthRepository, config: OAuthConfig = mcpConfig) {
     this.repo = repo;
     this.config = config;
   }
