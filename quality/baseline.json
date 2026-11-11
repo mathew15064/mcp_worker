@@ -128,8 +128,7 @@
     },
     "src/public/admin.ts": {
       "@typescript-eslint/no-base-to-string": 2,
-      "@typescript-eslint/no-floating-promises": 2,
-      "@typescript-eslint/no-misused-promises": 5,
+      "@typescript-eslint/no-misused-promises": 2,
       "@typescript-eslint/no-non-null-assertion": 6,
       "@typescript-eslint/no-unsafe-argument": 7,
       "@typescript-eslint/no-unsafe-assignment": 4,
@@ -138,8 +137,6 @@
       "@typescript-eslint/no-unused-vars": 6
     },
     "src/public/terminal-console.ts": {
-      "@typescript-eslint/no-floating-promises": 1,
-      "@typescript-eslint/no-misused-promises": 1,
       "@typescript-eslint/no-unused-vars": 4
     },
     "src/repositories/executionProfileRepository.ts": {
@@ -217,9 +214,6 @@
       "@typescript-eslint/no-unsafe-member-access": 6
     },
     "src/server.ts": {
-      "@typescript-eslint/no-floating-promises": 2,
-      "@typescript-eslint/no-require-imports": 8,
-      "@typescript-eslint/no-unsafe-assignment": 1,
       "@typescript-eslint/no-unused-vars": 5
     },
     "src/services/adminIdentityService.ts": {
@@ -277,13 +271,6 @@
     },
     "src/services/terminalWebSocketService.ts": {
       "@typescript-eslint/no-base-to-string": 1,
-      "@typescript-eslint/no-floating-promises": 2,
-      "@typescript-eslint/no-misused-promises": 4,
-      "@typescript-eslint/no-require-imports": 6,
-      "@typescript-eslint/no-unsafe-argument": 2,
-      "@typescript-eslint/no-unsafe-assignment": 1,
-      "@typescript-eslint/no-unsafe-member-access": 8,
-      "@typescript-eslint/no-unused-vars": 11,
       "@typescript-eslint/prefer-promise-reject-errors": 1
     },
     "src/services/userService.ts": {
@@ -302,12 +289,7 @@
     },
     "src/services/workerConnectionBroker.ts": {
       "@typescript-eslint/no-base-to-string": 6,
-      "@typescript-eslint/no-misused-promises": 2,
-      "@typescript-eslint/no-redundant-type-constituents": 1,
-      "@typescript-eslint/no-require-imports": 3,
       "@typescript-eslint/no-unnecessary-type-assertion": 2,
-      "@typescript-eslint/no-unsafe-assignment": 1,
-      "@typescript-eslint/no-unused-vars": 15,
       "prefer-const": 1
     },
     "src/services/workerExecutionService.ts": {
@@ -604,8 +586,6 @@
     "src/mcp/transport.ts": "c08dd8753e18f8ce29766189e4b12a7e726bf23538da86944b300b6898182266",
     "src/middleware/csrfMiddleware.ts": "b23977076ccdd1f471154523438a399334baefbba8b575462540b8b4bba554ee",
     "src/middleware/sessionMiddleware.ts": "6af474befd19652c73106d385b6216e3cfe0cfa795fb27fbb29685f250ed1e1a",
-    "src/public/admin.ts": "1e159d2e0219ddd9b35cb9f0ad4a3001b6ac469c87e914b2aeb583856003873d",
-    "src/public/terminal-console.ts": "6f0c5fb2767c76b9bcb45a3fd56176185a45d5f5d7f3338cf7c99e70ec342d0d",
     "src/repositories/executionProfileRepository.ts": "807fe44f4a07d4f03d9948e57ffd4cd3d33899388ada463ee1c707e001623444",
     "src/repositories/mcpOAuthRepository.ts": "31fbe9ff64b9b73cf9a1bfc8103c435acadb30469e266a516952011ff425efc0",
     "src/repositories/settingsRepository.ts": "33721142e0846cc64f359c397e8767061bd8d6c5c016aa6b2ba64f643f6702ba",
@@ -618,7 +598,6 @@
     "src/routes/authRoutes.ts": "3a59b1985ee5079e1566405f5c532a9b5da841bba467189ac6fa866f13bf66c4",
     "src/routes/mcpOAuthRoutes.ts": "036eec7e0ea2fdd920068195d92b6450b75e88f6f407710b29d3b4175fb53ada",
     "src/routes/workerRoutes.ts": "a8ed3875855df50373f4b9fc8479f16189cecab81ac7362298f3897e4b8749ce",
-    "src/server.ts": "f11b869613342c7ea65b2d50b90d9fd36e2bfd8b4bd46a403fd8bc4bd0c8bd13",
     "src/services/adminIdentityService.ts": "d51d3788fde3c14aa54624e4f9191411027e9c72f938607eab1ff2511511c437",
     "src/services/auditPayloadService.ts": "e274ba705d37e3266c724b3d38f55f72e33c288a7c2cc9c33e50a0c90429da45",
     "src/services/authService.ts": "2732bd1e86b0e759edc3e6b61cb34c00ee8fa5c3a964ad544de0b53e3eab90e5",
@@ -632,11 +611,9 @@
     "src/services/terminalNonceService.ts": "deb511fa544e9085b1fd173259515e43105329d116fd68eb6067a629cbed008e",
     "src/services/terminalPublicOriginService.ts": "3439f78f6f7867503a55b7fa5c6768c32ab42e415635adcf2fc97e9f5a11f5af",
     "src/services/terminalSshService.ts": "fa7881331e92ac6d8b3931ccb39561a280c2b419f72b88d14001a2160658fa15",
-    "src/services/terminalWebSocketService.ts": "8c3b05244f8cce7100fda13232b1d2ab1bd31a1993dc9faff84bb05ca365c0f2",
     "src/services/userService.ts": "563e5c6b7d5595885abca0492b1561d618e9276db66d27fd0d3d0d3df8e40c55",
     "src/services/userTelegramSettingsService.ts": "1900c4b96bc65ae63cfa92a74d29d5471443760f765554df8ca807f73859e471",
     "src/services/workerAuthService.ts": "9ab97a202ec243cfa5c46dd96fb144135efb76e4867707e4a072da487719fc7c",
-    "src/services/workerConnectionBroker.ts": "304f2c59336b39a9b946fd540122c1880e5656ea7fd6d8c681fee090f8b4e400",
     "src/services/workerExecutionService.ts": "5703b372b78dd9033f7aba137e49c3ac3c5e065eb4447c23ff44d3599bdecdce",
     "src/services/workerLifecycleService.ts": "e29b9edddbcd22b030ff40f2ddcf33b21c1c744ec54f1f5699225d2282f67afe",
     "tests/admin-config-ui.test.ts": "19d1ddb6e4af5edb7237f7093a52bd81b13d0610d131212e9929f4cec460ad13",

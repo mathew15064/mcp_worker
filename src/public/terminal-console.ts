@@ -1,13 +1,31 @@
-interface BrowserFitAddon {fit(): void}
-interface BrowserTerminal {
-  cols: number; rows: number; loadAddon(addon: BrowserFitAddon): void; open(container: HTMLElement): void;
-  focus(): void; write(text: string): void;
-  onData(handler: (data: string) => void): void;
-  onResize(handler: (size: {cols: number;rows: number}) => void): void;
+interface BrowserFitAddon {
+  fit(): void;
 }
-interface BrowserExtensions {Terminal?: new (options: Record<string, unknown>) => BrowserTerminal; FitAddon?: {FitAddon: new () => BrowserFitAddon}}
-interface TerminalSessionResponse {ws_url?: string;message?: string}
-interface TerminalMessage {type?: string; state?: string; data?: string; message?: string;code?: string}
+interface BrowserTerminal {
+  cols: number;
+  rows: number;
+  loadAddon(addon: BrowserFitAddon): void;
+  open(container: HTMLElement): void;
+  focus(): void;
+  write(text: string): void;
+  onData(handler: (data: string) => void): void;
+  onResize(handler: (size: { cols: number; rows: number }) => void): void;
+}
+interface BrowserExtensions {
+  Terminal?: new (options: Record<string, unknown>) => BrowserTerminal;
+  FitAddon?: { FitAddon: new () => BrowserFitAddon };
+}
+interface TerminalSessionResponse {
+  ws_url?: string;
+  message?: string;
+}
+interface TerminalMessage {
+  type?: string;
+  state?: string;
+  data?: string;
+  message?: string;
+  code?: string;
+}
 (() => {
   'use strict';
 
@@ -33,8 +51,8 @@ interface TerminalMessage {type?: string; state?: string; data?: string; message
       background: '#03060d',
       foreground: '#dce6f2',
       cursor: '#f8fafc',
-      selectionBackground: '#334155'
-    }
+      selectionBackground: '#334155',
+    },
   });
   const fit = new FitAddon();
   terminal.loadAddon(fit);
@@ -62,13 +80,19 @@ interface TerminalMessage {type?: string; state?: string; data?: string; message
   function resize() {
     try {
       fit.fit();
-      if (terminal.cols > 1 && terminal.rows > 1) send({ type: 'resize', cols: terminal.cols, rows: terminal.rows });
+      if (terminal.cols > 1 && terminal.rows > 1)
+        send({ type: 'resize', cols: terminal.cols, rows: terminal.rows });
     } catch (_) {}
   }
 
   async function connect() {
     if (!root) return;
-    if (connecting || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
+    if (
+      connecting ||
+      socket?.readyState === WebSocket.OPEN ||
+      socket?.readyState === WebSocket.CONNECTING
+    )
+      return;
     connecting = true;
     showError('');
     setStatus('Preparing…');
@@ -81,13 +105,14 @@ interface TerminalMessage {type?: string; state?: string; data?: string; message
       const response = await fetch(sessionUrl, {
         method: 'POST',
         headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+          Accept: 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
         },
-        body: new URLSearchParams({ _csrf: root.dataset.csrf || '' }).toString()
+        body: new URLSearchParams({ _csrf: root.dataset.csrf || '' }).toString(),
       });
-      const payload = await response.json().catch(() => ({})) as TerminalSessionResponse;
-      if (!response.ok || !payload.ws_url) throw new Error(payload.message || 'Unable to create terminal session.');
+      const payload = (await response.json().catch(() => ({}))) as TerminalSessionResponse;
+      if (!response.ok || !payload.ws_url)
+        throw new Error(payload.message || 'Unable to create terminal session.');
 
       const ws = new WebSocket(payload.ws_url);
       socket = ws;
@@ -98,10 +123,14 @@ interface TerminalMessage {type?: string; state?: string; data?: string; message
         resize();
         terminal.focus();
       });
-      ws.addEventListener('message', event => {
+      ws.addEventListener('message', (event) => {
         if (socket !== ws) return;
         let message: TerminalMessage;
-        try { message = JSON.parse(String(event.data)) as TerminalMessage; } catch (_) { return; }
+        try {
+          message = JSON.parse(String(event.data)) as TerminalMessage;
+        } catch (_) {
+          return;
+        }
         if (message.type === 'output' && typeof message.data === 'string') {
           terminal.write(message.data);
           return;
@@ -111,15 +140,20 @@ interface TerminalMessage {type?: string; state?: string; data?: string; message
             CONNECTING: 'Connecting…',
             ATTACHING: 'Attaching shell…',
             CONNECTED: 'Connected',
-            CLOSED: 'Disconnected'
+            CLOSED: 'Disconnected',
           };
-          setStatus(labels[message.state as keyof typeof labels] || message.state || 'Connecting…', message.state === 'CONNECTED' ? 'ok' : 'off');
+          setStatus(
+            labels[message.state as keyof typeof labels] || message.state || 'Connecting…',
+            message.state === 'CONNECTED' ? 'ok' : 'off',
+          );
           if (message.state === 'CONNECTED') terminal.focus();
           return;
         }
         if (message.type === 'error') {
           setStatus('Connection failed', 'danger');
-          showError(`${message.message || 'Terminal connection failed.'}${message.code ? ` (${message.code})` : ''}`);
+          showError(
+            `${message.message || 'Terminal connection failed.'}${message.code ? ` (${message.code})` : ''}`,
+          );
         }
       });
       ws.addEventListener('close', () => {
@@ -132,7 +166,9 @@ interface TerminalMessage {type?: string; state?: string; data?: string; message
       ws.addEventListener('error', () => {
         if (socket !== ws) return;
         setStatus('Connection failed', 'danger');
-        showError('WebSocket connection failed. Use Test Shell on the profile to verify the Worker and direct shell.');
+        showError(
+          'WebSocket connection failed. Use Test Shell on the profile to verify the Worker and direct shell.',
+        );
       });
     } catch (error) {
       connecting = false;
@@ -147,19 +183,27 @@ interface TerminalMessage {type?: string; state?: string; data?: string; message
     socket = null;
     connecting = false;
     if (current?.readyState === WebSocket.OPEN) {
-      try { current.send(JSON.stringify({ type: 'close' })); } catch (_) {}
+      try {
+        current.send(JSON.stringify({ type: 'close' }));
+      } catch (_) {}
     }
-    try { current?.close(); } catch (_) {}
+    try {
+      current?.close();
+    } catch (_) {}
     reconnectButton?.removeAttribute('disabled');
     setStatus('Disconnected');
   }
 
   terminal.onData((data: string) => send({ type: 'input', data }));
-  terminal.onResize(({ cols, rows }: {cols: number; rows: number}) => send({ type: 'resize', cols, rows }));
+  terminal.onResize(({ cols, rows }: { cols: number; rows: number }) =>
+    send({ type: 'resize', cols, rows }),
+  );
   reconnectButton?.addEventListener('click', () => {
     disconnect();
     terminal.write('\r\n\x1b[90m[reconnecting]\x1b[0m\r\n');
-    setTimeout(connect, 50);
+    setTimeout(() => {
+      void connect();
+    }, 50);
   });
   disconnectButton?.addEventListener('click', disconnect);
 
@@ -168,6 +212,6 @@ interface TerminalMessage {type?: string; state?: string; data?: string; message
   window.addEventListener('beforeunload', disconnect, { once: true });
   requestAnimationFrame(() => {
     resize();
-    connect();
+    void connect();
   });
 })();
