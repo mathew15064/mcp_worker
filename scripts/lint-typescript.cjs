@@ -17,8 +17,8 @@ function visit(dir) {
     const file = path.join(dir, ent.name);
     if (ent.isDirectory()) { visit(file); continue; }
     if (!ent.isFile()) continue;
-    if (file.endsWith('.js') && dir !== path.join(root, 'tests') && !file.split(path.sep).includes('tests')) {
-      console.error('Unmigrated production JavaScript source: ' + path.relative(root, file));
+    if (file.endsWith('.js')) {
+      console.error('Unmigrated TypeScript application or test source: ' + path.relative(root, file));
       violations++;
     }
     if (!file.endsWith('.ts')) continue;

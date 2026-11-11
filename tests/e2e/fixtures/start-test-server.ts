@@ -1,7 +1,7 @@
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const crypto = require('crypto');
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-report-playwright-'));
 const databasePath = path.join(dir, 'playwright.sqlite');
@@ -31,19 +31,21 @@ process.on('exit', () => {
 });
 
 async function main() {
-  const { runMigrations } = require('../../../src/db/migrations');
-  const { getDb } = require('../../../src/db/connection');
-  const databaseManager = require('../../../src/db/databaseManager');
-  const runtimeSettings = require('../../../src/services/runtimeSettingsService');
+  // Load configuration-sensitive modules only after the disposable test env is set.
+  // Type-only references are erased, so these runtime requires do not preinitialize config.
+  const {runMigrations} = require('../../../src/db/migrations') as typeof import('../../../src/db/migrations');
+  const {getDb} = require('../../../src/db/connection') as typeof import('../../../src/db/connection');
+  const databaseManager = require('../../../src/db/databaseManager') as typeof import('../../../src/db/databaseManager');
+  const runtimeSettings = require('../../../src/services/runtimeSettingsService') as typeof import('../../../src/services/runtimeSettingsService');
   runMigrations();
   databaseManager.useLegacyForTests(getDb());
   await runtimeSettings.load(databaseManager.getAdapter());
+  const oauthService = require('../../../src/services/mcpOAuthService') as typeof import('../../../src/services/mcpOAuthService');
+  const oauthRepo = require('../../../src/repositories/mcpOAuthRepository') as typeof import('../../../src/repositories/mcpOAuthRepository');
+  const workerRepo = require('../../../src/repositories/workerRepository') as typeof import('../../../src/repositories/workerRepository');
+  const workerBroker = require('../../../src/services/workerConnectionBroker') as typeof import('../../../src/services/workerConnectionBroker');
+  const telegramSecrets = require('../../../src/services/telegramSecretService') as typeof import('../../../src/services/telegramSecretService');
 
-  const oauthService = require('../../../src/services/mcpOAuthService');
-  const oauthRepo = require('../../../src/repositories/mcpOAuthRepository');
-  const workerRepo = require('../../../src/repositories/workerRepository');
-  const workerBroker = require('../../../src/services/workerConnectionBroker');
-  const telegramSecrets = require('../../../src/services/telegramSecretService');
 
   for (const [index, name] of ['ChatGPT Connector', 'Local QA Client', 'Automation Client'].entries()) {
     await oauthService.registerClient({
@@ -54,7 +56,8 @@ async function main() {
     });
   }
 
-  const auditClient = (await oauthRepo.listClients()).find(client => client.display_name === 'ChatGPT Connector');
+  const auditClient = (await oauthRepo.listClients()).find((client): client is NonNullable<typeof client> => client !== null && client.display_name === 'ChatGPT Connector');
+  if (!auditClient) throw new Error('Playwright audit fixture client missing');
   await oauthRepo.recordAudit({
     id: 'aud_playwright_runtime_info', requestId: 'req_playwright_runtime_info', clientId: auditClient.client_id, principalId: auditClient.principal_id,
     mcpMethod: 'tools/call', toolName: 'runtime_info', result: 'SUCCESS', httpStatus: 200, durationMs: 18,
@@ -79,6 +82,7 @@ async function main() {
     publicKey: workerKeyPair.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
     capabilities: ['tmux.inspect', 'tmux.send', 'tmux.read', 'tmux.interrupt', 'workspace.exec', 'artifact.collect', 'file.write']
   });
+  if (!worker) throw new Error('Playwright Worker fixture missing');
   await workerRepo.touchWorker(worker.id);
   const originalIsOnline = workerBroker.isOnline.bind(workerBroker);
   workerBroker.isOnline = workerId => workerId === worker.id || originalIsOnline(workerId);
@@ -86,19 +90,19 @@ async function main() {
   for (const [index, name] of ['Dev Alpha', 'Dev Beta', 'Ops Gamma', 'QA Delta'].entries()) {
     await workerRepo.createProfile({
       name, description: `${name} Playwright fixture`, worker_id: worker.id,
-      tmux_session: `pw-${index + 1}`, enabled: index !== 2
+      enabled: index !== 2
     });
   }
   await workerRepo.createProfile({
     name: 'Worker Alpha', description: 'Outbound Playwright fixture', worker_id: worker.id,
-    tmux_session: 'pw-worker', enabled: true
+    enabled: true
   });
 
   await runtimeSettings.set('telegram.enabled', 'false');
   await runtimeSettings.set('telegram.chat_id', '123456789');
   await runtimeSettings.set('telegram.bot_token', telegramSecrets.encrypt('123456:playwright-fixture-token'));
 
-  const serverModule = require('../../../src/server');
+  const serverModule = require('../../../src/server') as typeof import('../../../src/server');
   await serverModule.ready;
   console.log(`[PLAYWRIGHT] disposable server ready with DB ${databasePath}`);
 }

@@ -1,45 +1,46 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const http = require('http');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { spawn } = require('child_process');
-const { setupEnv, cleanup, initDb, issueToken, parseMcpResponse } = require('./helper');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {spawn, type SpawnOptionsWithoutStdio} from 'node:child_process';
+import helper = require('./helper');
+const {setupEnv, cleanup, initDb, issueToken, parseMcpResponse} = helper;
 
-function runProcess(command, args, options = {}) {
-  return new Promise((resolve, reject) => {
+function runProcess(command: string, args: string[], options: SpawnOptionsWithoutStdio = {}) {
+  return new Promise<{code: number; stdout: string; stderr: string}>((resolve, reject) => {
     const child = spawn(command, args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', chunk => { stdout += chunk.toString('utf8'); });
     child.stderr.on('data', chunk => { stderr += chunk.toString('utf8'); });
     child.once('error', reject);
-    child.once('close', code => resolve({ code: Number.isInteger(code) ? code : 1, stdout, stderr }));
+    child.once('close', code => resolve({ code: Number.isInteger(code) ? Number(code) : 1, stdout, stderr }));
   });
 }
 
 const env = setupEnv('http');
 initDb();
 const app = require('../src/app');
-let server;
-let baseUrl;
+let server: http.Server;
+let baseUrl = '';
 
 test.before(async () => {
   server = http.createServer(app);
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  baseUrl = `http://127.0.0.1:${server.address().port}`;
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  baseUrl = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
 });
 
 test.after(async () => {
-  if (server) await new Promise(resolve => server.close(resolve));
+  if (server) await new Promise<void>(resolve => server.close(() => resolve()));
   cleanup(env.dir);
 });
 
 test('HTTP surface is MCP-only', async () => {
   const health = await fetch(`${baseUrl}/healthz`);
   assert.equal(health.status, 200);
-  const healthBody = await health.json();
+  const healthBody = await health.json() as {ok:boolean; service:string; mode:string; database:string};
   assert.equal(healthBody.ok, true);
   assert.equal(healthBody.service, 'mcp_worker');
   assert.equal(healthBody.mode, 'mcp-admin');
@@ -236,7 +237,9 @@ test('administrator login can authorize an OAuth client through the minimal cons
     body: allowForm.toString()
   });
   assert.equal(allowed.status, 302);
-  const redirect = new URL(allowed.headers.get('location'));
+  const location = allowed.headers.get('location');
+  assert.ok(location);
+  const redirect = new URL(location);
   const code = redirect.searchParams.get('code');
   assert.ok(code);
   assert.equal(redirect.searchParams.get('state'), 'consent-state');
@@ -275,7 +278,7 @@ test('authenticated MCP initialize returns instructions and exactly 19 tools', a
   });
   assert.equal(init.status, 200);
   const initBody = await parseMcpResponse(init);
-  assert.match(initBody.result.instructions, /MCP-only/);
+  assert.match((initBody.result as {instructions?:string}|undefined)?.instructions || '', /MCP-only/);
 
   const list = await fetch(`${baseUrl}/mcp`, {
     method: 'POST', headers,
@@ -283,7 +286,7 @@ test('authenticated MCP initialize returns instructions and exactly 19 tools', a
   });
   assert.equal(list.status, 200);
   const listBody = await parseMcpResponse(list);
-  const names = listBody.result.tools.map(tool => tool.name);
+  const names = (listBody.result?.tools || []).map(tool => tool.name);
   assert.equal(names.length, 19);
   assert.ok(names.includes('runtime_info'));
   assert.ok(names.includes('file_patch'));
@@ -291,7 +294,8 @@ test('authenticated MCP initialize returns instructions and exactly 19 tools', a
   assert.ok(!names.some(name => /notification|inbox|control|antigravity/i.test(name)));
 
   await new Promise(resolve => setImmediate(resolve));
-  const auditRows = await require('../src/repositories/mcpOAuthRepository').listAuditLogs({
+  type AuditRow = {id:string;client_id:string;mcp_method:string;result:string};
+  const auditRows: AuditRow[] = await require('../src/repositories/mcpOAuthRepository').listAuditLogs({
     clientId: issued.client.client_id,
     limit: 10
   });

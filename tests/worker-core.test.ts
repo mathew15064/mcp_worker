@@ -1,33 +1,34 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const crypto = require('crypto');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { WebSocket } = require('ws');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {WebSocket} from 'ws';
 
-const { WorkerAuthService, canonicalConnectMessage } = require('../src/services/workerAuthService');
-const { WorkerConnectionBroker } = require('../src/services/workerConnectionBroker');
-const { WorkerExecutionService } = require('../src/services/workerExecutionService');
-const { TerminalMcpService } = require('../src/services/terminalMcpService');
-const { buildCleanupPlan, applyCleanupPlan } = require('../worker/lifecycle');
+const {WorkerAuthService, canonicalConnectMessage} = require('../src/services/workerAuthService');
+const {WorkerConnectionBroker} = require('../src/services/workerConnectionBroker');
+const {WorkerExecutionService} = require('../src/services/workerExecutionService');
+const {TerminalMcpService} = require('../src/services/terminalMcpService');
+import lifecycle = require('../worker/lifecycle');
+const {buildCleanupPlan, applyCleanupPlan} = lifecycle;
 
 test('worker enrollment normalizes capabilities and signed handshake rejects replay', async () => {
   const pair = crypto.generateKeyPairSync('ed25519');
   const publicKey = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString();
-  let storedWorker = null;
+  let storedWorker: {id:string;name:string;public_key:string;capabilities:string[];enabled:boolean} | null = null;
   let consumed = false;
   const repository = {
-    async consumeEnrollmentToken(token) {
+    async consumeEnrollmentToken(token: string) {
       assert.equal(token, 'br_enroll_fixture');
       if (consumed) throw Object.assign(new Error('used'), { code: 'WORKER_ENROLLMENT_INVALID', status: 401 });
       consumed = true;
     },
-    async createWorker({ name, publicKey: normalized, capabilities }) {
+    async createWorker({ name, publicKey: normalized, capabilities }: {name:string;publicKey:string;capabilities:string[]}) {
       storedWorker = { id: crypto.randomUUID(), name, public_key: normalized, capabilities, enabled: true };
       return storedWorker;
     },
-    async findWorkerById(id) { return storedWorker?.id === id ? storedWorker : null; }
+    async findWorkerById(id: string) { return storedWorker?.id === id ? storedWorker : null; }
   };
   const now = 1_800_000_000_000;
   const service = new WorkerAuthService({ repository, now: () => now });
@@ -51,9 +52,11 @@ test('worker enrollment normalizes capabilities and signed handshake rejects rep
     'x-br-worker-signature': signature
   };
   assert.equal((await service.authenticateConnect(headers)).id, worker.id);
-  await assert.rejects(() => service.authenticateConnect(headers), error => error.code === 'WORKER_AUTH_REPLAY');
+  await assert.rejects(() => service.authenticateConnect(headers), (error: unknown) => error instanceof Error && 'code' in error && error.code === 'WORKER_AUTH_REPLAY');
 
-  storedWorker.enabled = false;
+  const activeWorker = storedWorker as {enabled:boolean}|null;
+  if (!activeWorker) throw new Error("Worker was not stored by fixture repository");
+  activeWorker.enabled = false;
   const disabledNonce = 'nonce_disabled_abcdefghijk';
   const disabledSignature = crypto.sign(null,
     Buffer.from(canonicalConnectMessage({ workerId: worker.id, timestamp, nonce: disabledNonce }), 'utf8'),
@@ -62,39 +65,41 @@ test('worker enrollment normalizes capabilities and signed handshake rejects rep
     ...headers,
     'x-br-worker-nonce': disabledNonce,
     'x-br-worker-signature': disabledSignature
-  }), error => error.code === 'WORKER_DISABLED');
+  }), (error: unknown) => error instanceof Error && 'code' in error && error.code === 'WORKER_DISABLED');
 });
 
 test('worker broker dispatch correlates typed result and fails closed on missing capability', async () => {
   const workerId = crypto.randomUUID();
   const workerRecord = { id: workerId, capabilities: ['workspace.exec'], enabled: true };
-  const broker = new WorkerConnectionBroker({ repository: { findWorkerById: async id => id === workerId ? workerRecord : null }, defaultTimeoutMs: 1000 });
-  let outbound = null;
+  const broker = new WorkerConnectionBroker({ repository: { findWorkerById: async (id: string) => id === workerId ? workerRecord : null }, defaultTimeoutMs: 1000 });
+  const dispatched: {value: {type:string;operation:string;job_id:string}|null} = {value: null};
   const ws = {
     workerId,
     worker: { id: workerId, capabilities: ['workspace.exec'] },
     readyState: WebSocket.OPEN,
-    send(text) { outbound = JSON.parse(text); }
+    send(text: string) { dispatched.value = JSON.parse(text); }
   };
   broker.connections.set(workerId, ws);
   const pending = broker.dispatch(workerId, 'workspace.exec', { command: 'printf ok' }, { timeoutMs: 1000 });
   await new Promise(resolve => setImmediate(resolve));
+  const outbound = dispatched.value;
+  if (!outbound) throw new Error('Worker dispatch mock did not send');
   assert.equal(outbound.type, 'job');
   assert.equal(outbound.operation, 'workspace.exec');
   broker.handleMessage(ws, JSON.stringify({ type: 'result', job_id: outbound.job_id, ok: true, result: { exit_code: 0, stdout: 'ok' } }));
   assert.deepEqual(await pending, { exit_code: 0, stdout: 'ok' });
-  await assert.rejects(() => broker.dispatch(workerId, 'file.write', {}, { timeoutMs: 100 }), error => error.code === 'WORKER_CAPABILITY_DENIED');
+  await assert.rejects(() => broker.dispatch(workerId, 'file.write', {}, { timeoutMs: 100 }), (error: unknown) => error instanceof Error && 'code' in error && error.code === 'WORKER_CAPABILITY_DENIED');
   broker.close();
 });
 
 test('worker heartbeat skips redundant capabilities writes but preserves presence updates', async () => {
   const workerId = crypto.randomUUID();
-  const writes = [];
+  const writes: Array<{id:string;capabilities:string[]}> = [];
   let presenceTouches = 0;
   const broker = new WorkerConnectionBroker({
     repository: {
-      async updateWorkerCapabilities(id, capabilities) { writes.push({ id, capabilities }); },
-      async touchWorker(id) { assert.equal(id, workerId); presenceTouches += 1; }
+      async updateWorkerCapabilities(id: string, capabilities: string[]) { writes.push({ id, capabilities }); },
+      async touchWorker(id: string) { assert.equal(id, workerId); presenceTouches += 1; }
     }
   });
   const ws = {
@@ -118,23 +123,23 @@ test('worker heartbeat skips redundant capabilities writes but preserves presenc
 test('late close and result from a replaced Worker socket cannot affect the current connection', async () => {
   const workerId = crypto.randomUUID();
   const worker = { id: workerId, enabled: true, capabilities: ['workspace.exec'] };
-  const presence = [];
+  const presence: string[] = [];
   const broker = new WorkerConnectionBroker({
     repository: {
       async findWorkerById() { return worker; },
-      async updateWorkerPresence(_id, status) { presence.push(status); }
+      async updateWorkerPresence(_id: string, status: string) { presence.push(status); }
     },
     defaultTimeoutMs: 1_000
   });
   const socket = () => {
-    const listeners = {};
+    const listeners: Record<string, (()=>void)|undefined> = {};
     return {
       workerId,
       worker: { ...worker },
-      readyState: WebSocket.OPEN,
-      sent: [],
-      on(name, callback) { listeners[name] = callback; },
-      send(text) { this.sent.push(JSON.parse(text)); },
+      readyState: WebSocket.OPEN as number,
+      sent: [] as Array<{type:string;job_id:string}>,
+      on(name: string, callback: () => void) { listeners[name] = callback; },
+      send(text: string) { this.sent.push(JSON.parse(text)); },
       close() { this.readyState = WebSocket.CLOSED; listeners.close?.(); },
       triggerClose() { listeners.close?.(); }
     };
@@ -148,7 +153,7 @@ test('late close and result from a replaced Worker socket cannot affect the curr
 
   const second = socket();
   broker.handleConnection(second, { workerAuth: { worker } });
-  await assert.rejects(abandoned, error => error.code === 'WORKER_DISCONNECTED');
+  await assert.rejects(abandoned, (error: unknown) => error instanceof Error && 'code' in error && error.code === 'WORKER_DISCONNECTED');
   assert.equal(broker.isOnline(workerId), true);
   assert.deepEqual(presence, ['online', 'online']);
 
@@ -178,22 +183,22 @@ test('Worker broker limits regular jobs but reserves slots for lifecycle control
     maxControlPerWorker: 1,
     maxBufferedBytes: 32
   });
-  const sent = [];
+  const sent: Array<{type:string;job_id:string}> = [];
   const ws = {
     workerId, worker, readyState: WebSocket.OPEN, bufferedAmount: 0,
-    send(raw) { sent.push(JSON.parse(raw)); }, close() {}
+    send(raw: string) { sent.push(JSON.parse(raw)); }, close() {}
   };
   broker.connections.set(workerId, ws);
   const job = broker.dispatch(workerId, 'workspace.exec', {}, { timeoutMs: 1000 });
   await new Promise(resolve => setImmediate(resolve));
   await assert.rejects(() => broker.dispatch(workerId, 'workspace.exec', {}, { timeoutMs: 1000 }),
-    error => error.code === 'WORKER_BUSY' && error.status === 429);
+    (error: unknown) => error instanceof Error && 'code' in error && error.code === 'WORKER_BUSY' && 'status' in error && error.status === 429);
 
   const cleanup = broker.dispatchControl(workerId, 'worker.self_uninstall', {}, { timeoutMs: 1000 });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(sent.filter(item => item.type === 'job').length, 2);
   await assert.rejects(() => broker.dispatchControl(workerId, 'worker.self_uninstall', {}, { timeoutMs: 1000 }),
-    error => error.code === 'WORKER_BUSY' && error.status === 429);
+    (error: unknown) => error instanceof Error && 'code' in error && error.code === 'WORKER_BUSY' && 'status' in error && error.status === 429);
 
   for (const dispatched of sent) {
     if (dispatched.type === 'job') broker.handleMessage(ws, JSON.stringify({ type: 'result', job_id: dispatched.job_id, ok: true, result: { ok: true } }));
@@ -204,7 +209,7 @@ test('Worker broker limits regular jobs but reserves slots for lifecycle control
 
   ws.bufferedAmount = 32;
   await assert.rejects(() => broker.dispatch(workerId, 'workspace.exec', {}, { timeoutMs: 1000 }),
-    error => error.code === 'WORKER_BACKPRESSURE' && error.status === 429);
+    (error: unknown) => error instanceof Error && 'code' in error && error.code === 'WORKER_BACKPRESSURE' && 'status' in error && error.status === 429);
   broker.close();
 });
 
@@ -222,23 +227,23 @@ test('Worker broker bounds streams and rejects input while transport buffer is s
   broker.connections.set(workerId, ws);
   const stream = await broker.openStream(workerId, 'shell.attach', {});
   await assert.rejects(() => broker.openStream(workerId, 'shell.attach', {}),
-    error => error.code === 'WORKER_BUSY' && error.status === 429);
+    (error: unknown) => error instanceof Error && 'code' in error && error.code === 'WORKER_BUSY' && 'status' in error && error.status === 429);
   ws.bufferedAmount = 32;
   assert.throws(() => stream.input('x'),
-    error => error.code === 'WORKER_BACKPRESSURE' && error.status === 429);
+    (error: unknown) => error instanceof Error && 'code' in error && error.code === 'WORKER_BACKPRESSURE' && 'status' in error && error.status === 429);
   stream.close();
   assert.equal(broker.streams.size, 0);
   await assert.rejects(() => broker.openStream(workerId, 'shell.attach', {}),
-    error => error.code === 'WORKER_BACKPRESSURE' && error.status === 429);
+    (error: unknown) => error instanceof Error && 'code' in error && error.code === 'WORKER_BACKPRESSURE' && 'status' in error && error.status === 429);
   broker.close();
 });
 
 test('worker broker forwards authenticated memory emergency alerts to the Owner notifier', async () => {
   const workerId = crypto.randomUUID();
-  const alerts = [];
+  const alerts: Array<{workerId:string; workerName:string;memoryUsedPercent:number;phase:string; stopped:Record<string,number>}> = [];
   const broker = new WorkerConnectionBroker({
     repository: { findWorkerById: async () => null },
-    notifier: { async sendWorkerResourceAlert(alert) { alerts.push(alert); return { sent: true }; } }
+    notifier: { async sendWorkerResourceAlert(alert: {workerId:string;workerName:string;memoryUsedPercent:number;phase:string;stopped:Record<string,number>}) { alerts.push(alert); return { sent: true }; } }
   });
   const ws = {
     workerId,
@@ -268,9 +273,9 @@ test('worker broker forwards authenticated memory emergency alerts to the Owner 
 });
 
 test('worker execution service maps the existing execution interface to typed worker jobs', async () => {
-  const calls = [];
+  const calls: Array<{workerId:string;operation:string;payload:Record<string,unknown>;options:unknown}> = [];
   const broker = {
-    async dispatch(workerId, operation, payload, options) {
+    async dispatch(workerId: string, operation: string, payload: Record<string,unknown>, options: unknown) {
       calls.push({ workerId, operation, payload, options });
       if (operation === 'shell.inspect') return { pane_count: 1, target_pane: 'shell', pane_current_command: 'bash' };
       if (operation === 'workspace.exec') return { exit_code: 0, stdout: 'ok', stderr: '', duration_ms: 1, stdout_truncated: false, stderr_truncated: false };
@@ -322,7 +327,7 @@ test('MCP execution profile routes worker profiles without decrypting an SSH pas
   };
   const worker = {
     async inspectProfile() { return { pane_count: 1, target_pane: '%1', pane_current_command: 'bash', panes: [{ id: '%1', current_command: 'bash' }] }; },
-    async execWorkspaceCommand(_profile, password, command) {
+    async execWorkspaceCommand(_profile: unknown, password: string | null, command: string) {
       assert.equal(password, null);
       assert.equal(command, 'printf ok');
       return { exit_code: 0, stdout: 'ok', stderr: '', duration_ms: 2, stdout_truncated: false, stderr_truncated: false };
@@ -344,7 +349,7 @@ test('MCP execution profile routes worker profiles without decrypting an SSH pas
 test('dispatch rejects a socket replaced during asynchronous Worker lookup', async () => {
   const workerId = crypto.randomUUID();
   const worker = { id: workerId, enabled: true, capabilities: ['workspace.exec'] };
-  let completeLookup;
+  let completeLookup: (value: unknown) => void = () => {};
   const broker = new WorkerConnectionBroker({
     repository: { findWorkerById: () => new Promise(resolve => { completeLookup = resolve; }) },
     defaultTimeoutMs: 100
@@ -356,7 +361,7 @@ test('dispatch rejects a socket replaced during asynchronous Worker lookup', asy
   const job = broker.dispatch(workerId, 'workspace.exec', {}, { timeoutMs: 100 });
   broker.connections.set(workerId, second);
   completeLookup(worker);
-  await assert.rejects(job, error => error.code === 'WORKER_DISCONNECTED');
+  await assert.rejects(job, (error: unknown) => error instanceof Error && 'code' in error && error.code === 'WORKER_DISCONNECTED');
   assert.equal(sent, 0);
   assert.equal(broker.pending.size, 0);
   broker.close();
@@ -365,7 +370,7 @@ test('dispatch rejects a socket replaced during asynchronous Worker lookup', asy
 test('openStream rejects a socket replaced during asynchronous Worker lookup', async () => {
   const workerId = crypto.randomUUID();
   const worker = { id: workerId, enabled: true, capabilities: ['shell.attach'] };
-  let finish;
+  let finish: (value: unknown) => void = () => {};
   const broker = new WorkerConnectionBroker({
     repository: { findWorkerById: () => new Promise(resolve => { finish = resolve; }) }
   });
@@ -376,7 +381,7 @@ test('openStream rejects a socket replaced during asynchronous Worker lookup', a
   const opening = broker.openStream(workerId, 'shell.attach', {});
   broker.connections.set(workerId, second);
   finish(worker);
-  await assert.rejects(opening, error => error.code === 'WORKER_DISCONNECTED');
+  await assert.rejects(opening, (error: unknown) => error instanceof Error && 'code' in error && error.code === 'WORKER_DISCONNECTED');
   assert.equal(sent, 0);
   assert.equal(broker.streams.size, 0);
   broker.close();

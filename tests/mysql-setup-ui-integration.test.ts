@@ -1,19 +1,19 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const http = require('http');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const crypto = require('crypto');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
 
 const enabled = Boolean(process.env.MYSQL_TEST_HOST);
 
-function extractCsrf(html) { return html.match(/name="_csrf" value="([^"]+)"/)?.[1] || ''; }
+function extractCsrf(html: string) { return html.match(/name="_csrf" value="([^"]+)"/)?.[1] || ''; }
 
-async function adminConnection(database) {
+async function adminConnection(database: string) {
   const mysql = require('mysql2/promise');
   return mysql.createConnection({
-    host: process.env.MYSQL_TEST_HOST,
+    host: process.env.MYSQL_TEST_HOST || '127.0.0.1',
     port: Number(process.env.MYSQL_TEST_PORT || 3306),
     user: process.env.MYSQL_TEST_USERNAME || 'root',
     password: process.env.MYSQL_TEST_PASSWORD || '',
@@ -58,12 +58,12 @@ test('fresh Admin UI separates save/test from explicit MySQL source initializati
 
   const app = require('../src/app');
   const server = http.createServer(app);
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => {
-    await new Promise(resolve => server.close(resolve));
+    await new Promise<void>(resolve => server.close(() => resolve()));
     await databaseManager.close();
   });
-  const base = `http://127.0.0.1:${server.address().port}`;
+  const base = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
 
   const loginPage = await fetch(`${base}/login`);
   const preCookie = (loginPage.headers.get('set-cookie') || '').split(';')[0];
@@ -83,7 +83,7 @@ test('fresh Admin UI separates save/test from explicit MySQL source initializati
 
   const form = {
     _csrf: csrf,
-    host: process.env.MYSQL_TEST_HOST,
+    host: process.env.MYSQL_TEST_HOST || '127.0.0.1',
     port: String(process.env.MYSQL_TEST_PORT || 3306),
     database,
     username: process.env.MYSQL_TEST_USERNAME || 'root',
@@ -108,8 +108,8 @@ test('fresh Admin UI separates save/test from explicit MySQL source initializati
   assert.equal(databaseManager.status().engine, null);
   assert.equal(databaseManager.status().source?.initialized, false);
 
-  const bootstrapRaw = fs.readFileSync(process.env.BOOTSTRAP_CONFIG_PATH, 'utf8');
-  assert.doesNotMatch(bootstrapRaw, new RegExp(process.env.MYSQL_TEST_PASSWORD));
+  const bootstrapRaw = fs.readFileSync(process.env.BOOTSTRAP_CONFIG_PATH || '', 'utf8');
+  assert.doesNotMatch(bootstrapRaw, new RegExp(process.env.MYSQL_TEST_PASSWORD || ''));
 
   const untouched = await adminConnection(database);
   const [tablesBeforeInit] = await untouched.query('SHOW TABLES');

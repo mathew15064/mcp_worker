@@ -1,5 +1,6 @@
-const { test, expect } = require('@playwright/test');
-const { login, captureConsoleErrors } = require('./fixtures/helpers');
+import { test, expect } from '@playwright/test';
+import helpers = require('./fixtures/helpers');
+const {login, captureConsoleErrors} = helpers;
 
 test.describe.configure({ mode: 'serial' });
 
@@ -89,7 +90,7 @@ test('Audit Log pagination stays compact and page-size changes update the result
   const before = await header.boundingBox();
   await page.locator('.audit-section > .table-wrap').evaluate(element => { element.scrollTop = 320; });
   const after = await header.boundingBox();
-  expect(Math.abs(after.y - before.y)).toBeLessThan(3);
+  expect(Math.abs(after!.y - before!.y)).toBeLessThan(3);
 });
 
 test('desktop sidebar can collapse, persists the preference, and toasts stack from the top', async ({ page }) => {
@@ -97,11 +98,11 @@ test('desktop sidebar can collapse, persists the preference, and toasts stack fr
 
   const sidebar = page.locator('#admin-sidebar');
   const collapse = page.getByRole('button', { name: 'Collapse sidebar' });
-  const expandedWidth = (await sidebar.boundingBox()).width;
+  const expandedWidth = (await sidebar.boundingBox())!.width;
   await collapse.click();
   await expect(page.locator('body')).toHaveClass(/sidebar-collapsed/);
   await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeVisible();
-  const collapsedWidth = (await sidebar.boundingBox()).width;
+  const collapsedWidth = (await sidebar.boundingBox())!.width;
   expect(collapsedWidth).toBeLessThan(expandedWidth);
 
   await page.reload();
@@ -115,7 +116,7 @@ test('desktop sidebar can collapse, persists the preference, and toasts stack fr
   const toast = page.getByRole('status').filter({ hasText: 'Telegram settings saved to database.' });
   await expect(toast).toBeVisible();
   const box = await toast.boundingBox();
-  expect(box.y).toBeLessThan(120);
+  expect(box!.y).toBeLessThan(120);
 });
 
 test('OAuth modal traps focus, restores focus, creates a one-time secret, and search has an empty result state', async ({ page }) => {
@@ -132,8 +133,8 @@ test('OAuth modal traps focus, restores focus, creates a one-time secret, and se
   await expect(scopeChecks).toHaveCount(3);
   for (let index = 0; index < 3; index += 1) {
     const box = await scopeChecks.nth(index).boundingBox();
-    expect(box.width).toBeLessThanOrEqual(20);
-    expect(box.height).toBeLessThanOrEqual(20);
+    expect(box!.width).toBeLessThanOrEqual(20);
+    expect(box!.height).toBeLessThanOrEqual(20);
   }
   await expect(page.getByLabel('Display name')).toBeFocused();
 
@@ -156,7 +157,7 @@ test('OAuth modal traps focus, restores focus, creates a one-time secret, and se
 
   const secretDialog = page.getByRole('dialog', { name: 'Client secret created' });
   await expect(secretDialog).toBeVisible();
-  const secret = (await page.locator('#new-client-secret').textContent()).trim();
+  const secret = (await page.locator('#new-client-secret').textContent())!.trim();
   expect(secret).toMatch(/^br_sec_/);
   await page.getByRole('button', { name: "I've saved the secret" }).click();
   await expect(secretDialog).toBeHidden();
@@ -167,14 +168,14 @@ test('OAuth modal traps focus, restores focus, creates a one-time secret, and se
 
   const oauthClientRow = page.locator('#clients-table tbody tr').filter({ hasText: 'Playwright UX Client' });
   const oauthActions = oauthClientRow.locator('details.dropdown');
-  await oauthActions.evaluate(details => { details.open = true; });
+  await oauthActions.evaluate(details => { (details as HTMLDetailsElement).open = true; });
   await expect(oauthActions).toHaveAttribute('open', '');
   await oauthActions.locator('form[action$="/rotate"] button').click();
   const rotateConfirm = page.getByRole('dialog', { name: 'Rotate client secret?' });
   await expect(rotateConfirm).toBeVisible();
   await rotateConfirm.getByRole('button', { name: 'Rotate Secret' }).click();
   await expect(secretDialog).toBeVisible();
-  const rotatedSecret = (await page.locator('#new-client-secret').textContent()).trim();
+  const rotatedSecret = (await page.locator('#new-client-secret').textContent())!.trim();
   expect(rotatedSecret).toMatch(/^br_sec_/);
   expect(rotatedSecret).not.toBe(secret);
   await page.getByRole('button', { name: "I've saved the secret" }).click();
@@ -204,10 +205,10 @@ test('Admin SSH Profiles use direct Worker shells, expose Attach Shell, and rema
 
   const viewport = page.viewportSize();
   const box = await menu.boundingBox();
-  expect(box.x).toBeGreaterThanOrEqual(0);
-  expect(box.y).toBeGreaterThanOrEqual(0);
-  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
-  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.y).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height);
   await expect(menu.getByRole('menuitem', { name: 'Attach Shell' })).toBeVisible();
   await expect(menu.getByRole('menuitem', { name: 'Test Shell' })).toBeVisible();
   await expect(menu.getByRole('menuitem', { name: 'Edit Profile' })).toBeVisible();
@@ -270,7 +271,7 @@ test('Workers use one-time enrollment tokens and worker profiles without SSH cre
   await expect(enrollmentDialog.locator('#worker-install-macos-command')).toContainText('curl -fsSL http://127.0.0.1:3399/worker/install-macos.sh | sh');
   await expect(enrollmentDialog.locator('#worker-install-windows-command')).toContainText('irm http://127.0.0.1:3399/worker/install.ps1 | iex');
   await expect(enrollmentDialog.getByText('systemtd login', { exact: true })).toBeVisible();
-  const enrollment = (await enrollmentDialog.locator('#worker-enrollment-token').textContent()).trim();
+  const enrollment = (await enrollmentDialog.locator('#worker-enrollment-token').textContent())!.trim();
   expect(enrollment).toMatch(/^br_enroll_/);
   await enrollmentDialog.getByRole('button', { name: "I've saved the token" }).click();
   await expect(enrollmentDialog).toBeHidden();
@@ -490,7 +491,7 @@ test('theme preference persists and all admin pages render on desktop/mobile wit
   const theme = await page.locator('html').getAttribute('data-theme');
   expect(['light', 'dark']).toContain(theme);
   await page.reload();
-  await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+  await expect(page.locator('html')).toHaveAttribute('data-theme', theme ?? '');
 
   const pages = [
     ['overview', '/admin'],

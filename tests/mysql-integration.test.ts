@@ -1,9 +1,9 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const crypto = require('crypto');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
 
 const enabled = Boolean(process.env.MYSQL_TEST_HOST);
 
@@ -54,15 +54,15 @@ test('MySQL migrations, repositories, OAuth transactions, rollback and legacy im
   assert.equal(fresh.ran.length, expectedCount);
   let status = await runner.status();
   assert.equal(status.length, expectedCount);
-  assert.equal(status.every(row => row.ran), true);
-  assert.equal(new Set(status.map(row => row.batch)).size, 1);
+  assert.equal(status.every((row: {ran:boolean}) => row.ran), true);
+  assert.equal(new Set(status.map((row: {batch:number|null}) => row.batch)).size, 1);
 
   const rollback = await runner.rollback();
   assert.equal(rollback.rolledBack.length, expectedCount);
   assert.equal(rollback.rolledBack[0], '2026_11_02_000012_add_user_ownership_to_workers');
   assert.equal(rollback.rolledBack.at(-1), '2026_11_01_000001_create_system_settings_table');
   status = await runner.status();
-  assert.equal(status.filter(row => !row.ran).length, expectedCount);
+  assert.equal(status.filter((row: {ran:boolean}) => !row.ran).length, expectedCount);
   const remigrate = await runner.migrate();
   assert.equal(remigrate.ran.length, expectedCount);
 
@@ -72,7 +72,7 @@ test('MySQL migrations, repositories, OAuth transactions, rollback and legacy im
     '2026_11_02_000011_add_payloads_to_mcp_request_audit'
   ]);
   status = await runner.status();
-  assert.equal(status.filter(row => !row.ran).length, 2);
+  assert.equal(status.filter((row: {ran:boolean}) => !row.ran).length, 2);
   const stepRemigrate = await runner.migrate();
   assert.equal(stepRemigrate.ran.length, 2);
 
@@ -96,7 +96,7 @@ test('MySQL migrations, repositories, OAuth transactions, rollback and legacy im
     name: 'Replay Worker',
     publicKey: workerKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
     capabilities: []
-  }), error => error.code === 'WORKER_ENROLLMENT_INVALID');
+  }), (error: unknown) => error instanceof Error && 'code' in error && error.code === 'WORKER_ENROLLMENT_INVALID');
   const workerProfile = await workerRepo.createProfile({
     name: 'Worker Dev', description: 'outbound transport', workerId: worker.id,
     tmuxSession: 'main', enabled: true
@@ -117,7 +117,7 @@ test('MySQL migrations, repositories, OAuth transactions, rollback and legacy im
   await assert.rejects(() => terminals.create({
     name: 'mysql dev', description: '', host: '127.0.0.1', port: 22,
     username: 'root', tmux_session: 'other', enabled: true
-  }, 'enc:test-envelope'), error => error.code === 'PROFILE_NAME_CONFLICT');
+  }, 'enc:test-envelope'), (error: unknown) => error instanceof Error && 'code' in error && error.code === 'PROFILE_NAME_CONFLICT');
 
   const oauthRepo = new McpOAuthRepository(adapter);
   const oauthConfig = {

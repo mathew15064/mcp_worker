@@ -1,15 +1,15 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const http = require('http');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const crypto = require('crypto');
-const { spawn, spawnSync } = require('child_process');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import {spawn,spawnSync, type SpawnOptionsWithoutStdio} from 'node:child_process';
 
 const enabled = Boolean(process.env.MYSQL_TEST_HOST) && process.env.BOT_REPORT_ISOLATED_WORKER_TEST === '1';
 
-async function mysqlAdmin(database) {
+async function mysqlAdmin(database: string) {
   const mysql = require('mysql2/promise');
   return mysql.createConnection({
     host: process.env.MYSQL_TEST_HOST,
@@ -20,13 +20,13 @@ async function mysqlAdmin(database) {
   });
 }
 
-async function waitFor(check, timeoutMs = 12_000) {
+async function waitFor<T>(check: () => Promise<T> | T, timeoutMs = 12_000): Promise<NonNullable<T>> {
   const started = Date.now();
-  let lastError = null;
+  let lastError: unknown = null;
   while (Date.now() - started < timeoutMs) {
     try {
       const value = await check();
-      if (value) return value;
+      if (value) return value as NonNullable<T>;
     } catch (error) { lastError = error; }
     await new Promise(resolve => setTimeout(resolve, 100));
   }
@@ -34,15 +34,15 @@ async function waitFor(check, timeoutMs = 12_000) {
   throw new Error('Timed out waiting for worker integration state.');
 }
 
-function runCommand(command, args, options = {}) {
-  return new Promise((resolve, reject) => {
+function runCommand(command: string, args: string[], options: SpawnOptionsWithoutStdio = {}) {
+  return new Promise<{status: number;stdout:string;stderr:string}>((resolve, reject) => {
     const child = spawn(command, args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', chunk => { stdout += chunk.toString('utf8'); });
     child.stderr.on('data', chunk => { stderr += chunk.toString('utf8'); });
     child.once('error', reject);
-    child.once('close', code => resolve({ status: Number.isInteger(code) ? code : 1, stdout, stderr }));
+    child.once('close', code => resolve({ status: Number.isInteger(code) ? Number(code) : 1, stdout, stderr }));
   });
 }
 
@@ -95,8 +95,8 @@ test('real outbound worker executes MCP workspace, file and persistent direct-sh
   const terminalMcpService = require('../src/services/terminalMcpService');
   const server = http.createServer(app);
   workerBroker.attach(server);
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const baseUrl = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
 
   const userHome = path.join(dir, 'worker-user');
   fs.mkdirSync(userHome, { recursive: true });
@@ -107,7 +107,7 @@ test('real outbound worker executes MCP workspace, file and persistent direct-sh
   t.after(async () => {
     try { spawnSync(cliPath, ['stop'], { cwd: workRoot, env: cliEnv, encoding: 'utf8' }); } catch (_) {}
     try { workerBroker.close(); } catch (_) {}
-    try { await new Promise(resolve => server.close(resolve)); } catch (_) {}
+    try { await new Promise<void>(resolve => server.close(() => resolve())); } catch (_) {}
     try { await databaseManager.close(); } catch (_) {}
     try {
       const cleanup = await mysqlAdmin(rootDatabase);
@@ -119,19 +119,19 @@ test('real outbound worker executes MCP workspace, file and persistent direct-sh
 
   await runtimeSettings.set('mcp.public_base_url', baseUrl);
   const loginPage = await fetch(baseUrl + '/login');
-  const initialCookie = loginPage.headers.get('set-cookie').split(';')[0];
-  const csrf = html => html.match(/name="_csrf" value="([^"]+)"/)[1];
+  const initialCookie = (loginPage.headers.get('set-cookie') || '').split(';')[0];
+  const csrf = (html: string) => html.match(/name="_csrf" value="([^"]+)"/)?.[1] || '';
   const signedIn = await fetch(baseUrl + '/login', { method: 'POST', redirect: 'manual',
     headers: { cookie: initialCookie, 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ _csrf: csrf(await loginPage.text()), username: 'admin', password: process.env.ADMIN_PASSWORD }) });
+    body: new URLSearchParams({ _csrf: csrf(await loginPage.text()), username: 'admin', password: process.env.ADMIN_PASSWORD || '' }) });
   assert.equal(signedIn.status, 302);
-  const cookie = signedIn.headers.get('set-cookie').split(';')[0];
-  async function getPage(url) {
+  const cookie = (signedIn.headers.get('set-cookie') || '').split(';')[0];
+  async function getPage(url: string) {
     const r = await fetch(baseUrl + url, { headers: { cookie } });
     assert.equal(r.status, 200);
     return r.text();
   }
-  async function submit(url, fields) {
+  async function submit(url: string, fields: Record<string,string>) {
     return fetch(baseUrl + url, { method: 'POST', redirect: 'manual',
       headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams(fields) });
@@ -148,7 +148,7 @@ test('real outbound worker executes MCP workspace, file and persistent direct-sh
   const workersHtml = await getPage('/admin/workers');
   assert.equal((await submit('/admin/workers/enrollment', { _csrf: csrf(workersHtml), ttl_seconds: '600' })).status, 302);
   const enrollmentPage = await getPage('/admin/workers');
-  const enrollment = { token: enrollmentPage.match(/id="worker-enrollment-token"[^>]*>([^<]+)/)[1] };
+  const enrollment = { token: enrollmentPage.match(/id="worker-enrollment-token"[^>]*>([^<]+)/)?.[1] || '' };
   assert.doesNotMatch(await getPage('/admin/workers'), /id="worker-enrollment-token"/);
 
   const installResult = await runCommand('sh', ['-c', `curl -fsSL ${baseUrl}/worker/install.sh | sh`], {
@@ -176,7 +176,7 @@ test('real outbound worker executes MCP workspace, file and persistent direct-sh
     const row = await workerRepo.findWorkerByName('Live Worker');
     return row?.status === 'online' && workerBroker.isOnline(row.id) ? row : null;
   }).catch(error => {
-    throw new Error(`${error.message}\nworker output:\n${childOutput}`);
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\nworker output:\n${childOutput}`);
   });
   assert.ok(fs.existsSync(statePath));
   const stateText = fs.readFileSync(statePath, 'utf8');
@@ -223,8 +223,8 @@ test('real outbound worker executes MCP workspace, file and persistent direct-sh
   });
   assert.equal(created.status, 302);
   const oneTime = await getPage('/admin/clients');
-  const firstId = oneTime.match(/id="new-client-id"[^>]*>([^<]+)/)[1];
-  const firstSecret = oneTime.match(/id="new-client-secret"[^>]*>([^<]+)/)[1];
+  const firstId = oneTime.match(/id="new-client-id"[^>]*>([^<]+)/)?.[1] || '';
+  const firstSecret = oneTime.match(/id="new-client-secret"[^>]*>([^<]+)/)?.[1] || '';
   assert.doesNotMatch(await getPage('/admin/clients'), /id="new-client-secret"/);
   assert.match(await getPage('/admin/onboarding'), /Next step: 6/);
   const first = spawn(process.execPath, [path.resolve(__dirname, '../scripts/first-mcp-call.js'), baseUrl], {
@@ -234,7 +234,7 @@ test('real outbound worker executes MCP workspace, file and persistent direct-sh
   let firstOutput = '';
   first.stdout.on('data', chunk => { firstOutput += chunk; });
   first.stderr.on('data', chunk => { firstOutput += chunk; });
-  const finished = new Promise((resolve, reject) => { first.once('error', reject); first.once('close', resolve); });
+  const finished = new Promise<number | null>((resolve, reject) => { first.once('error', reject); first.once('close', resolve); });
   t.after(() => { if (first.exitCode === null) first.kill(); });
   const authUrl = await waitFor(() => firstOutput.match(/http:\/\/127\.0\.0\.1:\d+\/oauth\/authorize\?[^\s]+/)?.[0]);
   const authParams = Object.fromEntries(new URL(authUrl).searchParams);
@@ -243,9 +243,9 @@ test('real outbound worker executes MCP workspace, file and persistent direct-sh
   const approved = await submit('/oauth/authorize', { ...authParams, _csrf: csrf(await consent.text()), action: 'allow' });
   assert.equal(approved.status, 302);
   const callback = approved.headers.get('location');
-  const wrong = new URL(callback); wrong.searchParams.set('state', 'invalid');
+  const wrong = new URL(callback || ''); wrong.searchParams.set('state', 'invalid');
   assert.equal((await fetch(wrong)).status, 400);
-  assert.equal((await fetch(callback)).status, 200);
+  assert.equal((await fetch(callback || '')).status, 200);
   assert.equal(await finished, 0, 'first-call helper failed');
   assert.match(firstOutput, /PASS runtime_info/);
   assert.ok(!firstOutput.includes(firstSecret));
@@ -257,7 +257,8 @@ test('real outbound worker executes MCP workspace, file and persistent direct-sh
   const { token } = await issueToken();
   let requestId = 0;
   const called = new Set();
-  async function rpc(method, params) {
+  interface RpcResult {tools?: {name:string}[];structuredContent?: Record<string,unknown>;content?: Array<{type:string;text:string}>}
+  async function rpc(method: string, params: Record<string,unknown>): Promise<RpcResult> {
     const response = await fetch(baseUrl + '/mcp', {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream',
@@ -267,17 +268,18 @@ test('real outbound worker executes MCP workspace, file and persistent direct-sh
     assert.equal(response.status, 200);
     const body = await parseMcpResponse(response);
     assert.ok(!body.error, JSON.stringify(body.error));
-    assert.ok(!body.result.isError, JSON.stringify(body.result));
-    return body.result;
+    assert.ok(!body.result?.isError, JSON.stringify(body.result));
+    if (!body.result) throw new Error('MCP response missing result');
+    return body.result as RpcResult;
   }
-  const catalog = (await rpc('tools/list', {})).tools;
+  const catalog = (await rpc('tools/list', {})).tools || [];
   assert.equal(catalog.length, 19);
   const profile = 'Live Worker Profile';
-  async function call(name, args = {}) {
+  async function call(name: string, args: Record<string,unknown> = {}): Promise<Record<string,unknown>> {
     const result = await rpc('tools/call', { name, arguments: args });
     called.add(name);
     console.log('MCP PASS ' + name);
-    return result.structuredContent || JSON.parse(result.content[0].text);
+    return result.structuredContent || JSON.parse(result.content?.[0]?.text || '{}') as Record<string,unknown>;
   }
   const runtime = await call('runtime_info');
   assert.equal(runtime.tool_count, 19);
@@ -285,7 +287,7 @@ test('real outbound worker executes MCP workspace, file and persistent direct-sh
   await call('terminal_list');
   assert.equal((await call('terminal_status', { profile })).status, 'READY');
   await call('terminal_send', { profile, text: 'echo mcp-live-terminal' });
-  await waitFor(async () => (await call('terminal_read', { profile })).text.includes('mcp-live-terminal'));
+  await waitFor(async () => String((await call('terminal_read', {profile})).text).includes('mcp-live-terminal'));
   await call('terminal_interrupt', { profile });
   assert.equal((await call('workspace_exec', { profile, cwd: workRoot, command: 'git init -q && git add worker.txt && git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm initial' })).exit_code, 0);
   const readMcp = await call('file_read', { profile, path: filePath });
@@ -302,7 +304,7 @@ test('real outbound worker executes MCP workspace, file and persistent direct-sh
   assert.match(JSON.stringify(artifact), /mcp-patched/);
   assert.equal((await call('check_run', { profile, cwd: workRoot, command: 'test -f new.txt' })).exit_code, 0);
   const proc = await call('process_start', { profile, cwd: workRoot, command: 'echo mcp-live-process; sleep 60' });
-  const process_id = proc.process_id;
+  const process_id = String(proc.process_id);
   assert.match(process_id, /^brproc-/);
   await call('process_status', { profile, process_id });
   await waitFor(async () => JSON.stringify(await call('process_logs', { profile, process_id })).includes('mcp-live-process'));
@@ -318,12 +320,12 @@ test('real outbound worker executes MCP workspace, file and persistent direct-sh
     const original = fs.readFileSync(path.join(dist, file));
     const originalSums = fs.readFileSync(path.join(dist, 'SHA256SUMS'));
     const alternate = fs.readFileSync(process.env.BOT_REPORT_WORKER_UPGRADE_FIXTURE);
-    const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+    const digest = (bytes: Buffer) => crypto.createHash('sha256').update(bytes).digest('hex');
     assert.notEqual(digest(original), digest(alternate));
     const installed = path.join(cliEnv.BOT_REPORT_WORKER_INSTALL_ROOT, 'current', 'systemtd');
     const identityBefore = fs.readFileSync(statePath);
     const configBefore = fs.readFileSync(path.join(workerHome, 'config.json'));
-    async function install(action = 'install', extra = {}) {
+    async function install(action = 'install', extra: Record<string,string> = {}) {
       return runCommand('sh', ['-c', `curl -fsSL ${baseUrl}/worker/install.sh | sh`], {
         cwd: workRoot, env: { ...cliEnv, BOT_REPORT_WORKER_ACTION: action, BOT_REPORT_WORKER_SKIP_SERVICE: '0', ...extra }
       });

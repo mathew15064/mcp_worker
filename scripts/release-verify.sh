@@ -29,12 +29,23 @@ trap 'exit 1' HUP INT TERM
 start=$(date +%s)
 ./setup.sh --init >"$OUT/setup.log" 2>&1
 echo "Fresh setup elapsed seconds: $(($(date +%s)-start))" | tee "$OUT/timing.txt"
-compose exec -T -e BOT_REPORT_STANDALONE_SMOKE=1 bot-report node - seed < tests/standalone-install-smoke.js
+# Build tests once in the isolated builder, then put only compiled fixtures into
+# temporary verification containers. The production image never contains tests.
+docker build --target builder -t "$ID-test:local" . >"$OUT/test-build.log" 2>&1
+docker create --name "$ID-test-builder" "$ID-test:local" >/dev/null
+docker cp "$ID-test-builder":/app/dist/tests "$TEST_TMP/"
+APP_CONTAINER=$(compose ps -q bot-report)
+[ -n "$APP_CONTAINER" ]
+docker cp "$TEST_TMP/tests" "$APP_CONTAINER":/app/dist/
+compose exec -T -e BOT_REPORT_STANDALONE_SMOKE=1 bot-report node dist/tests/standalone-install-smoke.js seed
 hash=$(sha256sum "$ENVFILE" | cut -d' ' -f1)
 ./setup.sh --down
 ./setup.sh --init >"$OUT/restart.log" 2>&1
 [ "$hash" = "$(sha256sum "$ENVFILE" | cut -d' ' -f1)" ]
-compose exec -T -e BOT_REPORT_STANDALONE_SMOKE=1 bot-report node - verify < tests/standalone-install-smoke.js
+APP_CONTAINER=$(compose ps -q bot-report)
+[ -n "$APP_CONTAINER" ]
+docker cp "$TEST_TMP/tests" "$APP_CONTAINER":/app/dist/
+compose exec -T -e BOT_REPORT_STANDALONE_SMOKE=1 bot-report node dist/tests/standalone-install-smoke.js verify
 docker run --rm --entrypoint sh "$IMAGE" -c 'cd /app/worker/bin && sha256sum -c SHA256SUMS && cat WORKER_RELEASE && ./bot-report-worker-linux-amd64 version' | tee "$OUT/worker-checksums.txt"
 docker network create "$ID-net" >/dev/null
 pass=$(openssl rand -hex 24)
@@ -42,9 +53,6 @@ docker run -d --name "$ID-db" --network "$ID-net" -e MYSQL_ROOT_PASSWORD="$pass"
 docker run -d --name "$ID-run" --network "$ID-net" --user root --entrypoint sh "$IMAGE" -c 'sleep 3600' >/dev/null
 # Compile the typed tests in the same builder used for the production image.
 # Do not ship test files or TypeScript dev dependencies in the runtime image.
-docker build --target builder -t "$ID-test:local" . >"$OUT/test-build.log" 2>&1
-docker create --name "$ID-test-builder" "$ID-test:local" >/dev/null
-docker cp "$ID-test-builder":/app/dist/tests "$TEST_TMP/"
 docker cp "$TEST_TMP/tests" "$ID-run":/app/dist/
 rm -rf "$TEST_TMP/tests"
 docker exec "$ID-run" apk add --no-cache curl git bash ripgrep openssl >"$OUT/test-prerequisites.log" 2>&1

@@ -1,19 +1,27 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const http = require('http');
-const fs = require('fs');
-const { setupEnv, cleanup } = require('./helper');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import http, {type Server} from 'node:http';
+import fs from 'node:fs';
+import Database from 'better-sqlite3';
+import bcrypt from 'bcryptjs';
+import crypto from 'node:crypto';
+import {runMigrations} from '../src/db/migrations';
+import authService = require('../src/services/authService');
+import store = require('../src/db/bootstrapConfigStore');
+import databaseManager = require('../src/db/databaseManager');
+import runtimeSettings = require('../src/services/runtimeSettingsService');
+import app = require('../src/app');
+import helper = require('./helper');
+const {setupEnv,cleanup} = helper;
 
 const env = setupEnv('setup-mode');
-const databaseManager = require('../src/db/databaseManager');
-const runtimeSettings = require('../src/services/runtimeSettingsService');
 databaseManager.resetForTests();
 runtimeSettings.resetForTests();
-const app = require('../src/app');
-let server;
-let baseUrl;
 
-function csrf(html) { return html.match(/name="_csrf" value="([^"]+)"/)?.[1] || ''; }
+let server: Server;
+let baseUrl: string;
+
+function csrf(html: string) { return html.match(/name="_csrf" value="([^"]+)"/)?.[1] || ''; }
 
 async function login() {
   const page = await fetch(`${baseUrl}/login`);
@@ -32,12 +40,12 @@ test.before(async () => {
   await databaseManager.initialize();
   await runtimeSettings.load(null);
   server = http.createServer(app);
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  baseUrl = `http://127.0.0.1:${server.address().port}`;
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  baseUrl = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
 });
 
 test.after(async () => {
-  if (server) await new Promise(resolve => server.close(resolve));
+  if (server) await new Promise<void>(resolve => server.close(() => resolve()));
   cleanup(env.dir);
 });
 
@@ -45,11 +53,11 @@ test('fresh install stays administrable without a database and blocks data surfa
   const health = await fetch(`${baseUrl}/healthz`);
   assert.equal(health.status, 200);
   const healthBody = await health.json();
-  assert.equal(healthBody.database, 'UNCONFIGURED');
+  assert.equal((healthBody as {database:string}).database, 'UNCONFIGURED');
 
   const ready = await fetch(`${baseUrl}/readyz`);
   assert.equal(ready.status, 503);
-  assert.equal((await ready.json()).ready, false);
+  assert.equal(((await ready.json()) as {ready:boolean}).ready, false);
 
   const denied = await fetch(baseUrl + '/admin/onboarding', { redirect: 'manual' });
   assert.equal(denied.status, 302);
@@ -85,10 +93,6 @@ test('fresh install stays administrable without a database and blocks data surfa
 });
 
 test('existing SQLite data becomes migration-only and keeps a temporary legacy-admin login bridge', async () => {
-  const Database = require('better-sqlite3');
-  const bcrypt = require('bcryptjs');
-  const crypto = require('crypto');
-  const { runMigrations } = require('../src/db/migrations');
   const legacy = new Database(process.env.DATABASE_PATH);
   runMigrations(legacy);
   const now = new Date().toISOString();
@@ -106,24 +110,23 @@ test('existing SQLite data becomes migration-only and keeps a temporary legacy-a
   assert.equal(status.setupOnly, true);
   assert.equal(databaseManager.getAdapter(), null);
 
-  const authService = require('../src/services/authService');
   const envAuth = await authService.authenticate('admin', 'TestAdminPassword2026!');
   assert.equal(envAuth.success, true);
-  assert.equal(envAuth.user.auth_source, 'env');
+  assert.equal(envAuth.user?.auth_source, 'env');
   const legacyAuth = await authService.authenticate('admin', 'LegacyAdminPassword2026!');
   assert.equal(legacyAuth.success, true);
-  assert.equal(legacyAuth.user.auth_source, 'legacy');
+  assert.equal(legacyAuth.user?.auth_source, 'legacy');
 });
 
 test('bootstrap MySQL password is encrypted on disk and never returned by public config', () => {
-  const store = require('../src/db/bootstrapConfigStore');
   const password = 'mysql-super-secret-password';
   const publicConfig = store.save({ host: 'db.internal', port: 3306, database: 'bot_report', username: 'bot_report', password, ssl: true });
   const raw = fs.readFileSync(store.path, 'utf8');
   assert.doesNotMatch(raw, new RegExp(password));
   assert.match(raw, /password_envelope/);
+  if (!publicConfig) throw new Error('Public bootstrap config missing');
   assert.equal(publicConfig.hasPassword, true);
   assert.equal('password' in publicConfig, false);
-  assert.equal(store.load().password, password);
+  assert.equal(store.load()?.password, password);
   if (process.platform !== 'win32') assert.equal(fs.statSync(store.path).mode & 0o777, 0o600);
 });

@@ -1,17 +1,17 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const http = require('http');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const crypto = require('crypto');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
 
 const enabled = Boolean(process.env.MYSQL_TEST_HOST);
 
-function extractCsrf(html) { return html.match(/name="_csrf" value="([^"]+)"/)?.[1] || ''; }
-function cookieFrom(response) { return (response.headers.get('set-cookie') || '').split(';')[0]; }
+function extractCsrf(html: string) { return html.match(/name="_csrf" value="([^"]+)"/)?.[1] || ''; }
+function cookieFrom(response: Response) { return (response.headers.get('set-cookie') || '').split(';')[0]; }
 
-async function adminConnection(database) {
+async function adminConnection(database: string) {
   const mysql = require('mysql2/promise');
   return mysql.createConnection({
     host: process.env.MYSQL_TEST_HOST,
@@ -22,7 +22,7 @@ async function adminConnection(database) {
   });
 }
 
-async function login(base, username, password, returnTo = '/') {
+async function login(base: string, username: string, password: string, returnTo = '/') {
   const page = await fetch(`${base}/login`);
   const preCookie = cookieFrom(page);
   const csrf = extractCsrf(await page.text());
@@ -34,7 +34,7 @@ async function login(base, username, password, returnTo = '/') {
   return { response, cookie: cookieFrom(response) };
 }
 
-async function pageWithCsrf(base, pathname, cookie) {
+async function pageWithCsrf(base: string, pathname: string, cookie: string) {
   const response = await fetch(`${base}${pathname}`, { headers: { cookie } });
   const html = await response.text();
   return { response, html, csrf: extractCsrf(html) };
@@ -91,12 +91,12 @@ test('database users own isolated OAuth client profiles and sessions revoke on a
 
   const app = require('../src/app');
   const server = http.createServer(app);
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => {
-    await new Promise(resolve => server.close(resolve));
+    await new Promise<void>(resolve => server.close(() => resolve()));
     await databaseManager.close();
   });
-  const base = `http://127.0.0.1:${server.address().port}`;
+  const base = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
 
   const adminLogin = await login(base, 'admin', 'UserAdmin2026!', '/admin/users');
   assert.equal(adminLogin.response.status, 302);
@@ -121,8 +121,8 @@ test('database users own isolated OAuth client profiles and sessions revoke on a
   const userRepo = require('../src/repositories/userRepository');
   const oauthRepo = require('../src/repositories/mcpOAuthRepository');
   const users = await userRepo.list();
-  const alice = users.find(user => user.username === 'alice');
-  const bob = users.find(user => user.username === 'bob');
+  const alice = users.find((user: {username: string;principal_id: string;profile_id: string;id: string}) => user.username === 'alice');
+  const bob = users.find((user: {username: string;principal_id: string;profile_id: string;id: string}) => user.username === 'bob');
   assert.ok(alice && bob);
   assert.notEqual(alice.principal_id, bob.principal_id);
   assert.notEqual(alice.profile_id, bob.profile_id);
@@ -191,9 +191,9 @@ test('database users own isolated OAuth client profiles and sessions revoke on a
   const globalWorker = await workerRepo.createWorker({ name: 'Admin Global Worker', publicKey: 'test-key', capabilities: [] });
   await workerRepo.createProfile({ name: 'Admin Global Profile', workerId: globalWorker.id, tmuxSession: 'main', enabled: true });
   const terminalMcpService = require('../src/services/terminalMcpService');
-  assert.deepEqual((await terminalMcpService.list({ actorId: alice.principal_id })).map(item => item.name), [enrolled.profile.name]);
+  assert.deepEqual((await terminalMcpService.list({ actorId: alice.principal_id })).map((item: {name:string}) => item.name), [enrolled.profile.name]);
   assert.deepEqual(await terminalMcpService.list({ actorId: bob.principal_id }), []);
-  await assert.rejects(() => terminalMcpService.findProfile('Admin Global Profile', { actorId: alice.principal_id }), error => error.code === 'PROFILE_NOT_FOUND');
+  await assert.rejects(() => terminalMcpService.findProfile('Admin Global Profile', { actorId: alice.principal_id }), (error: unknown) => error instanceof Error && 'code' in error && error.code === 'PROFILE_NOT_FOUND');
 
   const bobWorkersPageBeforeEnroll = await pageWithCsrf(base, '/account/workers', (await login(base, 'bob', 'BobPassword2026!')).cookie);
   assert.doesNotMatch(bobWorkersPageBeforeEnroll.html, /Alice Worker/);
@@ -232,7 +232,7 @@ test('database users own isolated OAuth client profiles and sessions revoke on a
 
   const verifier = 'user-account-verifier-abcdefghijklmnopqrstuvwxyz-0123456789';
   const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
-  const authorizeParams = client => new URLSearchParams({
+  const authorizeParams = (client: {client_id:string;redirect_uris:string[]}) => new URLSearchParams({
     client_id: client.client_id,
     redirect_uri: client.redirect_uris[0],
     response_type: 'code',
@@ -298,8 +298,8 @@ test('database users own isolated OAuth client profiles and sessions revoke on a
     codeChallenge: challenge,
     codeChallengeMethod: 'S256',
     resource: 'http://127.0.0.1:3333/mcp'
-  }), error => error.error === 'unauthorized_client' && /disabled/i.test(error.message));
-  await assert.rejects(() => resourceServer.verifyToken(rawAccessToken), error => error.code === 'USER_DISABLED');
+  }), (error: unknown) => typeof error === 'object' && error !== null && 'error' in error && error.error === 'unauthorized_client' && 'message' in error && /disabled/i.test(String(error.message)));
+  await assert.rejects(() => resourceServer.verifyToken(rawAccessToken), (error: unknown) => error instanceof Error && 'code' in error && error.code === 'USER_DISABLED');
 
   const enableAlice = await fetch(`${base}/admin/users/${alice.id}/enable`, {
     method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: adminLogin.cookie },

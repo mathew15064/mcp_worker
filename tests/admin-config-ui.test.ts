@@ -1,20 +1,21 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const http = require('http');
-const crypto = require('crypto');
-const { setupEnv, cleanup, initDb } = require('./helper');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import crypto from 'node:crypto';
+import helper = require('./helper');
+const {setupEnv, cleanup, initDb} = helper;
 
 const env = setupEnv('admin-ui');
 initDb();
 const app = require('../src/app');
-let server;
-let baseUrl;
-let cookie;
-let csrf;
-let adminWorker;
-let originalWorkerIsOnline;
+let server: http.Server;
+let baseUrl = '';
+let cookie = '';
+let csrf = '';
+let adminWorker: {id:string} = {id: ""};
+let originalWorkerIsOnline: ((workerId: string) => boolean) | null = null;
 
-function extractCsrf(html) {
+function extractCsrf(html: string) {
   return html.match(/name="_csrf" value="([^"]+)"/)?.[1] || '';
 }
 
@@ -48,8 +49,8 @@ async function login() {
 
 test.before(async () => {
   server = http.createServer(app);
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  baseUrl = `http://127.0.0.1:${server.address().port}`;
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  baseUrl = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
   await login();
   const workerRepo = require('../src/repositories/workerRepository');
   const workerBroker = require('../src/services/workerConnectionBroker');
@@ -59,13 +60,13 @@ test.before(async () => {
     capabilities: ['tmux.inspect', 'tmux.send', 'tmux.read', 'tmux.interrupt']
   });
   originalWorkerIsOnline = workerBroker.isOnline.bind(workerBroker);
-  workerBroker.isOnline = workerId => workerId === adminWorker.id || originalWorkerIsOnline(workerId);
+  workerBroker.isOnline = (workerId: string) => workerId === adminWorker.id || (originalWorkerIsOnline?.(workerId) ?? false);
 });
 
 test.after(async () => {
   const workerBroker = require('../src/services/workerConnectionBroker');
   if (originalWorkerIsOnline) workerBroker.isOnline = originalWorkerIsOnline;
-  if (server) await new Promise(resolve => server.close(resolve));
+  if (server) await new Promise<void>(resolve => server.close(() => resolve()));
   cleanup(env.dir);
 });
 
@@ -110,14 +111,14 @@ test('OAuth client can be created from admin UI and secret is shown once', async
   const secondGet = await fetch(`${baseUrl}/admin/clients`, { headers: { cookie } });
   assert.doesNotMatch(await secondGet.text(), /Client secret created/);
   const clients = await require('../src/repositories/mcpOAuthRepository').listClients();
-  const matching = clients.filter(client => client.display_name === 'UI Client');
+  const matching = clients.filter((client: {display_name:string}) => client.display_name === 'UI Client');
   assert.equal(matching.length, 1);
   assert.equal(matching[0].status, 'active');
 });
 
 test('Audit Log traces MCP activity by client, tool, result, and request id', async () => {
   const repo = require('../src/repositories/mcpOAuthRepository');
-  const client = (await repo.listClients()).find(item => item.display_name === 'UI Client');
+  const client = (await repo.listClients()).find((item: {display_name:string}) => item.display_name === 'UI Client');
   assert.ok(client);
 
   await repo.recordAudit({
@@ -166,7 +167,7 @@ test('Audit Log traces MCP activity by client, tool, result, and request id', as
 
 test('Audit Log uses compact numbered pagination with configurable page size', async () => {
   const repo = require('../src/repositories/mcpOAuthRepository');
-  const client = (await repo.listClients()).find(item => item.display_name === 'UI Client');
+  const client = (await repo.listClients()).find((item: {display_name:string}) => item.display_name === 'UI Client');
   assert.ok(client);
   for (let index = 0; index < 25; index += 1) {
     await repo.recordAudit({
@@ -217,7 +218,7 @@ test('Admin SSH Profile is created through an active global Worker without SSH c
   assert.equal(response.status, 302);
   assert.equal(response.headers.get('location'), '/admin/terminals');
   const workerRepo = require('../src/repositories/workerRepository');
-  const profile = (await workerRepo.listAdminProfiles()).find(item => item.name === 'UI-Terminal');
+  const profile = (await workerRepo.listAdminProfiles()).find((item: {name:string}) => item.name === 'UI-Terminal');
   assert.ok(profile);
   assert.equal(profile.worker_id, adminWorker.id);
   assert.equal(profile.tmux_session, '');
@@ -231,7 +232,7 @@ test('Admin SSH Profile is created through an active global Worker without SSH c
 
 test('Admin SSH Profile edit keeps Worker-backed metadata only', async () => {
   const workerRepo = require('../src/repositories/workerRepository');
-  const profile = (await workerRepo.listAdminProfiles()).find(item => item.name === 'UI-Terminal');
+  const profile = (await workerRepo.listAdminProfiles()).find((item: {name:string}) => item.name === 'UI-Terminal');
   assert.ok(profile);
   const response = await fetch(`${baseUrl}/admin/terminals/${profile.id}/update`, {
     method: 'POST',
@@ -258,12 +259,12 @@ test('Admin SSH Profile edit keeps Worker-backed metadata only', async () => {
 
 test('Admin SSH Profile tests direct Worker shell and exposes Attach Shell', async () => {
   const workerRepo = require('../src/repositories/workerRepository');
-  const profile = (await workerRepo.listAdminProfiles()).find(item => item.name === 'UI-Terminal-Edited');
+  const profile = (await workerRepo.listAdminProfiles()).find((item: {name:string}) => item.name === 'UI-Terminal-Edited');
   assert.ok(profile);
 
   const workerExecution = require('../src/services/workerExecutionService');
   const originalTest = workerExecution.testConnection;
-  workerExecution.testConnection = async workerProfile => {
+  workerExecution.testConnection = async (workerProfile: {id:string;worker_id:string}) => {
     assert.equal(workerProfile.id, profile.id);
     assert.equal(workerProfile.worker_id, adminWorker.id);
     return { pane_count: 1, target_pane: 'ui-terminal-edit:0.0', pane_current_command: 'bash' };

@@ -22,4 +22,7 @@ test('TS4 compiled Worker and script layout retains installer endpoints', () => 
     assert.ok(fs.statSync(path.join(compiled, 'scripts', name)).isFile());
   }
   assert.ok(fs.statSync(path.join(compiled, 'src/server.js')).isFile());
+  assert.ok(fs.statSync(path.join(compiled, 'tests/standalone-install-smoke.js')).isFile());
+  assert.ok(fs.statSync(path.join(compiled, 'tests/e2e/fixtures/start-test-server.js')).isFile());
+  assert.ok(fs.statSync(path.join(compiled, 'playwright.config.js')).isFile());
 });
