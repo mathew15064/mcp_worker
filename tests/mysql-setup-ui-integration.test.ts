@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,7 +14,7 @@ function extractCsrf(html: string) {
 }
 
 async function adminConnection(database: string) {
-  const mysql = require('mysql2/promise');
+  const mysql = await import('mysql2/promise');
   return mysql.createConnection({
     host: process.env.MYSQL_TEST_HOST || '127.0.0.1',
     port: Number(process.env.MYSQL_TEST_PORT || 3306),
@@ -61,22 +62,22 @@ void test(
       LOGIN_RATE_LIMIT_MAX: '1000',
     });
 
-    const databaseManager = require('../src/db/databaseManager');
-    const runtimeSettings = require('../src/services/runtimeSettingsService');
+    const databaseManager = (await import('../src/db/databaseManager.js')).default;
+    const runtimeSettings = (await import('../src/services/runtimeSettingsService.js')).default;
     databaseManager.resetForTests();
     runtimeSettings.resetForTests();
     await databaseManager.initialize();
     await runtimeSettings.load(null);
     assert.equal(databaseManager.status().state, 'UNCONFIGURED');
 
-    const app = require('../src/app');
+    const app = (await import('../src/app.js')).default;
     const server = http.createServer(app);
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     t.after(async () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await databaseManager.close();
     });
-    const base = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
     const loginPage = await fetch(`${base}/login`);
     const preCookie = (loginPage.headers.get('set-cookie') || '').split(';')[0];
@@ -141,6 +142,7 @@ void test(
     const untouched = await adminConnection(database);
     const [tablesBeforeInit] = await untouched.query('SHOW TABLES');
     await untouched.end();
+    assert.ok(Array.isArray(tablesBeforeInit), 'SHOW TABLES must return a rowset');
     assert.equal(tablesBeforeInit.length, 0, 'Save Connection must not create schema tables');
 
     await databaseManager.close();
@@ -210,8 +212,14 @@ void test(
       }),
     });
     assert.equal(enrolled.status, 201);
-    const enrolledBody = await enrolled.json();
-    assert.ok(enrolledBody.worker_id);
+    const enrolledData: unknown = await enrolled.json();
+    assert.ok(enrolledData && typeof enrolledData === 'object');
+    assert.ok('worker_id' in enrolledData && typeof enrolledData.worker_id === 'string');
+    assert.ok('capabilities' in enrolledData && Array.isArray(enrolledData.capabilities));
+    const enrolledBody = {
+      worker_id: enrolledData.worker_id,
+      capabilities: enrolledData.capabilities,
+    };
     assert.deepEqual(enrolledBody.capabilities, ['tmux.inspect', 'workspace.exec']);
 
     const createProfile = () =>
@@ -238,9 +246,13 @@ void test(
 
     // Simulate only the broker's online status in this isolated HTTP fixture.
     // This test does not run an actual Worker; real WSS is covered by separate E2E.
-    const workerBroker = require('../src/services/workerConnectionBroker');
+    const workerBroker = (await import('../src/services/workerConnectionBroker.js')).default;
     const fixtureSocket = { readyState: 1, close() {} };
-    workerBroker.connections.set(enrolledBody.worker_id, fixtureSocket);
+    // A broker-ready socket stub is enough for this isolated UI test.
+    workerBroker.connections.set(
+      enrolledBody.worker_id,
+      fixtureSocket as unknown as Parameters<typeof workerBroker.connections.set>[1],
+    );
     t.after(() => {
       if (workerBroker.connections.get(enrolledBody.worker_id) === fixtureSocket) {
         workerBroker.connections.delete(enrolledBody.worker_id);

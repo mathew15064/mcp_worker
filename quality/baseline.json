@@ -241,15 +241,8 @@
       "@typescript-eslint/no-unused-vars": 1
     },
     "tests/mysql-setup-ui-integration.test.ts": {
-      "@typescript-eslint/consistent-type-imports": 1,
-      "@typescript-eslint/no-require-imports": 5,
-      "@typescript-eslint/no-unsafe-argument": 1,
-      "@typescript-eslint/no-unsafe-assignment": 11,
-      "@typescript-eslint/no-unsafe-call": 31,
-      "@typescript-eslint/no-unsafe-member-access": 50,
-      "@typescript-eslint/no-unsafe-return": 1,
-      "@typescript-eslint/no-unused-vars": 1,
-      "@typescript-eslint/require-await": 1
+      "@typescript-eslint/no-unsafe-member-access": 3,
+      "@typescript-eslint/no-unused-vars": 1
     },
     "tests/oauth-core.test.ts": {
       "@typescript-eslint/no-require-imports": 1,
