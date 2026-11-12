@@ -20,23 +20,13 @@ const { currentIdentity } = authRoutes;
 import oauthRepo from '../repositories/mcpOAuthRepository';
 import workerRepo from '../repositories/workerRepository';
 import workerBroker from '../services/workerConnectionBroker';
-import workerExecutionService from '../services/workerExecutionService';
-import terminalNonces from '../services/terminalNonceService';
-import terminalOrigins from '../services/terminalPublicOriginService';
 import workerLifecycle from '../services/workerLifecycleService';
 import oauthService from '../services/mcpOAuthService';
 import userService from '../services/userService';
 import userTelegramSettings from '../services/userTelegramSettingsService';
 import telegramService from '../services/telegramService';
 import mcpConfig from '../config/mcpConfig';
-const {
-  accountClientsPage,
-  accountSshProfilesPage,
-  accountTelegramPage,
-  terminalConsolePage,
-  workersPage,
-  errorPage,
-} = pages;
+const { accountClientsPage, accountTelegramPage, workersPage, errorPage } = pages;
 
 const router = express.Router();
 
@@ -116,10 +106,10 @@ async function requireActiveOwnedWorker(workerId: string, ownerUserId: string) {
   if (!worker)
     throw Object.assign(new Error('Worker not found.'), { code: 'WORKER_NOT_FOUND', status: 404 });
   if (!worker.enabled || worker.status !== 'online' || !workerBroker.isOnline(worker.id)) {
-    throw Object.assign(
-      new Error('SSH Profiles can only bind to an enabled Worker that is currently online.'),
-      { code: 'WORKER_NOT_ONLINE', status: 409 },
-    );
+    throw Object.assign(new Error('Execution targets require an enabled, online Worker.'), {
+      code: 'WORKER_NOT_ONLINE',
+      status: 409,
+    });
   }
   return worker;
 }
@@ -336,11 +326,11 @@ router.post('/account/workers/profiles', async (req, res) => {
       },
       { ownerUserId: req.currentUser.id },
     );
-    setFlash(req, 'success', 'SSH Profile created through the active Worker.');
+    setFlash(req, 'success', 'Execution target created through the active Worker.');
   } catch (error) {
     setFlash(req, 'error', routeError(error).message);
   }
-  return res.redirect('/account/ssh-profiles');
+  return res.redirect('/account/workers');
 });
 
 router.post('/account/workers/profiles/:id/delete', async (req, res) => {
@@ -354,186 +344,7 @@ router.post('/account/workers/profiles/:id/delete', async (req, res) => {
   } catch (error) {
     setFlash(req, 'error', routeError(error).message);
   }
-  return res.redirect('/account/ssh-profiles');
-});
-
-router.get('/account/ssh-profiles', async (req, res, next) => {
-  try {
-    const workers = (await workerRepo.listWorkersByOwner(req.currentUser.id))
-      .filter((item): item is NonNullable<typeof item> => item !== null)
-      .map((worker) => ({
-        ...worker,
-        status: worker.enabled && workerBroker.isOnline(worker.id) ? 'online' : 'offline',
-      }));
-    const workerById = new Map(workers.map((worker) => [worker.id, worker]));
-    const profiles = (await workerRepo.listProfilesByOwner(req.currentUser.id))
-      .filter((item): item is NonNullable<typeof item> => item !== null)
-      .map((profile) => {
-        const liveWorker = workerById.get(profile.worker_id);
-        return {
-          ...profile,
-          worker_status: liveWorker?.status || 'offline',
-          worker_enabled: Boolean(liveWorker?.enabled),
-        };
-      });
-    return res.type('html').send(
-      accountSshProfilesPage({
-        user: req.currentUser,
-        profiles,
-        workers,
-        csrfToken: csrf(req),
-        ...consumeFlash(req),
-      }),
-    );
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.post('/account/ssh-profiles', async (req, res) => {
-  try {
-    await requireActiveOwnedWorker(formString(req.body, 'worker_id'), req.currentUser.id);
-    await workerRepo.createProfile(
-      {
-        name: formString(req.body, 'name'),
-        description: formString(req.body, 'description'),
-        worker_id: formString(req.body, 'worker_id'),
-        enabled: formFlag(req.body, 'enabled'),
-      },
-      { ownerUserId: req.currentUser.id },
-    );
-    setFlash(req, 'success', 'SSH Profile created through the active Worker.');
-  } catch (error) {
-    setFlash(req, 'error', routeError(error).message);
-  }
-  return res.redirect('/account/ssh-profiles');
-});
-
-router.post('/account/ssh-profiles/:id/update', async (req, res) => {
-  try {
-    const existing = await workerRepo.findProfileByIdForOwner(req.params.id, req.currentUser.id);
-    if (!existing)
-      return res.status(404).type('html').send(errorPage(404, 'SSH Profile not found.'));
-    await requireActiveOwnedWorker(formString(req.body, 'worker_id'), req.currentUser.id);
-    await workerRepo.updateProfile(
-      existing.id,
-      {
-        name: formString(req.body, 'name'),
-        description: formString(req.body, 'description'),
-        worker_id: formString(req.body, 'worker_id'),
-        enabled: formFlag(req.body, 'enabled'),
-      },
-      { ownerUserId: req.currentUser.id },
-    );
-    setFlash(req, 'success', 'SSH Profile updated.');
-  } catch (error) {
-    setFlash(req, 'error', routeError(error).message);
-  }
-  return res.redirect('/account/ssh-profiles');
-});
-
-router.get('/account/ssh-profiles/:id/shell', async (req, res) => {
-  const profile = await workerRepo.findProfileByIdForOwner(req.params.id, req.currentUser.id);
-  if (!profile) return res.status(404).type('html').send(errorPage(404, 'SSH Profile not found.'));
-  if (!profile.enabled || !workerBroker.isOnline(profile.worker_id)) {
-    setFlash(
-      req,
-      'error',
-      'The Worker must be online and this SSH Profile must be enabled before attaching a shell.',
-    );
-    return res.redirect('/account/ssh-profiles');
-  }
-  return res.type('html').send(
-    terminalConsolePage({
-      profile,
-      accountUser: req.currentUser,
-      routeBase: '/account/ssh-profiles',
-      csrfToken: csrf(req),
-    }),
-  );
-});
-
-router.post('/account/ssh-profiles/:id/test', async (req, res) => {
-  const json = String(req.get('accept') || '').includes('application/json');
-  try {
-    const profile = await workerRepo.findProfileByIdForOwner(req.params.id, req.currentUser.id);
-    if (!profile)
-      throw Object.assign(new Error('SSH Profile not found.'), {
-        code: 'PROFILE_NOT_FOUND',
-        status: 404,
-      });
-    if (!profile.enabled)
-      throw Object.assign(new Error('This SSH Profile is disabled.'), {
-        code: 'PROFILE_DISABLED',
-        status: 409,
-      });
-    await requireActiveOwnedWorker(profile.worker_id, req.currentUser.id);
-    const startedAt = Date.now();
-    const result = await workerExecutionService.testConnection(profile);
-    const payload = {
-      code: 'TEST_OK',
-      message: 'Direct Worker shell is ready.',
-      duration_ms: Date.now() - startedAt,
-      pane_count: result.pane_count,
-      target_pane: result.target_pane,
-      pane_current_command: result.pane_current_command,
-    };
-    if (json) return res.json(payload);
-    setFlash(req, 'success', `${payload.message} (${payload.duration_ms} ms)`);
-  } catch (error) {
-    if (json)
-      return res.status(routeError(error).status || 422).json({
-        code: routeError(error).code || 'WORKER_TEST_FAILED',
-        message: routeError(error).message || 'Worker shell test failed.',
-      });
-    setFlash(req, 'error', routeError(error).message || 'Worker shell test failed.');
-  }
-  return res.redirect('/account/ssh-profiles');
-});
-
-router.post('/account/ssh-profiles/:id/session', async (req, res) => {
-  try {
-    const profile = await workerRepo.findProfileByIdForOwner(req.params.id, req.currentUser.id);
-    if (!profile)
-      return res.status(404).json({ code: 'PROFILE_NOT_FOUND', message: 'SSH Profile not found.' });
-    if (!profile.enabled)
-      return res
-        .status(409)
-        .json({ code: 'PROFILE_DISABLED', message: 'This SSH Profile is disabled.' });
-    await requireActiveOwnedWorker(profile.worker_id, req.currentUser.id);
-    const origin = terminalOrigins.resolve(req);
-    const issued = terminalNonces.issue({
-      sessionId: req.sessionID,
-      userId: req.currentUser.id,
-      sessionVersion: req.session.sessionVersion || 1,
-      profileId: profile.id,
-      origin,
-    });
-    return res.status(201).json({
-      attempt_id: issued.attempt_id,
-      expires_at: issued.expires_at,
-      ws_url: terminalOrigins.websocketUrl(origin, issued),
-    });
-  } catch (error) {
-    return res.status(routeError(error).status || 422).json({
-      code: routeError(error).code || 'SHELL_ATTACH_FAILED',
-      message: routeError(error).message || 'Unable to attach shell.',
-    });
-  }
-});
-
-router.post('/account/ssh-profiles/:id/delete', async (req, res) => {
-  try {
-    const removed = await workerRepo.deleteProfile(req.params.id, {
-      ownerUserId: req.currentUser.id,
-    });
-    if (!removed)
-      return res.status(404).type('html').send(errorPage(404, 'SSH Profile not found.'));
-    setFlash(req, 'success', 'SSH Profile deleted. The Worker remains enrolled.');
-  } catch (error) {
-    setFlash(req, 'error', routeError(error).message);
-  }
-  return res.redirect('/account/ssh-profiles');
+  return res.redirect('/account/workers');
 });
 
 router.get('/account/telegram', async (req, res, next) => {

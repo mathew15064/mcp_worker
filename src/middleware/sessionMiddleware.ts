@@ -16,15 +16,19 @@ declare module 'express-session' {
 }
 import config from '../config/env';
 import BoundedMemorySessionStore from '../db/memorySessionStore';
+import { UpstashSessionStore } from '../db/upstashSessionStore';
 
 const secureCookie =
   config.NODE_ENV === 'production'
     ? process.env.COOKIE_SECURE !== 'false'
     : process.env.COOKIE_SECURE === 'true';
 
-const store = new BoundedMemorySessionStore({
-  maxSessions: Number.parseInt(process.env.ADMIN_SESSION_MAX || '500', 10),
-});
+const store =
+  process.env.MCP_PLATFORM === 'vercel'
+    ? new UpstashSessionStore()
+    : new BoundedMemorySessionStore({
+        maxSessions: Number.parseInt(process.env.ADMIN_SESSION_MAX || '500', 10),
+      });
 
 const sessionMiddleware = session({
   store,

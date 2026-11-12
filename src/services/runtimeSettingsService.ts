@@ -3,10 +3,12 @@ import type { DatabaseAdapter } from '../db/contracts';
 
 const DEFAULTS = Object.freeze({
   'mcp.enabled': process.env.MCP_ENABLED !== 'false' ? 'true' : 'false',
-  'mcp.public_base_url': String(process.env.MCP_PUBLIC_BASE_URL || 'http://localhost:3333').replace(
-    /\/+$/,
-    '',
-  ),
+  'mcp.public_base_url': String(
+    process.env.MCP_PUBLIC_BASE_URL ||
+      (process.env.MCP_PLATFORM === 'vercel' && process.env.VERCEL_PROJECT_PRODUCTION_URL
+        ? 'https://' + process.env.VERCEL_PROJECT_PRODUCTION_URL
+        : 'http://localhost:3333'),
+  ).replace(/\/+$/, ''),
   'mcp.access_token_ttl_seconds': String(
     parseInt(process.env.MCP_ACCESS_TOKEN_TTL_SECONDS || '900', 10),
   ),
@@ -94,7 +96,9 @@ class RuntimeSettingsService {
     } catch (_) {}
     const existing = new Set(rows.map((row) => String(row.key)));
     const currentBase = String(
-      process.env.MCP_PUBLIC_BASE_URL || DEFAULTS['mcp.public_base_url'],
+      (process.env.MCP_PLATFORM === 'vercel' && process.env.VERCEL_PROJECT_PRODUCTION_URL
+        ? 'https://' + process.env.VERCEL_PROJECT_PRODUCTION_URL
+        : process.env.MCP_PUBLIC_BASE_URL) || DEFAULTS['mcp.public_base_url'],
     ).replace(/\/+$/, '');
     const seed = { ...DEFAULTS, 'mcp.public_base_url': currentBase };
     for (const [key, value] of Object.entries(seed)) {

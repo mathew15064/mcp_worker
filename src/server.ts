@@ -7,19 +7,14 @@ import runtimeSettings from './services/runtimeSettingsService';
 import sessionMiddleware from './middleware/sessionMiddleware';
 import { closeDb } from './db/connection';
 import workerBrokerService from './services/workerConnectionBroker';
-interface Closable {
-  close(): void;
-}
-import terminalWebSocketModule from './services/terminalWebSocketService';
 
 let server: Server | null = null;
-let terminalWebSocket: Closable | null = null;
 let workerBroker: typeof workerBrokerService | null = null;
 let closing = false;
 
 async function bootstrap(): Promise<Server> {
   const storage = await databaseManager.initialize();
-  if (databaseManager.isMysqlReady())
+  if (databaseManager.isSqlReady())
     await runtimeSettings.seedDefaults(databaseManager.getAdapter());
   else if (databaseManager.isOperational())
     await runtimeSettings.load(databaseManager.getAdapter());
@@ -34,7 +29,6 @@ async function bootstrap(): Promise<Server> {
     if (databaseManager.isOperational())
       console.log(`[BOOT] MCP resource: ${mcpConfig.resourceUrl}`);
   });
-  terminalWebSocket = terminalWebSocketModule.attachTerminalWebSocket(server);
   workerBroker = workerBrokerService;
   workerBroker.attach(server);
   return server;
@@ -44,9 +38,6 @@ async function shutdown(signal: string): Promise<void> {
   if (closing) return;
   closing = true;
   console.log(`[SHUTDOWN] ${signal}`);
-  try {
-    terminalWebSocket?.close();
-  } catch (_) {}
   try {
     workerBroker?.close();
   } catch (_) {}

@@ -29,10 +29,6 @@ class ExecutionProfileRepository {
       .map((profile) => ({ ...profile, transport: 'worker' as const }))
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   }
-
-  async findWithCredentialById(_id: string): Promise<ExecutionProfile | null> {
-    return null;
-  }
 }
 
 const instance = Object.assign(new ExecutionProfileRepository(), { ExecutionProfileRepository });

@@ -29,9 +29,9 @@ function terminalPrincipal() {
 export const listTerminals = defineTool({
   name: 'terminal_list',
   description:
-    'List configured Terminal Profiles available for remote coordination. Returns aliases only; never exposes SSH credentials or hosts.',
+    'List enrolled Worker execution target aliases. No SSH hostnames, credentials or direct connections.',
   schema: {},
-  domain: 'Terminals',
+  domain: 'Worker Execution',
   requiredScope: 'bot_report.terminal',
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
   async handler(args = {}, service = checkedTerminalService) {
@@ -40,89 +40,23 @@ export const listTerminals = defineTool({
   },
 });
 
-export const terminalStatus = defineTool({
-  name: 'terminal_status',
-  description:
-    'Verify the SSH connection and configured tmux session for a Terminal Profile. Also reports the single target pane and its current command.',
-  schema: { profile: profileSchema },
-  domain: 'Terminals',
-  requiredScope: 'bot_report.terminal',
-  annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
-  async handler(args, service = checkedTerminalService) {
-    const principal = terminalPrincipal();
-    return textResult(await service.status(args.profile, { actorId: principal.actor_id }));
-  },
-});
-
-export const terminalRead = defineTool({
-  name: 'terminal_read',
-  description:
-    'Read recent sanitized text from an existing tmux session. Use for interactive coordination or secondary-agent progress; do not use as the default source-code or process-log reader when structured tools are available.',
-  schema: {
-    profile: profileSchema,
-    lines: z
-      .number()
-      .int()
-      .min(1)
-      .max(1000)
-      .optional()
-      .default(200)
-      .describe('Number of recent logical lines to return'),
-  },
-  domain: 'Terminals',
-  requiredScope: 'bot_report.terminal',
-  annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
-  async handler(args, service = checkedTerminalService) {
-    const principal = terminalPrincipal();
-    return textResult(
-      await service.read(args.profile, args.lines || 200, { actorId: principal.actor_id }),
-    );
-  },
-});
-
-export const terminalSend = defineTool({
-  name: 'terminal_send',
-  description:
-    'Send text to the single tmux pane behind a configured Terminal Profile. Use only for interactive coordination with an already-running shell or secondary agent; this is not the default coding path and does not accept raw SSH credentials.',
-  schema: {
-    profile: profileSchema,
-    text: z
-      .string()
-      .min(1)
-      .max(32000)
-      .describe('Text or instruction to paste into the existing tmux session'),
-    submit: z.boolean().optional().default(true).describe('Press Enter after pasting the text'),
-  },
-  domain: 'Terminals',
-  requiredScope: 'bot_report.terminal',
-  annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: true },
-  async handler(args, service = checkedTerminalService) {
-    const principal = terminalPrincipal();
-    const result = await service.send(args.profile, args.text, {
-      submit: args.submit !== false,
-      actorId: principal.actor_id,
-    });
-    return textResult({ success: true, ...result });
-  },
-});
-
 export const workspaceExec = defineTool({
   name: 'workspace_exec',
   description:
-    'Execute a deterministic one-shot shell command over SSH. Use as the generic fallback when no specialized structured tool fits; prefer repo_snapshot, git_diff, code_search, file_*, check_run, and process_* when they cover the task.',
+    'Execute a deterministic one-shot shell command on an enrolled Worker over outbound WSS. Use as the generic fallback; prefer specialized file, Git, search and check tools.',
   schema: {
     profile: profileSchema,
     command: z
       .string()
       .min(1)
       .max(32000)
-      .describe('Shell command to execute on the configured remote host'),
+      .describe('Shell command to execute on the enrolled Worker'),
     cwd: z
       .string()
       .max(1000)
       .optional()
       .describe(
-        'Optional working directory on the configured remote host; absolute or relative paths are accepted',
+        'Optional working directory on the enrolled Worker; absolute or relative paths are accepted',
       ),
     timeout_ms: z
       .number()
@@ -133,7 +67,7 @@ export const workspaceExec = defineTool({
       .default(30000)
       .describe('Execution timeout in milliseconds (max 300000ms / 5 min)'),
   },
-  domain: 'Terminals',
+  domain: 'Worker Execution',
   requiredScope: 'bot_report.terminal',
   annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: true },
   async handler(args, service = checkedTerminalService) {
@@ -141,25 +75,6 @@ export const workspaceExec = defineTool({
     const result = await service.workspaceExec(args.profile, args.command, {
       cwd: args.cwd,
       timeoutMs: args.timeout_ms || 30000,
-      actorId: principal.actor_id,
-    });
-    return textResult({ success: true, ...result });
-  },
-});
-
-export const terminalInterrupt = defineTool({
-  name: 'terminal_interrupt',
-  description:
-    'Send a SIGINT (Ctrl-C) to the single tmux pane behind a configured Terminal Profile to cancel or interrupt a running process.',
-  schema: {
-    profile: profileSchema,
-  },
-  domain: 'Terminals',
-  requiredScope: 'bot_report.terminal',
-  annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: true },
-  async handler(args, service = checkedTerminalService) {
-    const principal = terminalPrincipal();
-    const result = await service.interrupt(args.profile, {
       actorId: principal.actor_id,
     });
     return textResult({ success: true, ...result });
@@ -177,7 +92,7 @@ export const artifactCollect = defineTool({
       .min(1)
       .max(1000)
       .describe(
-        'Path to the artifact file on the configured remote host; absolute or relative paths are accepted',
+        'Path to the artifact file on the enrolled Worker; absolute or relative paths are accepted',
       ),
     max_bytes: z
       .number()
@@ -188,7 +103,7 @@ export const artifactCollect = defineTool({
       .default(2 * 1024 * 1024)
       .describe('Maximum allowed artifact size in bytes (default 2 MiB, max 10 MiB)'),
   },
-  domain: 'Terminals',
+  domain: 'Worker Execution',
   requiredScope: 'bot_report.terminal',
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
   async handler(args, service = checkedTerminalService) {

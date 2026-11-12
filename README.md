@@ -2,21 +2,22 @@
 
 mcp_worker is a deterministic MCP coding execution harness. ChatGPT performs reasoning; mcp_worker exposes bounded MCP primitives and routes execution through an explicit execution profile.
 
-Version 2 adds an **outbound Worker transport** so managed machines no longer need an inbound SSH port or an SSH password stored on the mcp_worker server. Existing SSH profiles remain as a compatibility transport while machines are migrated.
+Worker-only deployment: machines run standalone Go Workers that connect **outbound** over
+authenticated WSS. The MCP server never opens inbound SSH connections or stores SSH
+credentials. Browser SSH/terminal consoles and user/admin SSH Profiles are removed.
 
-```text
-Worker transport (preferred in v2)
-Owner -> ChatGPT -> mcp_worker -> authenticated WSS job/event -> Worker -> local machine
+    ChatGPT / MCP Client -> OAuth/PKCE -> mcp_worker MCP Server
+                                         |
+                                  authenticated WSS
+                                         |
+                                  enrolled Go Worker -> local machine
 
-SSH compatibility transport
-Owner -> ChatGPT -> mcp_worker -> SSH Profile -> SSH -> machine
-```
-
-The project keeps a small Admin UI for configuration and observability. V2 focuses on the coding execution gateway, not business workflows.
+The Admin UI focuses on OAuth Clients, Workers (including Execution Targets), Audit
+and system settings. The terminal_list tool still lists Worker aliases for compatibility.
 
 ## Version and release policy
 
-The main branch is the mcp_worker V2 line, with the 19-tool MCP catalog and outbound Go Worker transport. Stable releases will use versioned Git tags. This repository contains the V2 source release candidate. Public source access does not imply a stable signed release. See [the public release roadmap](docs/PUBLIC_RELEASE_ROADMAP.md).
+The published V2 main branch is the historical baseline; this Worker-only refactor exposes 15 MCP tools over outbound Go Worker transport. Stable releases will use versioned Git tags. This repository contains the V2 source release candidate. Public source access does not imply a stable signed release. See [the public release roadmap](docs/PUBLIC_RELEASE_ROADMAP.md).
 
 ## Compatibility identifiers
 
@@ -33,6 +34,16 @@ The project source is licensed under [MIT](LICENSE). Third-party components reta
 - [Backup, restore and upgrade](docs/BACKUP_RESTORE.md) and [troubleshooting](docs/TROUBLESHOOTING.md)
 - [Release engineering](docs/RELEASE_ENGINEERING.md), [release checklist](docs/RELEASE_CHECKLIST.md) and [changelog](CHANGELOG.md)
 - [Administration and development reference](docs/ADMIN_REFERENCE.md), [contributing](CONTRIBUTING.md) and [security reporting](SECURITY.md)
+
+## Vercel self-hosting (work in progress — not a release)
+
+A separate Vercel/Neon/Upstash runtime is under development. It is
+**not yet a one-click deploy template**: multi-instance Worker dispatch and
+verified installer releases are still incomplete. No public Deploy Button is
+published; do not use the Vercel prototype for production.
+
+Read [the Vercel self-host development status](docs/VERCEL_SELFHOST_PREVIEW.md).
+The stable Docker/VPS deployment path below is unchanged.
 
 ## Standalone Docker quickstart (local only)
 
@@ -94,17 +105,21 @@ helper URI). Add terminal scope only after reviewing Worker permissions.
 
 ## Core MCP tools
 
-The MCP registry exposes exactly 19 tools:
+The Worker-only MCP registry exposes exactly **15 tools**:
 
-- Runtime: `runtime_info`
-- Terminal fallback: `terminal_list`, `terminal_status`, `terminal_read`, `terminal_send`, `terminal_interrupt`
-- Generic execution/evidence: `workspace_exec`, `artifact_collect`
-- Files: `file_read`, `file_write`, `file_patch`
-- Git/review: `repo_snapshot`, `git_diff`, `code_search`
-- Checks: `check_run`
-- Long-running processes: `process_start`, `process_status`, `process_logs`, `process_stop`
+- Runtime: runtime_info
+- Worker alias discovery: terminal_list
+- Execution and evidence: workspace_exec, artifact_collect
+- Files: file_read, file_write, file_patch
+- Git/review: repo_snapshot, git_diff, code_search
+- Checks: check_run
+- Managed processes: process_start, process_status, process_logs, process_stop
 
-The tool contract stays stable across transports. `terminal_list` returns profile aliases; when an alias is a Worker Profile, the same terminal/workspace/file/git/process tool calls are dispatched over the worker connection instead of SSH.
+All execution travels through the selected Worker over authenticated outbound
+WSS. The retired interactive terminal_status, terminal_read, terminal_send
+and terminal_interrupt tools are no longer available. No SSH credentials are
+accepted. The OAuth scope bot_report.terminal remains for compatibility and
+now authorizes **Worker execution only**.
 
 ## Worker and security boundaries
 
@@ -122,8 +137,8 @@ clients and profiles. See [Worker lifecycle](worker/README.md),
 
 ## Release status
 
-V2 remains a source release candidate. Linux standalone installation,
-all 19 tools, Worker upgrade/rollback, and image vulnerability scanning have
+Worker-only remains an unmerged source candidate. Linux standalone installation,
+the historical 19 tools, Worker upgrade/rollback, and image vulnerability scanning have
 been verified locally. Cross-built binaries do not establish native installer
 compatibility. The [release checklist](docs/RELEASE_CHECKLIST.md) identifies
 the remaining gates; third-party distribution review, signing

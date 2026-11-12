@@ -7,14 +7,9 @@ import authRoutes from './authRoutes';
 const { currentAdmin } = authRoutes;
 import oauthRepo from '../repositories/mcpOAuthRepository';
 import oauthService from '../services/mcpOAuthService';
-import userRepo from '../repositories/userRepository';
-import userService from '../services/userService';
 import workerRepo from '../repositories/workerRepository';
 import workerBroker from '../services/workerConnectionBroker';
 import workerLifecycleService from '../services/workerLifecycleService';
-import workerExecutionService from '../services/workerExecutionService';
-import terminalNonces from '../services/terminalNonceService';
-import terminalOrigins from '../services/terminalPublicOriginService';
 import settingsRepo from '../repositories/settingsRepository';
 import telegramSecrets from '../services/telegramSecretService';
 import telegramService from '../services/telegramService';
@@ -30,10 +25,7 @@ const {
   onboardingPage,
   clientsPage,
   auditPage,
-  terminalsPage,
-  terminalConsolePage,
   workersPage,
-  usersPage,
   settingsPage,
   setupRequiredPage,
   errorPage,
@@ -96,38 +88,17 @@ async function clientList() {
 async function requireActiveAdminWorker(workerId: string) {
   const worker = await workerRepo.findAdminWorkerById(workerId);
   if (!worker)
-    throw Object.assign(new Error('Admin SSH Profiles can only use global/admin-owned Workers.'), {
+    throw Object.assign(new Error('Execution targets can only use global/admin-owned Workers.'), {
       code: 'WORKER_NOT_FOUND',
       status: 404,
     });
   if (!worker.enabled || !workerBroker.isOnline(worker.id)) {
-    throw Object.assign(
-      new Error('SSH Profiles can only bind to an enabled Worker that is currently online.'),
-      { code: 'WORKER_NOT_ONLINE', status: 409 },
-    );
+    throw Object.assign(new Error('Execution targets require an enabled, online Worker.'), {
+      code: 'WORKER_NOT_ONLINE',
+      status: 409,
+    });
   }
   return worker;
-}
-
-async function adminSshData() {
-  const workers = (await workerRepo.listAdminWorkers())
-    .filter((v): v is NonNullable<typeof v> => v !== null)
-    .map((worker) => ({
-      ...worker,
-      status: worker.enabled && workerBroker.isOnline(worker.id) ? 'online' : 'offline',
-    }));
-  const workerById = new Map(workers.map((worker) => [worker.id, worker]));
-  const profiles = (await workerRepo.listAdminProfiles())
-    .filter((v): v is NonNullable<typeof v> => v !== null)
-    .map((profile) => {
-      const liveWorker = workerById.get(profile.worker_id);
-      return {
-        ...profile,
-        worker_status: liveWorker?.status || 'offline',
-        worker_enabled: Boolean(liveWorker?.enabled),
-      };
-    });
-  return { workers, profiles };
 }
 
 async function telegramConfig() {
@@ -199,8 +170,8 @@ router.get('/admin', async (req, res, next) => {
   try {
     const operational = databaseManager.isOperational();
     const clients = operational ? await clientList() : [];
-    const terminals = operational
-      ? (await workerRepo.listAdminProfiles()).filter((p): p is NonNullable<typeof p> => p !== null)
+    const workers = operational
+      ? (await workerRepo.listAdminWorkers()).filter((w): w is NonNullable<typeof w> => w !== null)
       : [];
     const telegram = await telegramConfig();
     const startedAt = new Date(Date.now() - Math.round(process.uptime() * 1000)).toISOString();
@@ -215,7 +186,7 @@ router.get('/admin', async (req, res, next) => {
           toolCount: TOOLS.length,
         },
         clients,
-        terminals,
+        workers,
         telegram,
         endpoint: mcpConfig.resourceUrl,
         storage: databaseManager.status(),
@@ -232,18 +203,27 @@ router.get('/admin', async (req, res, next) => {
 router.get('/admin/onboarding', async (req, res, next) => {
   try {
     const storage = databaseManager.status();
-    const ready = databaseManager.isMysqlReady();
+    const ready = databaseManager.isSqlReady();
     let workerReady = false,
       clientReady = false,
       firstCall = false;
     if (ready) {
-      const [ssh, clients, called] = await Promise.all([
-        adminSshData(),
+      const [profiles, workers, clients, called] = await Promise.all([
+        workerRepo.listAdminProfiles(),
+        workerRepo.listAdminWorkers(),
         clientList(),
         oauthRepo.hasAdminRuntimeCall(),
       ]);
-      workerReady = ssh.profiles.some(
-        (p) => p.enabled && p.worker_enabled && p.worker_status === 'online',
+      const activeWorkerIds = new Set(
+        workers
+          .filter(
+            (w): w is NonNullable<typeof w> =>
+              w !== null && w.enabled && workerBroker.isOnline(w.id),
+          )
+          .map((w) => w.id),
+      );
+      workerReady = profiles.some(
+        (p) => p !== null && p.enabled && activeWorkerIds.has(p.worker_id),
       );
       clientReady = clients.some(
         (c) =>
@@ -570,23 +550,23 @@ router.post('/admin/workers/profiles', requireDataStore, async (req, res) => {
       worker_id: formString(req.body, 'worker_id'),
       enabled: formFlag(req.body, 'enabled'),
     });
-    setFlash(req, 'success', 'SSH Profile created through the active Worker.');
+    setFlash(req, 'success', 'Execution target created through the active Worker.');
   } catch (error) {
     setFlash(req, 'error', routeError(error).message);
   }
-  return res.redirect('/admin/terminals');
+  return res.redirect('/admin/workers');
 });
 
 router.post('/admin/workers/profiles/:id/delete', requireDataStore, async (req, res) => {
   try {
     const existing = await workerRepo.findAdminProfileById(String(req.params.id));
     if (!existing || !(await workerRepo.deleteProfile(existing.id)))
-      throw new Error('SSH Profile not found.');
-    setFlash(req, 'success', 'SSH Profile deleted. The Worker remains enrolled.');
+      throw new Error('Execution target not found.');
+    setFlash(req, 'success', 'Execution target deleted. The Worker remains enrolled.');
   } catch (error) {
     setFlash(req, 'error', routeError(error).message);
   }
-  return res.redirect('/admin/terminals');
+  return res.redirect('/admin/workers');
 });
 
 router.post('/admin/workers/:id/:action', requireDataStore, async (req, res) => {
@@ -635,69 +615,6 @@ router.post('/admin/workers/:id/:action', requireDataStore, async (req, res) => 
     setFlash(req, 'error', routeError(error).message);
   }
   return res.redirect('/admin/workers');
-});
-
-router.get('/admin/users', requireDataStore, async (req, res, next) => {
-  try {
-    const [users, clients] = await Promise.all([userRepo.list(), clientList()]);
-    const clientCounts = clients.reduce(
-      (counts: Record<string, number>, client) => {
-        if (client.owner_user_id)
-          counts[client.owner_user_id] = (counts[client.owner_user_id] || 0) + 1;
-        return counts;
-      },
-      {} as Record<string, number>,
-    );
-    return res
-      .type('html')
-      .send(usersPage({ users, clientCounts, csrfToken: csrf(req), ...consumeFlash(req) }));
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.post('/admin/users', requireDataStore, async (req, res) => {
-  try {
-    await userService.createUser({
-      username: formString(req.body, 'username'),
-      email: formString(req.body, 'email'),
-      displayName: formString(req.body, 'display_name'),
-      password: formString(req.body, 'password'),
-    });
-    setFlash(req, 'success', 'User created.');
-  } catch (error) {
-    setFlash(req, 'error', routeError(error).message);
-  }
-  return res.redirect('/admin/users');
-});
-
-router.post('/admin/users/:id/reset-password', requireDataStore, async (req, res) => {
-  try {
-    await userService.resetPassword(String(req.params.id), formString(req.body, 'password'));
-    setFlash(req, 'success', 'User password reset and existing sessions revoked.');
-  } catch (error) {
-    setFlash(req, 'error', routeError(error).message);
-  }
-  return res.redirect('/admin/users');
-});
-
-router.post('/admin/users/:id/:action', requireDataStore, async (req, res) => {
-  try {
-    if (!['enable', 'disable'].includes(String(req.params.action)))
-      return res.status(404).type('html').send(errorPage(404, 'Unknown user action.'));
-    await userService.setStatus(
-      String(req.params.id),
-      String(req.params.action) === 'enable' ? 'active' : 'disabled',
-    );
-    setFlash(
-      req,
-      'success',
-      `User ${String(req.params.action) === 'enable' ? 'enabled' : 'disabled'}.`,
-    );
-  } catch (error) {
-    setFlash(req, 'error', routeError(error).message);
-  }
-  return res.redirect('/admin/users');
 });
 
 router.get('/admin/clients', requireDataStore, async (req, res, next) => {
@@ -860,162 +777,6 @@ router.post('/admin/clients/:id/:action', requireDataStore, async (req, res) => 
     setFlash(req, 'error', routeError(error).message);
   }
   return res.redirect('/admin/clients');
-});
-
-router.get('/admin/terminals', requireDataStore, async (req, res, next) => {
-  try {
-    const { workers, profiles } = await adminSshData();
-    return res.type('html').send(
-      terminalsPage({
-        profiles,
-        workers,
-        routeBase: '/admin/terminals',
-        csrfToken: csrf(req),
-        ...consumeFlash(req),
-      }),
-    );
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.get('/admin/terminals/:id/ssh', requireDataStore, async (req, res) =>
-  res.redirect(`/admin/terminals/${encodeURIComponent(String(req.params.id))}/shell`),
-);
-
-router.get('/admin/terminals/:id/shell', requireDataStore, async (req, res) => {
-  const profile = await workerRepo.findAdminProfileById(String(req.params.id));
-  if (!profile) return res.status(404).type('html').send(errorPage(404, 'SSH Profile not found.'));
-  if (!profile.enabled || !workerBroker.isOnline(profile.worker_id)) {
-    setFlash(
-      req,
-      'error',
-      'The Worker must be online and this SSH Profile must be enabled before attaching a shell.',
-    );
-    return res.redirect('/admin/terminals');
-  }
-  return res
-    .type('html')
-    .send(terminalConsolePage({ profile, routeBase: '/admin/terminals', csrfToken: csrf(req) }));
-});
-
-router.post('/admin/terminals/:id/test', requireDataStore, async (req, res) => {
-  const json = String(req.get('accept') || '').includes('application/json');
-  try {
-    const profile = await workerRepo.findAdminProfileById(String(req.params.id));
-    if (!profile)
-      throw Object.assign(new Error('SSH Profile not found.'), {
-        code: 'PROFILE_NOT_FOUND',
-        status: 404,
-      });
-    if (!profile.enabled)
-      throw Object.assign(new Error('This SSH Profile is disabled.'), {
-        code: 'PROFILE_DISABLED',
-        status: 409,
-      });
-    await requireActiveAdminWorker(profile.worker_id);
-    const startedAt = Date.now();
-    const result = await workerExecutionService.testConnection(profile);
-    const payload = {
-      code: 'TEST_OK',
-      message: 'Direct Worker shell is ready.',
-      duration_ms: Date.now() - startedAt,
-      pane_count: result.pane_count,
-      target_pane: result.target_pane,
-      pane_current_command: result.pane_current_command,
-    };
-    if (json) return res.json(payload);
-    setFlash(req, 'success', `${payload.message} (${payload.duration_ms} ms)`);
-  } catch (error) {
-    if (json)
-      return res.status(routeError(error).status || 422).json({
-        code: routeError(error).code || 'WORKER_TEST_FAILED',
-        message: routeError(error).message || 'Worker shell test failed.',
-      });
-    setFlash(req, 'error', routeError(error).message || 'Worker shell test failed.');
-  }
-  return res.redirect('/admin/terminals');
-});
-
-router.post('/admin/terminals/:id/session', requireDataStore, async (req, res) => {
-  try {
-    const profile = await workerRepo.findAdminProfileById(String(req.params.id));
-    if (!profile)
-      return res.status(404).json({ code: 'PROFILE_NOT_FOUND', message: 'SSH Profile not found.' });
-    if (!profile.enabled)
-      return res
-        .status(409)
-        .json({ code: 'PROFILE_DISABLED', message: 'This SSH Profile is disabled.' });
-    await requireActiveAdminWorker(profile.worker_id);
-    const origin = terminalOrigins.resolve(req);
-    const issued = terminalNonces.issue({
-      sessionId: req.sessionID,
-      userId: req.session.userId || '',
-      sessionVersion: req.session.sessionVersion || 1,
-      profileId: profile.id,
-      origin,
-    });
-    return res.status(201).json({
-      attempt_id: issued.attempt_id,
-      expires_at: issued.expires_at,
-      ws_url: terminalOrigins.websocketUrl(origin, issued),
-    });
-  } catch (error) {
-    return res.status(routeError(error).status || 422).json({
-      code: routeError(error).code || 'SHELL_ATTACH_FAILED',
-      message: routeError(error).message || 'Unable to attach shell.',
-    });
-  }
-});
-
-router.post('/admin/terminals', requireDataStore, async (req, res) => {
-  try {
-    await requireActiveAdminWorker(formString(req.body, 'worker_id'));
-    await workerRepo.createProfile({
-      name: formString(req.body, 'name'),
-      description: formString(req.body, 'description'),
-      worker_id: formString(req.body, 'worker_id'),
-      enabled: formFlag(req.body, 'enabled'),
-    });
-    setFlash(req, 'success', 'SSH Profile created through the active Worker.');
-  } catch (error) {
-    setFlash(req, 'error', routeError(error).message);
-  }
-  return res.redirect('/admin/terminals');
-});
-
-router.post('/admin/terminals/:id/update', requireDataStore, async (req, res) => {
-  try {
-    const existing = await workerRepo.findAdminProfileById(String(req.params.id));
-    if (!existing)
-      throw Object.assign(new Error('SSH Profile not found.'), {
-        code: 'PROFILE_NOT_FOUND',
-        status: 404,
-      });
-    await requireActiveAdminWorker(formString(req.body, 'worker_id'));
-    await workerRepo.updateProfile(existing.id, {
-      name: formString(req.body, 'name'),
-      description: formString(req.body, 'description'),
-      worker_id: formString(req.body, 'worker_id'),
-      enabled: formFlag(req.body, 'enabled'),
-    });
-    setFlash(req, 'success', 'SSH Profile updated.');
-  } catch (error) {
-    setFlash(req, 'error', routeError(error).message);
-  }
-  return res.redirect('/admin/terminals');
-});
-
-router.post('/admin/terminals/:id/delete', requireDataStore, async (req, res) => {
-  try {
-    const existing = await workerRepo.findAdminProfileById(String(req.params.id));
-    if (!existing) throw new Error('SSH Profile not found.');
-    if (!(await workerRepo.deleteProfile(existing.id))) throw new Error('SSH Profile not found.');
-    setFlash(req, 'success', 'SSH Profile deleted. The Worker remains enrolled.');
-  } catch (error) {
-    setFlash(req, 'error', routeError(error).message);
-  }
-  return res.redirect('/admin/terminals');
 });
 
 export = Object.assign(router, { requireAdmin, requireDataStore, telegramConfig });

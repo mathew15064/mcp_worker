@@ -81,7 +81,9 @@ function rejectUpgrade(socket: Duplex | null | undefined, status: number, code: 
         ? 'Forbidden'
         : status === 429
           ? 'Too Many Requests'
-          : 'Service Unavailable';
+          : status === 404
+            ? 'Not Found'
+            : 'Service Unavailable';
   try {
     socket.write(
       `HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n${JSON.stringify({ code })}`,
@@ -151,9 +153,10 @@ class WorkerConnectionBroker {
       try {
         url = new URL(request.url || '', 'http://worker.invalid');
       } catch {
-        return;
+        return rejectUpgrade(socket, 404, 'WEBSOCKET_ROUTE_NOT_FOUND');
       }
-      if (url.pathname !== WORKER_CONNECT_PATH) return;
+      if (url.pathname !== WORKER_CONNECT_PATH)
+        return rejectUpgrade(socket, 404, 'WEBSOCKET_ROUTE_NOT_FOUND');
       try {
         const worker = await this.authService.authenticateConnect(request.headers || {});
         request.workerAuth = { worker };

@@ -361,7 +361,7 @@ void test('OAuth rejects malformed scope without consuming a valid refresh token
   assert.equal(result.scope, 'bot_report.read');
 });
 
-void test('authenticated MCP initialize returns instructions and exactly 19 tools', async () => {
+void test('authenticated MCP initialize returns instructions and exactly 15 tools', async () => {
   const issued = await issueToken();
   const headers = {
     'content-type': 'application/json',
@@ -397,7 +397,7 @@ void test('authenticated MCP initialize returns instructions and exactly 19 tool
   assert.equal(list.status, 200);
   const listBody = await parseMcpResponse(list);
   const names = (listBody.result?.tools || []).map((tool) => tool.name);
-  assert.equal(names.length, 19);
+  assert.equal(names.length, 15);
   assert.ok(names.includes('runtime_info'));
   assert.ok(names.includes('file_patch'));
   assert.ok(names.includes('process_logs'));

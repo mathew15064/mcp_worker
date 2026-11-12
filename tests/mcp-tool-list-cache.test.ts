@@ -22,7 +22,7 @@ void test('static tools/list cache returns the exact SDK schemas across distinct
   const second = await listTools(cachedB);
   assert.deepEqual(first, expected);
   assert.deepEqual(second, expected);
-  assert.equal(first.tools.length, 19);
+  assert.equal(first.tools.length, 15);
   assert.equal(first, second, 'cached tool list should reuse the same static schema object');
   assert.notEqual(cachedA, cachedB, 'each request must still get its own MCP server');
 });
@@ -36,9 +36,9 @@ void test('cache respects per-server disabled tools and can be disabled entirely
   };
   registered._registeredTools.runtime_info.enabled = false;
   const list = await listTools(modified);
-  assert.equal(list.tools.length, 18);
+  assert.equal(list.tools.length, 14);
   assert.ok(!list.tools.some((tool) => tool.name === 'runtime_info'));
-  assert.equal(cached.tools.length, 19);
+  assert.equal(cached.tools.length, 15);
 
   const noCacheA = createMcpServer({ toolListCache: false });
   const noCacheB = createMcpServer({ toolListCache: false });

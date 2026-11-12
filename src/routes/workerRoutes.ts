@@ -591,7 +591,7 @@ router.get('/worker/dist/:file', (req, res) => {
 
 router.post('/worker/v1/enroll', enrollmentLimiter, async (req, res, next) => {
   try {
-    if (!databaseManager.isMysqlReady()) {
+    if (!databaseManager.isSqlReady()) {
       return res.status(503).json({
         error: 'temporarily_unavailable',
         code: databaseManager.status().state,

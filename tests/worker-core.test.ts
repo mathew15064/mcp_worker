@@ -588,19 +588,6 @@ void test('MCP execution profile routes worker profiles without decrypting an SS
   const service = new TerminalMcpService({
     profiles: {
       findAll: async () => [profile],
-      findWithCredentialById: async () => {
-        throw new Error('must not read SSH credential');
-      },
-    },
-    credentials: {
-      decrypt: () => {
-        throw new Error('must not decrypt SSH credential');
-      },
-    },
-    ssh: {
-      inspectProfile: async () => {
-        throw new Error('must not use SSH');
-      },
     },
     worker,
     audit: { log: async () => {} },

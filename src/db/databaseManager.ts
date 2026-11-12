@@ -4,13 +4,14 @@ import bootstrapConfigStore from './bootstrapConfigStore';
 import { getDb } from './connection';
 import { SqliteAdapter } from './adapters/sqliteAdapter';
 import { MysqlAdapter } from './adapters/mysqlAdapter';
+import { PostgresAdapter } from './adapters/postgresAdapter';
 import type { DatabaseAdapter, SqlRow } from './contracts';
 import type Database from 'better-sqlite3';
 import { MigrationRunner } from './migrationRunner';
 type MysqlInput = Parameters<typeof MysqlAdapter.create>[0];
 type SourceInfo = Awaited<ReturnType<MigrationRunner['inspectSource']>>;
 interface Candidate {
-  adapter: MysqlAdapter;
+  adapter: MysqlAdapter | PostgresAdapter;
   info: SqlRow;
   source: SourceInfo;
   duration_ms: number;
@@ -19,6 +20,11 @@ interface Prepared extends Candidate {
   beforeSource: SourceInfo;
   migration: Awaited<ReturnType<MigrationRunner['migrate']>>;
 }
+function managedPostgresUrl() {
+  if (process.env.MCP_PLATFORM !== 'vercel') return '';
+  return process.env.POSTGRES_URL || process.env.DATABASE_URL || '';
+}
+
 function errorCode(error: unknown) {
   return typeof error === 'object' &&
     error !== null &&
@@ -97,7 +103,11 @@ class DatabaseManager {
       } catch (_) {}
     }
 
-    if (previous?.kind === 'mysql' && previous !== this.adapter && previous !== candidate.adapter) {
+    if (
+      (previous?.kind === 'mysql' || previous?.kind === 'postgres') &&
+      previous !== this.adapter &&
+      previous !== candidate.adapter
+    ) {
       try {
         await previous.close();
       } catch (_) {}
@@ -109,6 +119,9 @@ class DatabaseManager {
     if (this.initialized) return this.status();
     this.initialized = true;
 
+    if (process.env.MCP_PLATFORM === 'vercel') {
+      return this.connectManagedPostgres();
+    }
     if (bootstrapConfigStore.exists()) {
       return this.reconnect();
     }
@@ -125,6 +138,78 @@ class DatabaseManager {
     this.adapter = null;
     this.sourceInfo = null;
     return this.status();
+  }
+
+  async connectManagedPostgres() {
+    const url = managedPostgresUrl();
+    this.initialized = true;
+    if (!url) {
+      this.adapter = null;
+      this.state = STATES.UNCONFIGURED;
+      this.lastError = {
+        code: 'POSTGRES_MISSING',
+        message: 'Connect Neon PostgreSQL in Vercel Storage.',
+      };
+      return this.status();
+    }
+    let adapter: PostgresAdapter | null = null;
+    try {
+      adapter = PostgresAdapter.create(url);
+      await adapter.ping();
+      const source = await new MigrationRunner(adapter).inspectSource();
+      const info = await adapter.serverInfo();
+      if (source.initialized) {
+        this.adapter = adapter;
+        this.state = STATES.READY;
+      } else {
+        await adapter.close();
+        this.adapter = null;
+        this.state = STATES.CONFIGURED;
+      }
+      this.mysqlInfo = info;
+      this.sourceInfo = source;
+      this.lastError = null;
+      return this.status();
+    } catch (error) {
+      await adapter?.close().catch(() => {});
+      this.adapter = null;
+      this.sourceInfo = null;
+      this.state = STATES.DEGRADED;
+      this.lastError = {
+        code: errorCode(error) || 'POSTGRES_CONNECT_FAILED',
+        message: 'PostgreSQL unavailable; check the Vercel Storage connection.',
+      };
+      return this.status();
+    }
+  }
+
+  async prepareManagedPostgresInitialization() {
+    const url = managedPostgresUrl();
+    if (!url)
+      throw Object.assign(new Error('Neon PostgreSQL must be connected before setup.'), {
+        code: 'POSTGRES_MISSING',
+        status: 503,
+      });
+    const adapter = PostgresAdapter.create(url);
+    try {
+      await adapter.ping();
+      const runner = new MigrationRunner(adapter);
+      const beforeSource = await runner.inspectSource();
+      const migration = await runner.migrate();
+      const source = await runner.inspectSource();
+      if (!source.initialized) throw new Error('PostgreSQL migration incomplete.');
+      return {
+        adapter,
+        info: (await adapter.serverInfo()) || {},
+        beforeSource,
+        source,
+        migration,
+        duration_ms: 0,
+      };
+    } catch (error) {
+      await adapter.close();
+      throw error;
+    }
   }
 
   useLegacyForTests(db: Database.Database | null = null) {
@@ -172,6 +257,12 @@ class DatabaseManager {
   }
   isMysqlReady() {
     return this.state === STATES.READY && this.adapter?.kind === 'mysql';
+  }
+  isManagedPostgresReady() {
+    return this.state === STATES.READY && this.adapter?.kind === 'postgres';
+  }
+  isSqlReady() {
+    return this.isMysqlReady() || this.isManagedPostgresReady();
   }
   isSetupOnly() {
     return (
@@ -255,7 +346,10 @@ class DatabaseManager {
     this.sourceInfo = prepared.source;
     this.lastError = null;
     this.lastTestAt = new Date().toISOString();
-    if (previous?.kind === 'mysql' && previous !== this.adapter) {
+    if (
+      (previous?.kind === 'mysql' || previous?.kind === 'postgres') &&
+      previous !== this.adapter
+    ) {
       try {
         await previous.close();
       } catch (_) {}
@@ -265,7 +359,7 @@ class DatabaseManager {
 
   async reconnect() {
     if (!bootstrapConfigStore.exists()) {
-      if (this.adapter?.kind === 'mysql')
+      if (this.adapter?.kind === 'mysql' || this.adapter?.kind === 'postgres')
         try {
           await this.adapter.close();
         } catch (_) {}
@@ -287,7 +381,7 @@ class DatabaseManager {
       this.initialized = true;
       return this.adoptInspected(candidate);
     } catch (error) {
-      if (this.adapter?.kind === 'mysql')
+      if (this.adapter?.kind === 'mysql' || this.adapter?.kind === 'postgres')
         try {
           await this.adapter.close();
         } catch (_) {}
@@ -309,10 +403,16 @@ class DatabaseManager {
   }
 
   status() {
-    const saved = bootstrapConfigStore.readPublic();
+    const saved = process.env.MCP_PLATFORM === 'vercel' ? null : bootstrapConfigStore.readPublic();
     return {
       state: this.state,
-      engine: this.isMysqlReady() ? 'mysql' : this.state === STATES.LEGACY_SQLITE ? 'sqlite' : null,
+      engine: this.isManagedPostgresReady()
+        ? 'postgres'
+        : this.isMysqlReady()
+          ? 'mysql'
+          : this.state === STATES.LEGACY_SQLITE
+            ? 'sqlite'
+            : null,
       mysql: saved ? { ...saved, version: this.mysqlInfo?.version || null } : null,
       source: this.sourceInfo
         ? {
@@ -325,6 +425,7 @@ class DatabaseManager {
       legacyAvailable: this.legacyAvailable(),
       operational: this.isOperational(),
       mysqlReady: this.isMysqlReady(),
+      postgresReady: this.isManagedPostgresReady(),
       setupOnly: this.isSetupOnly(),
       lastError: this.lastError,
       lastTestAt: this.lastTestAt,
@@ -332,7 +433,8 @@ class DatabaseManager {
   }
 
   async close() {
-    if (this.adapter?.kind === 'mysql') await this.adapter.close();
+    if (this.adapter?.kind === 'mysql' || this.adapter?.kind === 'postgres')
+      await this.adapter.close();
     this.adapter = null;
   }
 

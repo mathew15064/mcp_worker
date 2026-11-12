@@ -59,7 +59,7 @@ class McpConfig {
         errors.push('MCP Public Base URL must use HTTP or HTTPS.');
       if (
         process.env.NODE_ENV === 'production' &&
-        databaseManager.isMysqlReady() &&
+        databaseManager.isSqlReady() &&
         publicUrl.protocol !== 'https:'
       ) {
         errors.push('MCP Public Base URL must use HTTPS in production.');
