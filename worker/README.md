@@ -36,7 +36,7 @@ Windows PowerShell:
 irm https://bot-report.example.com/worker/install.ps1 | iex
 ```
 
-All installers download the matching binary from `/worker/dist/`, verify it against `SHA256SUMS`, preserve an existing Worker identity during upgrades, and print the next `login` or `start` command. Windows adds the managed `current` directory to the user PATH; Linux installs the OS-facing CLI as `systemtd` and keeps `bot-report-worker` as a compatibility symlink. The default is user-mode, without systemd or sudo. macOS keeps the standalone CLI flow for now.
+Once an approved release is pinned, all installers download the matching binary from `/worker/dist/`, verify a mandatory signature and `SHA256SUMS`, preserve an existing Worker identity during upgrades, and print the next `login` or `start` command. Windows adds the managed `current` directory to the user PATH; Linux installs the OS-facing CLI as `systemtd` and keeps `bot-report-worker` as a compatibility symlink. The default is user-mode, without systemd or sudo. macOS keeps the standalone CLI flow for now.
 
 ## Upgrade and rollback
 
@@ -48,21 +48,10 @@ The installer verifies the downloaded checksum before stopping the Worker.
 If the replacement fails to reconnect, it attempts to restore and restart the
 previous binary. Workloads/PTY sessions may be interrupted; schedule maintenance.
 
-Linux/macOS manual rollback (from the same server):
-
-```sh
-curl -fsSL https://bot-report.example.com/worker/install-linux.sh -o /tmp/br-worker-install.sh
-BOT_REPORT_WORKER_ACTION=rollback sh /tmp/br-worker-install.sh
-```
-
-Use install-macos.sh on macOS. Keep a trusted copy of the installer if offline
-rollback is needed. Windows: set `$env:BOT_REPORT_WORKER_ACTION='rollback'`,
-run the same PowerShell installer, then remove the environment variable.
-The previous binary's local checksum is checked before rollback. Rollback
-does not reset enrollment or change the server; it swaps the current and
-previous binaries. Keep an independent backup of identity/config and binaries
-before maintenance. A stale .install-lock after interruption requires manual
-inspection before removal.
+Manual rollback using an unsigned `previous/SHA256SUMS` file is
+**disabled**. Keep a secure backup for operator-led recovery; restoring an
+older signed release requires a separately reviewed release/pin change.
+A stale .install-lock after interruption requires manual inspection.
 
 Linux systemd is advanced opt-in:
 `curl .../worker/install-linux.sh | BOT_REPORT_WORKER_SYSTEMD=1 sh`.
@@ -72,19 +61,67 @@ Do not run service installation against an unrelated existing service.
 User-mode Workers should be run by a dedicated low-privilege OS user; running the installer/login as root still gives the Worker root authority.
 macOS/Windows use manual mode; OS-native lifecycle tests remain a release gate.
 
-## Signed release artifacts
+## Signed release artifacts — approval required
 
-Builds include version and commit in WORKER_RELEASE, whose checksum is covered by SHA256SUMS. In an authorized
-signing environment run `scripts/sign-worker-manifest.sh /absolute/private-key.pem`
-with an owner-controlled RSA or ECDSA signing key. Publish the signature,
-manifest, WORKER_RELEASE and matching binaries together. Never embed the private key in the
-repository or Docker image. On a target machine, obtain the public key through
-a separate trusted channel and set `BOT_REPORT_WORKER_TRUSTED_KEY` to its
-local path before running the installer. This opt-in requires OpenSSL and
-fails closed if the signature is missing or invalid. Without a trusted key,
-checksum verification provides integrity but not independent authenticity.
-Use HTTPS for remote downloads. Signed public releases and key provisioning
-remain a release gate; local builds are not signed by default.
+**Current state: no production Worker release is approved.** Railway returns
+`503 WORKER_SIGNED_RELEASE_PENDING` for every installer and binary endpoint.
+Non-Railway installer templates also fail closed without a review-pinned signing
+key, release version and commit. Do **not** work around this by setting an
+environment variable or disabling signature verification. The `curl | sh`
+and PowerShell examples above are for an *approved future release*, not current
+Railway deployment instructions.
+
+All eight Linux/macOS/Windows Go binaries and `WORKER_RELEASE` are listed in
+`SHA256SUMS`. `WORKER_RELEASE` has exactly two lines:
+`version=x.y.z` and `commit=<git SHA prefix>`. A detached
+`SHA256SUMS.sig` signs the exact manifest using RSA/SHA-256. The installer
+contains an independently reviewed, pinned RSA public verification key
+(in base64 PEM form) and expected release version/commit. It verifies the
+manifest signature **before** trusting any checksum; then checks metadata,
+binary SHA-256, release identity and monotonic installed version. An
+unsigned, altered, wrong-key, wrong-version or older signed release is rejected
+without replacing the running binary. `BOT_REPORT_WORKER_TRUSTED_KEY` is no
+longer an override. All platforms require OpenSSL; Windows also requires
+PowerShell. The Windows URL runs a single stage rather than executing an
+unverified downloaded PowerShell payload.
+
+Release candidate procedure (offline, only after human approval):
+
+1. Build from an immutable reviewed commit with
+   `VERSION=x.y.z COMMIT=<12-character-hex-commit> ./scripts/build-worker-go.sh`.
+   Independently inspect `worker/bin/WORKER_RELEASE` and run
+   `(cd worker/bin && sha256sum -c SHA256SUMS)`.
+2. In an authorized offline signer environment, provide the **private**
+   RSA key from a separate secure channel, not source, Actions secrets printed
+   to logs, or the Docker image. Run
+   `WORKER_RELEASE_EXPECTED_VERSION=x.y.z WORKER_RELEASE_EXPECTED_COMMIT=<commit> ./scripts/sign-worker-manifest.sh /absolute/private.pem`.
+   This tool refuses noncanonical or incomplete manifests and verifies its
+   detached signature locally. It does **not** publish or approve a release.
+3. Verify the signature independently with
+   `openssl dgst -sha256 -verify public.pem -signature worker/bin/SHA256SUMS.sig worker/bin/SHA256SUMS`.
+   Compare the public-key SPKI SHA-256 fingerprint through an **independent**
+   owner-reviewed channel, and review the exact `version`, `commit` and
+   `publicKeyBase64` values pinned by
+   `APPROVED_WORKER_RELEASE` in `src/routes/workerRoutes.ts`.
+   Until all three are approved and reviewed, this constant stays empty.
+4. Run offline native lifecycle, malicious fixture and rollback tests on
+   Linux, macOS and Windows; independently approve the release contents,
+   recovery plan and distribution endpoints before enabling anything.
+   Neither the manual artifact workflow nor tests create a public GitHub
+   Release, tag, or trusted production key.
+
+**Rollback policy:** manual `BOT_REPORT_WORKER_ACTION=rollback` is rejected,
+including for older binaries with locally stored SHA256 checksums. An
+automated start-failure recovery may restore the *previously running* binary
+during a failed replacement; this is not permission to install an older
+release. A deliberate downgrade requires separate owner approval and a
+reviewed signed release policy change. Installer records
+`release-version`/`release-commit` beside the local identity and denies
+older signed packages and same-version/different-commit substitution.
+Legacy untracked binaries require an explicit migration rather than an
+unverified in-place upgrade. Protect the installer source itself: its
+download-channel authenticity is a separate bootstrap trust requirement,
+so verify it via a trusted independent channel before execution.
 
 ## Login / enrollment
 
