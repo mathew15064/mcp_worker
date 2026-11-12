@@ -52,8 +52,40 @@ jobs:
           probe 503 /readyz
           docker exec "$container" test -f /app/data/bot_report.sqlite
           docker exec "$container" sh -c 'test "$(stat -c %u /app/data/bot_report.sqlite)" = 1000'
+          # Perform a proper online SQLite backup (not an unsafe live file copy).
+          docker exec "$container" node -e '
+            const Database=require("better-sqlite3");
+            const db=new Database("/app/data/bot_report.sqlite");
+            db.prepare("INSERT INTO system_settings (key,value,updated_at) VALUES (?,?,?)").run("railway.ci.marker", "persisted", new Date().toISOString());
+            db.backup("/app/data/railway-ci-backup.sqlite")
+              .then(()=>db.close()).catch(e=>{console.error(e.name);db.close();process.exitCode=1;});
+          '
+          docker exec "$container" node -e '
+            const Database=require("better-sqlite3");
+            const b=new Database("/app/data/railway-ci-backup.sqlite", {readonly:true,fileMustExist:true});
+            const marker=b.prepare("SELECT value FROM system_settings WHERE key=?").get("railway.ci.marker");
+            if(marker?.value!=="persisted" || b.pragma("quick_check",{simple:true})!=="ok")process.exitCode=1;
+            b.close();
+          '
           docker restart "$container" >/dev/null
           probe 200 /healthz
           probe 200 /setup
           docker exec "$container" sh -c 'test "$(stat -c %u /app/data/bot_report.sqlite)" = 1000'
-          echo 'Railway SQLite image, non-root runtime and restart gates passed.'
+          docker exec "$container" node -e '
+            const Database=require("better-sqlite3");
+            const db=new Database("/app/data/bot_report.sqlite");
+            const marker=db.prepare("SELECT value FROM system_settings WHERE key=?").get("railway.ci.marker");
+            if(marker?.value!=="persisted")process.exitCode=1;
+            db.close();
+          '
+          # Offline restore into a disposable file, never overwrite the live DB.
+          docker exec "$container" cp /app/data/railway-ci-backup.sqlite /tmp/railway-ci-restored.sqlite
+          docker exec "$container" node -e '
+            const Database=require("better-sqlite3");
+            const db=new Database("/tmp/railway-ci-restored.sqlite",{readonly:true,fileMustExist:true});
+            if(db.pragma("quick_check",{simple:true})!=="ok")process.exitCode=1;
+            const marker=db.prepare("SELECT value FROM system_settings WHERE key=?").get("railway.ci.marker");
+            if(marker?.value!=="persisted")process.exitCode=1;
+            db.close();
+          '
+          echo 'Railway SQLite image, online backup, offline restore, and restart gates passed.'
