@@ -15,6 +15,24 @@ credentials. Browser SSH/terminal consoles and user/admin SSH Profiles are remov
 The Admin UI focuses on OAuth Clients, Workers (including Execution Targets), Audit
 and system settings. The terminal_list tool still lists Worker aliases for compatibility.
 
+## Railway + SQLite Quickstart (developer beta — no Neon/Upstash)
+
+[Railway + SQLite deployment guide](docs/RAILWAY_QUICKSTART.md) and
+[reviewable one-service/one-volume IaC](.railway/railway.ts).
+
+This new deployment mode uses **one Railway Node service, one persistent
+SQLite volume and one private setup key**, instead of Neon/Postgres and
+Upstash/Redis. From a fresh project: review the Railway plan and costs,
+provide an instance-only setup secret, create the initial Admin at /setup,
+then configure OAuth and connect a Worker over outbound WSS.
+
+**Not a released One-Click Template.** The new Railway image, SQLite owner
+setup and durable sessions have automated regression coverage. Signed
+Worker installers are intentionally unavailable (HTTP 503) pending
+public-key pinning and release approval. Full live Railway E2E and backup
+recovery remain required. Do not point Railway at an existing Docker/VPS
+or Vercel database or reuse any credentials.
+
 ## Two-screen Vercel Quickstart (beta — not a production release)
 
 [![Deploy to Vercel — development beta](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fmathew15064%2Fmcp_worker%2Ftree%2Ffeature%2Fvercel-selfhost-20261112&project-name=mcp-worker-private&repository-name=mcp-worker-private&env=MCP_SETUP_SECRET&envDescription=Enter+one+freshly+generated+private+43-character+base64url+key.+Keep+it+in+your+password+manager%3B+it+protects+your+independent+instance.&envLink=https%3A%2F%2Fgithub.com%2Fmathew15064%2Fmcp_worker%2Fblob%2Ffeature%2Fvercel-selfhost-20261112%2Fdocs%2FVERCEL_QUICKSTART.md&products=%5B%7B%22type%22%3A%22integration%22%2C%22protocol%22%3A%22storage%22%2C%22productSlug%22%3A%22neon%22%2C%22integrationSlug%22%3A%22neon%22%7D%2C%7B%22type%22%3A%22integration%22%2C%22protocol%22%3A%22storage%22%2C%22productSlug%22%3A%22upstash-kv%22%2C%22integrationSlug%22%3A%22upstash%22%7D%5D)
