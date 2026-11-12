@@ -578,10 +578,11 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
     .filter((line) => line.startsWith('data: '))
     .at(-1);
   const payload = JSON.parse(event ? event.slice(6) : bodyText) as {
-    result?: { isError?: boolean; structuredContent?: { stdout_tail?: string } };
+    result?: { isError?: boolean; structuredContent?: { stdout?: string; exit_code?: number } };
   };
   assert.equal(payload.result?.isError, undefined, bodyText);
-  assert.match(payload.result?.structuredContent?.stdout_tail || '', /T04_GO_WORKER_OK/);
+  assert.equal(payload.result?.structuredContent?.exit_code, 0, bodyText);
+  assert.match(payload.result?.structuredContent?.stdout || '', /T04_GO_WORKER_OK/);
 
   const marker = path.join(workspace, 'non-idempotent-marker');
   const onceCommand = "printf 'once\\n' >> " + JSON.stringify(marker);
