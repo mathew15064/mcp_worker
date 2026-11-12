@@ -508,8 +508,7 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
     ...forwarded,
     'content-type': 'application/x-www-form-urlencoded',
     authorization:
-      'Basic ' +
-      Buffer.from(client.client_id + ':' + registered.rawSecret).toString('base64'),
+      'Basic ' + Buffer.from(client.client_id + ':' + registered.rawSecret).toString('base64'),
   };
   const issued = await fetch(base + '/oauth/token', {
     method: 'POST',
