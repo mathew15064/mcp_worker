@@ -585,10 +585,20 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
   assert.match(payload.result?.structuredContent?.stdout || '', /T04_GO_WORKER_OK/);
 
   const marker = path.join(workspace, 'non-idempotent-marker');
-  const onceCommand = "printf 'once\\n' >> " + JSON.stringify(marker);
+  const onceCommand = 'printf once >> ' + JSON.stringify(marker);
   const onceCall = await request(token, 3, 'workspace_exec', onceCommand);
   assert.equal(onceCall.status, 200);
-  assert.equal(fs.readFileSync(marker, 'utf8'), 'once\n');
+  const onceText = await onceCall.text();
+  const onceEvent = onceText
+    .split('\n')
+    .filter((line) => line.startsWith('data: '))
+    .at(-1);
+  const onceResult = JSON.parse(onceEvent ? onceEvent.slice(6) : onceText) as {
+    result?: { isError?: boolean; structuredContent?: { exit_code?: number; stderr?: string } };
+  };
+  assert.equal(onceResult.result?.isError, undefined, onceText);
+  assert.equal(onceResult.result?.structuredContent?.exit_code, 0, onceText);
+  assert.equal(fs.readFileSync(marker, 'utf8'), 'once');
 
   await terminate();
   await waitUntil(() => !broker.isOnline(state.worker_id), 5000);
@@ -596,7 +606,7 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
   await waitUntil(() => broker.isOnline(state.worker_id), 15000);
   assert.equal(
     fs.readFileSync(marker, 'utf8'),
-    'once\n',
+    'once',
     'Reconnect must not replay a completed write',
   );
 
