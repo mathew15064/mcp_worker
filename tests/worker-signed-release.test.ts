@@ -5,8 +5,8 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import workerRoutes = require('../src/routes/workerRoutes');
+import { spawn } from 'node:child_process';
+import * as workerRoutes from '../src/routes/workerRoutes';
 
 const VERSION_A = '2.3.4';
 const COMMIT_A = '0123456789ab';
@@ -45,19 +45,21 @@ function bundle(
     signature: crypto.sign('sha256', sums, key.privateKey),
   };
 }
-function execute(command: string, args: string[], env: NodeJS.ProcessEnv, cwd: string) {
-  const result = spawnSync(command, args, {
-    cwd,
-    env,
-    encoding: 'utf8',
-    timeout: 60000,
-    windowsHide: true,
+function execute(
+  command: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+): Promise<{ code: number | null; output: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { cwd, env, windowsHide: true });
+    let output = '';
+    const timer = setTimeout(() => child.kill('SIGKILL'), 60000);
+    child.stdout.on('data', (chunk: Buffer) => { output += chunk.toString(); });
+    child.stderr.on('data', (chunk: Buffer) => { output += chunk.toString(); });
+    child.once('error', (error) => { clearTimeout(timer); reject(error); });
+    child.once('close', (code) => { clearTimeout(timer); resolve({ code, output }); });
   });
-  if (result.error) throw result.error;
-  return {
-    code: result.status,
-    output: String(result.stdout || '') + String(result.stderr || ''),
-  };
 }
 
 void test('no approved release is embedded in any downloadable installer', () => {
@@ -109,7 +111,7 @@ void test('offline native installer rejects fake, unsigned, wrong-key, wrong-ver
       '}',
       '',
     ].join('\n'));
-    const built = execute('go', ['build', '-o', fixture, stub], process.env, root);
+    const built = await execute('go', ['build', '-o', fixture, stub], process.env, root);
     assert.equal(built.code, 0, built.output);
   } else {
     fs.writeFileSync(fixture,
@@ -151,7 +153,7 @@ void test('offline native installer rejects fake, unsigned, wrong-key, wrong-ver
       BOT_REPORT_WORKER_SKIP_SERVICE: '1',
       BOT_REPORT_WORKER_SKIP_PATH: '1',
     };
-    function install(
+    async function install(
       approval = { version: VERSION_A, commit: COMMIT_A, publicKeyBase64: key.publicKeyBase64 },
       extra: NodeJS.ProcessEnv = {},
     ) {
@@ -166,72 +168,73 @@ void test('offline native installer rejects fake, unsigned, wrong-key, wrong-ver
         win ? ['-NoProfile', '-NonInteractive', '-File', scriptFile] : [scriptFile],
         { ...env, ...extra }, root);
     }
-    function unchanged(label: string, result: ReturnType<typeof execute>, expected = binaryA) {
-      assert.notEqual(result.code, 0, label + ': unexpectedly succeeded');
+    async function unchanged(label: string, result: ReturnType<typeof execute>, expected = binaryA) {
+      const outcome = await result;
+      assert.notEqual(outcome.code, 0, label + ': unexpectedly succeeded');
       assert.deepEqual(fs.readFileSync(installed), expected, label + ': replaced runtime');
     }
-    const first = install();
+    const first = await install();
     assert.equal(first.code, 0, 'signed fresh install: ' + first.output);
     assert.deepEqual(fs.readFileSync(installed), binaryA);
     assert.equal(fs.readFileSync(path.join(stateRoot, 'release-version'), 'utf8').trim(), VERSION_A);
     assert.equal(fs.readFileSync(path.join(stateRoot, 'release-commit'), 'utf8').trim(), COMMIT_A);
-    await t.test('valid signed same-version reinstall', () => {
-      assert.equal(install().code, 0);
+    await t.test('valid signed same-version reinstall', async () => {
+      assert.equal((await install()).code, 0);
     });
-    await t.test('modified binary', () => {
+    await t.test('modified binary', async () => {
       active = { ...packageA, binary: Buffer.concat([binaryA, Buffer.from('tamper')]) };
-      unchanged('modified binary', install());
+      await unchanged('modified binary', install());
       active = packageA;
     });
-    await t.test('tampered SHA256SUMS', () => {
+    await t.test('tampered SHA256SUMS', async () => {
       active = { ...packageA, sums: Buffer.from(packageA.sums.toString().replace(hash(binaryA), '0'.repeat(64))) };
-      unchanged('tampered manifest', install());
+      await unchanged('tampered manifest', install());
       active = packageA;
     });
-    await t.test('missing signature', () => {
+    await t.test('missing signature', async () => {
       missingSignature = true;
-      unchanged('missing signature', install());
+      await unchanged('missing signature', install());
       missingSignature = false;
     });
-    await t.test('wrong signature', () => {
+    await t.test('wrong signature', async () => {
       const sig = Buffer.from(packageA.signature);
       sig[0] ^= 1;
       active = { ...packageA, signature: sig };
-      unchanged('wrong signature', install());
+      await unchanged('wrong signature', install());
       active = packageA;
     });
-    await t.test('public verification key mismatch', () => {
-      unchanged('wrong public key', install({
+    await t.test('public verification key mismatch', async () => {
+      await unchanged('wrong public key', install({
         version: VERSION_A, commit: COMMIT_A, publicKeyBase64: wrong.publicKeyBase64,
       }));
     });
-    await t.test('modified signed metadata bytes', () => {
+    await t.test('modified signed metadata bytes', async () => {
       active = { ...packageA, metadata: Buffer.from('version=0.0.0\ncommit=' + COMMIT_A + '\n') };
-      unchanged('metadata tamper', install());
+      await unchanged('metadata tamper', install());
       active = packageA;
     });
-    await t.test('valid signature but mismatched release version', () => {
+    await t.test('valid signature but mismatched release version', async () => {
       active = bundle(key, file, binaryA, VERSION_B, COMMIT_B);
-      unchanged('mismatched pin', install());
+      await unchanged('mismatched pin', install());
       active = packageA;
     });
-    await t.test('manual rollback rejected', () => {
-      unchanged('manual rollback', install(undefined, { BOT_REPORT_WORKER_ACTION: 'rollback' }));
+    await t.test('manual rollback rejected', async () => {
+      await unchanged('manual rollback', install(undefined, { BOT_REPORT_WORKER_ACTION: 'rollback' }));
     });
-    await t.test('valid signed version upgrade', () => {
+    await t.test('valid signed version upgrade', async () => {
       active = packageB;
-      const upgraded = install({ version: VERSION_B, commit: COMMIT_B, publicKeyBase64: key.publicKeyBase64 });
+      const upgraded = await install({ version: VERSION_B, commit: COMMIT_B, publicKeyBase64: key.publicKeyBase64 });
       assert.equal(upgraded.code, 0, 'signed upgrade: ' + upgraded.output);
       assert.deepEqual(fs.readFileSync(installed), binaryB);
       assert.equal(fs.readFileSync(path.join(stateRoot, 'release-version'), 'utf8').trim(), VERSION_B);
     });
-    await t.test('previously valid signed release cannot downgrade', () => {
+    await t.test('previously valid signed release cannot downgrade', async () => {
       active = packageA;
-      unchanged('signed downgrade', install(), binaryB);
+      await unchanged('signed downgrade', install(), binaryB);
     });
-    await t.test('same version with different signed commit is rejected', () => {
+    await t.test('same version with different signed commit is rejected', async () => {
       active = bundle(key, file, binaryB, VERSION_B, 'bbbbbbbbbbbb');
-      unchanged('version reuse', install({
+      await unchanged('version reuse', install({
         version: VERSION_B, commit: 'bbbbbbbbbbbb', publicKeyBase64: key.publicKeyBase64,
       }), binaryB);
     });
@@ -243,7 +246,7 @@ void test('offline native installer rejects fake, unsigned, wrong-key, wrong-ver
 
 void test('signer requires approved version, canonical checksums and RSA private key', {
   skip: process.platform !== 'linux' ? 'canonical SHA256SUMS signer runs on Linux' : false,
-}, () => {
+}, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-manifest-sign-'));
   try {
     const scripts = path.join(root, 'scripts');
@@ -277,11 +280,11 @@ void test('signer requires approved version, canonical checksums and RSA private
         WORKER_RELEASE_EXPECTED_COMMIT: COMMIT_A,
       }, root);
     }
-    assert.notEqual(sign(VERSION_B).code, 0, 'wrong approval version accepted');
+    assert.notEqual((await sign(VERSION_B)).code, 0, 'wrong approval version accepted');
     fs.writeFileSync(path.join(bin, 'SHA256SUMS'), sums().replace(/^[0-9a-f]{64}/, '0'.repeat(64)));
-    assert.notEqual(sign(VERSION_A).code, 0, 'tampered checksum accepted');
+    assert.notEqual((await sign(VERSION_A)).code, 0, 'tampered checksum accepted');
     fs.writeFileSync(path.join(bin, 'SHA256SUMS'), sums());
-    assert.equal(sign(VERSION_A).code, 0, 'signed candidate failed');
+    assert.equal((await sign(VERSION_A)).code, 0, 'signed candidate failed');
     const manifest = fs.readFileSync(path.join(bin, 'SHA256SUMS'));
     const signature = fs.readFileSync(path.join(bin, 'SHA256SUMS.sig'));
     assert.equal(crypto.verify('sha256', manifest, key.publicPem, signature), true);
