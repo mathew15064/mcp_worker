@@ -54,6 +54,17 @@ function certificate(root: string) {
   return { key: fs.readFileSync(key), cert: fs.readFileSync(cert), certPath: cert };
 }
 
+function makeDisposableDirectoriesWritable(directory: string) {
+  // go build downloads modules as read-only directories. Only touch our mkdtemp tree,
+  // and never follow symlinks out of it.
+  fs.chmodSync(directory, 0o700);
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      makeDisposableDirectoriesWritable(path.join(directory, entry.name));
+    }
+  }
+}
+
 function codeIs(value: string) {
   return (error: unknown) => error instanceof Error && 'code' in error && error.code === value;
 }
@@ -335,6 +346,7 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
+    makeDisposableDirectoriesWritable(root);
     fs.rmSync(root, { recursive: true, force: true });
   });
 
