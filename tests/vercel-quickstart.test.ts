@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import type { Request } from 'express';
+import workerRoutes from '../src/routes/workerRoutes';
 import { Redis } from '@upstash/redis';
 import {
   managedRedisConnection,
@@ -118,4 +120,29 @@ void test('Canonical Vercel URL is automatic and cannot be replaced with a suppl
   assert.equal(hasManagedPostgres({ POSTGRES_URL: 'postgresql://example' }), true);
   assert.equal(hasManagedPostgres({ DATABASE_URL: 'postgresql://example' }), true);
   assert.equal(hasManagedPostgres({}), false);
+});
+
+void test('Vercel installer origin ignores a spoofed Host header and refuses missing canonical host', () => {
+  const before = {
+    platform: process.env.MCP_PLATFORM,
+    production: process.env.VERCEL_PROJECT_PRODUCTION_URL,
+    url: process.env.VERCEL_URL,
+  };
+  const spoofed = { protocol: 'https', get: () => 'attacker.example' } as unknown as Request;
+  try {
+    process.env.MCP_PLATFORM = 'vercel';
+    process.env.VERCEL_PROJECT_PRODUCTION_URL = 'trusted-owner.vercel.app';
+    process.env.VERCEL_URL = 'other-preview.vercel.app';
+    assert.equal(workerRoutes.publicBaseUrl(spoofed), 'https://trusted-owner.vercel.app');
+    delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+    delete process.env.VERCEL_URL;
+    assert.throws(() => workerRoutes.publicBaseUrl(spoofed), /Missing canonical Vercel origin/);
+  } finally {
+    if (before.platform === undefined) delete process.env.MCP_PLATFORM;
+    else process.env.MCP_PLATFORM = before.platform;
+    if (before.production === undefined) delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+    else process.env.VERCEL_PROJECT_PRODUCTION_URL = before.production;
+    if (before.url === undefined) delete process.env.VERCEL_URL;
+    else process.env.VERCEL_URL = before.url;
+  }
 });
