@@ -8,6 +8,18 @@ import workerRepository from '../repositories/workerRepository';
 import { canonicalVercelOrigin } from '../config/managedStorage';
 import { canonicalRailwayOrigin } from '../config/railwayOrigin';
 
+// No approved signing key/release exists. Populate only by reviewed code change.
+type ApprovedWorkerRelease = Readonly<{
+  version: string;
+  commit: string;
+  publicKeyBase64: string;
+}>;
+const APPROVED_WORKER_RELEASE: ApprovedWorkerRelease = Object.freeze({
+  version: '',
+  commit: '',
+  publicKeyBase64: '',
+});
+
 const router = express.Router();
 const WORKER_DIR = path.resolve(__dirname, '../../worker');
 const WORKER_BIN_DIR = path.join(WORKER_DIR, 'bin');
@@ -61,14 +73,24 @@ function shellSingleQuote(value: string) {
   return `'${String(value).replace(/'/g, `'"'"'`)}'`;
 }
 
-function unixInstallerScript(baseUrl: string, expectedOS: string) {
+function unixInstallerScript(
+  baseUrl: string,
+  expectedOS: string,
+  approved: ApprovedWorkerRelease = APPROVED_WORKER_RELEASE,
+) {
   const base = shellSingleQuote(baseUrl);
   const osName = shellSingleQuote(expectedOS);
+  const pinnedVersion = shellSingleQuote(approved.version);
+  const pinnedCommit = shellSingleQuote(approved.commit);
+  const pinnedKey = shellSingleQuote(approved.publicKeyBase64);
   return `#!/bin/sh
 set -eu
 
 BASE_URL=${base}
 EXPECTED_OS=${osName}
+PINNED_VERSION=${pinnedVersion}
+PINNED_COMMIT=${pinnedCommit}
+PINNED_PUBLIC_KEY_B64=${pinnedKey}
 INSTALL_ROOT="${'${BOT_REPORT_WORKER_INSTALL_ROOT:-$HOME/.local/share/bot-report-worker}'}"
 BIN_DIR="${'${BOT_REPORT_WORKER_BIN_DIR:-$HOME/.local/bin}'}"
 WORKER_HOME="${'${BOT_REPORT_WORKER_HOME:-$HOME/.bot-report-worker}'}"
@@ -95,6 +117,16 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "[systemtd] missing required 
 need curl
 need uname
 need id
+need openssl
+[ -n "$PINNED_VERSION" ] && [ -n "$PINNED_COMMIT" ] && [ -n "$PINNED_PUBLIC_KEY_B64" ] || {
+  echo "[systemtd] signed release not approved" >&2; exit 1;
+}
+case "$PINNED_VERSION" in *[!0-9.]*|'') echo "[systemtd] invalid release version" >&2; exit 1;; esac
+case "$PINNED_COMMIT" in *[!0-9a-f]*|'') echo "[systemtd] invalid release commit" >&2; exit 1;; esac
+if [ "$ACTION" = rollback ]; then
+  echo "[systemtd] manual rollback prohibited; explicitly approve a signed release" >&2
+  exit 1
+fi
 
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH_RAW="$(uname -m)"
@@ -124,20 +156,58 @@ fi
 mkdir "$INSTALL_ROOT/.install-lock" || { echo "[systemtd] installer already running or stale lock; inspect before removal" >&2; exit 1; }
 LOCK="$INSTALL_ROOT/.install-lock"
 PREVIOUS="$INSTALL_ROOT/previous"
-if [ "$ACTION" = rollback ]; then
-  [ -f "$PREVIOUS/systemtd" ] && [ -f "$PREVIOUS/SHA256SUMS" ] && [ ! -L "$PREVIOUS" ] && [ ! -L "$PREVIOUS/systemtd" ] || { echo "[systemtd] no verified previous runtime" >&2; exit 1; }
-  cp "$PREVIOUS/systemtd" "$TMP/systemtd"
-  cp "$PREVIOUS/SHA256SUMS" "$TMP/SHA256SUMS"
-else
-  curl -fsSL "$BASE_URL/worker/dist/$FILE" -o "$TMP/systemtd"
-  curl -fsSL "$BASE_URL/worker/dist/SHA256SUMS" -o "$TMP/SHA256SUMS"
-  if [ -n "${'${BOT_REPORT_WORKER_TRUSTED_KEY:-}'}" ]; then
-    need openssl
-    curl -fsSL "$BASE_URL/worker/dist/SHA256SUMS.sig" -o "$TMP/SHA256SUMS.sig"
-    openssl dgst -sha256 -verify "$BOT_REPORT_WORKER_TRUSTED_KEY" -signature "$TMP/SHA256SUMS.sig" "$TMP/SHA256SUMS" >/dev/null
+printf '%s' "$PINNED_PUBLIC_KEY_B64" | openssl base64 -d -A > "$TMP/release-key.pem"
+openssl rsa -pubin -in "$TMP/release-key.pem" -noout >/dev/null 2>&1 || {
+  echo "[systemtd] invalid pinned RSA public key" >&2; exit 1;
+}
+curl -fsSL "$BASE_URL/worker/dist/SHA256SUMS" -o "$TMP/SHA256SUMS"
+curl -fsSL "$BASE_URL/worker/dist/SHA256SUMS.sig" -o "$TMP/SHA256SUMS.sig"
+openssl dgst -sha256 -verify "$TMP/release-key.pem" -signature "$TMP/SHA256SUMS.sig" "$TMP/SHA256SUMS" >/dev/null || {
+  echo "[systemtd] signature verification failed" >&2; exit 1;
+}
+manifest_hash() {
+  awk -v file="$1" '
+    $2 == file { count++; value=$1 }
+    END {
+      if (count != 1 || length(value) != 64 || value ~ /[^0-9a-fA-F]/) exit 1
+      print tolower(value)
+    }' "$TMP/SHA256SUMS"
+}
+RELEASE_HASH="$(manifest_hash WORKER_RELEASE)" || { echo "[systemtd] missing or duplicate release checksum" >&2; exit 1; }
+curl -fsSL "$BASE_URL/worker/dist/WORKER_RELEASE" -o "$TMP/WORKER_RELEASE"
+ACTUAL_RELEASE="$(openssl dgst -sha256 "$TMP/WORKER_RELEASE" | awk '{print $NF}')"
+[ "$ACTUAL_RELEASE" = "$RELEASE_HASH" ] || { echo "[systemtd] release metadata checksum failed" >&2; exit 1; }
+[ "$(wc -l < "$TMP/WORKER_RELEASE" | tr -d ' ')" = 2 ] &&
+  [ "$(sed -n '1p' "$TMP/WORKER_RELEASE")" = "version=$PINNED_VERSION" ] &&
+  [ "$(sed -n '2p' "$TMP/WORKER_RELEASE")" = "commit=$PINNED_COMMIT" ] || {
+  echo "[systemtd] signed release version/commit mismatch" >&2; exit 1;
+}
+RECORDED_VERSION="$WORKER_HOME/release-version"
+RECORDED_COMMIT="$WORKER_HOME/release-commit"
+if [ -f "$SYSTEMTD" ] && [ ! -f "$RECORDED_VERSION" ]; then
+  echo "[systemtd] existing runtime lacks verified release record" >&2; exit 1
+fi
+if [ -e "$RECORDED_VERSION" ] || [ -e "$RECORDED_COMMIT" ]; then
+  [ -f "$RECORDED_VERSION" ] && [ -f "$RECORDED_COMMIT" ] &&
+    [ ! -L "$RECORDED_VERSION" ] && [ ! -L "$RECORDED_COMMIT" ] || {
+    echo "[systemtd] incomplete or unsafe release record" >&2; exit 1;
+  }
+  OLD_VERSION="$(cat "$RECORDED_VERSION")"
+  OLD_COMMIT="$(cat "$RECORDED_COMMIT")"
+  awk -v old="$OLD_VERSION" -v new="$PINNED_VERSION" 'BEGIN {
+    if (old !~ /^[0-9]+\\.[0-9]+\\.[0-9]+$/ || new !~ /^[0-9]+\\.[0-9]+\\.[0-9]+$/) exit 1
+    split(old,a,"."); split(new,b,".")
+    for (i=1;i<=3;i++) {
+      if (b[i]+0<a[i]+0) exit 1
+      if (b[i]+0>a[i]+0) exit 0
+    }
+  }' || { echo "[systemtd] signed release rollback rejected" >&2; exit 1; }
+  if [ "$OLD_VERSION" = "$PINNED_VERSION" ] && [ "$OLD_COMMIT" != "$PINNED_COMMIT" ]; then
+    echo "[systemtd] release version reused for another commit" >&2; exit 1
   fi
 fi
-EXPECTED="$(awk -v file="$FILE" '$2 == file { print $1; exit }' "$TMP/SHA256SUMS")"
+curl -fsSL "$BASE_URL/worker/dist/$FILE" -o "$TMP/systemtd"
+EXPECTED="$(manifest_hash "$FILE")" || { echo "[systemtd] missing or duplicate binary checksum" >&2; exit 1; }
 if [ -z "$EXPECTED" ]; then
   echo "[systemtd] checksum manifest does not contain $FILE." >&2
   exit 1
@@ -210,6 +280,9 @@ printf '%s\n' "$INSTALL_ROOT" > "$WORKER_HOME/install-root"
 printf '%s\n' "$BIN_DIR/systemtd" > "$WORKER_HOME/bin-path"
 chmod 0700 "$WORKER_HOME"
 chmod 0600 "$WORKER_HOME/default-server" "$WORKER_HOME/install-root" "$WORKER_HOME/bin-path"
+printf '%s\\n' "$PINNED_VERSION" > "$WORKER_HOME/release-version"
+printf '%s\\n' "$PINNED_COMMIT" > "$WORKER_HOME/release-commit"
+chmod 0600 "$WORKER_HOME/release-version" "$WORKER_HOME/release-commit"
 
 echo "[systemtd] installed standalone runtime: $BIN_DIR/systemtd ($OS/$ARCH)"
 
@@ -325,11 +398,11 @@ fi
 `;
 }
 
-function installerScript(baseUrl: string) {
-  return unixInstallerScript(baseUrl, 'linux');
+function installerScript(baseUrl: string, approved?: ApprovedWorkerRelease) {
+  return unixInstallerScript(baseUrl, 'linux', approved);
 }
-function macInstallerScript(baseUrl: string) {
-  return unixInstallerScript(baseUrl, 'darwin');
+function macInstallerScript(baseUrl: string, approved?: ApprovedWorkerRelease) {
+  return unixInstallerScript(baseUrl, 'darwin', approved);
 }
 function powershellSingleQuote(value: string) {
   return `'${String(value).replace(/'/g, "''")}'`;
