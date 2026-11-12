@@ -8,9 +8,17 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 
+type ApprovedRelease = { version: string; commit: string; publicKeyBase64: string };
+type Installer = (baseUrl: string, approval?: ApprovedRelease) => string;
+type WorkerRouteApi = {
+  installerScript: Installer;
+  macInstallerScript: Installer;
+  windowsInstallerScript: Installer;
+  windowsInstallerPayloadScript: Installer;
+};
 const workerRoutes = createRequire(__filename)(
   '../src/routes/workerRoutes',
-) as typeof import('../src/routes/workerRoutes');
+) as WorkerRouteApi;
 
 const VERSION_A = '2.3.4';
 const COMMIT_A = '0123456789ab';
