@@ -137,6 +137,7 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
       allowedScopes: ['bot_report.read', 'bot_report.terminal'],
     });
     assert.ok(registered.client);
+    assert.ok(registered.rawSecret);
     const verifier = 'railway-pkce-verifier-abcdefghijklmnopqrstuvwxyz-0123456789';
     const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
     const redirectUri = 'https://chatgpt.com/connector_platform_oauth_redirect';
@@ -188,7 +189,7 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
       'content-type': 'application/x-www-form-urlencoded',
       authorization:
         'Basic ' +
-        Buffer.from(registered.client.client_id + ':' + registered.rawSecret).toString('base64'),
+        Buffer.from([registered.client.client_id, registered.rawSecret].join(':')).toString('base64'),
     };
     const granted = await fetch(base + '/oauth/token', {
       method: 'POST',
