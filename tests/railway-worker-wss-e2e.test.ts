@@ -115,7 +115,8 @@ void test('loopback WSS signs identity, rejects forgery, enforces capacity, and 
   const server = https.createServer({ key: tls.key, cert: tls.cert });
   broker.attach(server);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const url = 'wss://127.0.0.1:' + String((server.address() as AddressInfo).port) + '/worker/v1/connect';
+  const url =
+    'wss://127.0.0.1:' + String((server.address() as AddressInfo).port) + '/worker/v1/connect';
   const sockets: WebSocket[] = [];
   t.after(async () => {
     broker.close();
@@ -453,11 +454,7 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
   assert.ok(profile && profile.worker_id === state.worker_id);
 
   const spawnWorker = () => {
-    child = spawn(
-      executable,
-      ['run'],
-      { cwd: workspace, env: goEnv, stdio: 'ignore' },
-    );
+    child = spawn(executable, ['run'], { cwd: workspace, env: goEnv, stdio: 'ignore' });
     return child;
   };
   spawnWorker();
