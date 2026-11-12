@@ -1,0 +1,91 @@
+name: Railway SQLite preview (no provisioning)
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  railway-image:
+    if: github.head_ref == 'feature/railway-sqlite-oneclick-20261112' || github.ref_name == 'feature/railway-sqlite-oneclick-20261112'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate Railway volume initialization script
+        run: sh -n docker-entrypoint-railway.sh
+      - name: Build isolated Railway image
+        run: docker build -f Dockerfile.railway -t mcp-railway-sqlite:ci .
+      - name: Verify fail-closed volume and persisted SQLite restart
+        shell: bash
+        run: |
+          set -euo pipefail
+          container="mcp-railway-ci-$GITHUB_RUN_ID"
+          volume="mcp-railway-data-$GITHUB_RUN_ID"
+          trap 'docker rm -f "$container" >/dev/null 2>&1 || true; docker volume rm "$volume" >/dev/null 2>&1 || true' EXIT
+          # The image must refuse to start without a Railway volume identity.
+          if docker run --rm             -e MCP_PLATFORM=railway             -e RAILWAY_VOLUME_MOUNT_PATH=/app/data             -e RAILWAY_VOLUME_NAME=             -e DATABASE_PATH=/app/data/bot_report.sqlite             mcp-railway-sqlite:ci >/dev/null 2>&1; then
+            echo 'Missing-volume fail-closed gate failed' >&2
+            exit 1
+          fi
+          docker volume create "$volume" >/dev/null
+          key="$(node -p "require('node:crypto').randomBytes(32).toString('base64url')")"
+          docker run -d --name "$container"             -p 127.0.0.1:13347:80             -v "$volume":/app/data             -e MCP_PLATFORM=railway             -e RAILWAY_VOLUME_MOUNT_PATH=/app/data             -e RAILWAY_VOLUME_NAME="$volume"             -e DATABASE_PATH=/app/data/bot_report.sqlite             -e MCP_SETUP_SECRET="$key"             -e RAILWAY_PUBLIC_DOMAIN=isolated-ci.up.railway.app             mcp-railway-sqlite:ci >/dev/null
+          unset key
+          probe() {
+            local expected="$1" endpoint="$2"
+            for i in {1..30}; do
+              if [ "$(curl --max-time 3 -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:13347$endpoint")" = "$expected" ]; then
+                return 0
+              fi
+              sleep 2
+            done
+            docker logs "$container" | tail -30
+            return 1
+          }
+          probe 200 /healthz
+          probe 200 /setup
+          probe 503 /readyz
+          docker exec "$container" test -f /app/data/bot_report.sqlite
+          docker exec "$container" sh -c 'test "$(stat -c %u /app/data/bot_report.sqlite)" = 1000'
+          # Perform a proper online SQLite backup (not an unsafe live file copy).
+          docker exec "$container" node -e '
+            const Database=require("better-sqlite3");
+            const db=new Database("/app/data/bot_report.sqlite");
+            db.prepare("INSERT INTO system_settings (key,value,updated_at) VALUES (?,?,?)").run("railway.ci.marker", "persisted", new Date().toISOString());
+            db.backup("/app/data/railway-ci-backup.sqlite")
+              .then(()=>db.close()).catch(e=>{console.error(e.name);db.close();process.exitCode=1;});
+          '
+          docker exec "$container" node -e '
+            const Database=require("better-sqlite3");
+            const b=new Database("/app/data/railway-ci-backup.sqlite", {readonly:true,fileMustExist:true});
+            const marker=b.prepare("SELECT value FROM system_settings WHERE key=?").get("railway.ci.marker");
+            if(marker?.value!=="persisted" || b.pragma("quick_check",{simple:true})!=="ok")process.exitCode=1;
+            b.close();
+          '
+          docker restart "$container" >/dev/null
+          probe 200 /healthz
+          probe 200 /setup
+          docker exec "$container" sh -c 'test "$(stat -c %u /app/data/bot_report.sqlite)" = 1000'
+          docker exec "$container" node -e '
+            const Database=require("better-sqlite3");
+            const db=new Database("/app/data/bot_report.sqlite");
+            const marker=db.prepare("SELECT value FROM system_settings WHERE key=?").get("railway.ci.marker");
+            if(marker?.value!=="persisted")process.exitCode=1;
+            db.close();
+          '
+          # Offline restore into a disposable file, never overwrite the live DB.
+          docker exec "$container" cp /app/data/railway-ci-backup.sqlite /tmp/railway-ci-restored.sqlite
+          docker exec "$container" node -e '
+            const Database=require("better-sqlite3");
+            const db=new Database("/tmp/railway-ci-restored.sqlite",{readonly:true,fileMustExist:true});
+            if(db.pragma("quick_check",{simple:true})!=="ok")process.exitCode=1;
+            const marker=db.prepare("SELECT value FROM system_settings WHERE key=?").get("railway.ci.marker");
+            if(marker?.value!=="persisted")process.exitCode=1;
+            db.close();
+          '
+          echo 'Railway SQLite image, online backup, offline restore, and restart gates passed.'

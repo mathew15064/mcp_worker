@@ -1,6 +1,8 @@
 import { URL } from 'node:url';
 import runtimeSettings from '../services/runtimeSettingsService';
 import databaseManager from '../db/databaseManager';
+import { canonicalVercelOrigin } from './managedStorage';
+import { canonicalRailwayOrigin } from './railwayOrigin';
 
 const DEFAULT_SCOPES = Object.freeze(['bot_report.read', 'bot_report.terminal', 'offline_access']);
 
@@ -9,6 +11,19 @@ class McpConfig {
     return databaseManager.isOperational() && runtimeSettings.bool('mcp.enabled', true);
   }
   get publicBaseUrl() {
+    // Preview deployment hostnames are ephemeral. Do not persist the first
+    // deployment URL as the issuer for every future OAuth/PKCE callback.
+    // On Vercel the platform-provided stable project hostname is authoritative.
+    if (process.env.MCP_PLATFORM === 'vercel') {
+      const origin = canonicalVercelOrigin();
+      if (!origin) throw new Error('Vercel canonical origin is unavailable.');
+      return origin;
+    }
+    if (process.env.MCP_PLATFORM === 'railway') {
+      const origin = canonicalRailwayOrigin();
+      if (!origin) throw new Error('Railway canonical origin is unavailable.');
+      return origin;
+    }
     return String(runtimeSettings.get('mcp.public_base_url', 'http://localhost:3333')).replace(
       /\/+$/,
       '',
@@ -59,7 +74,7 @@ class McpConfig {
         errors.push('MCP Public Base URL must use HTTP or HTTPS.');
       if (
         process.env.NODE_ENV === 'production' &&
-        databaseManager.isMysqlReady() &&
+        databaseManager.isSqlReady() &&
         publicUrl.protocol !== 'https:'
       ) {
         errors.push('MCP Public Base URL must use HTTPS in production.');

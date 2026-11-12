@@ -1,0 +1,48 @@
+name: Worker cross-platform artifacts (manual, no release)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: worker-go/go.mod
+          cache-dependency-path: worker-go/go.sum
+
+      - name: Test Worker
+        run: |
+          cd worker-go
+          go test ./...
+
+      - name: Build all Worker platforms
+        run: ./scripts/build-worker-go.sh
+
+      - name: Verify hashes and Linux binary
+        run: |
+          cd worker/bin
+          sha256sum -c SHA256SUMS
+          ./bot-report-worker-linux-amd64 version
+
+      - name: Upload private CI artifacts for release review
+        uses: actions/upload-artifact@v4
+        with:
+          name: worker-cross-platform-${{ github.sha }}
+          path: |
+            worker/bin/bot-report-worker-*
+            worker/bin/WORKER_RELEASE
+            worker/bin/SHA256SUMS
+          retention-days: 7
+          if-no-files-found: error

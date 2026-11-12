@@ -401,7 +401,7 @@ void test(
       return body.result as RpcResult;
     }
     const catalog = (await rpc('tools/list', {})).tools || [];
-    assert.equal(catalog.length, 19);
+    assert.equal(catalog.length, 15);
     const profile = 'Live Worker Profile';
     async function call(
       name: string,
@@ -416,18 +416,12 @@ void test(
       );
     }
     const runtime = await call('runtime_info');
-    assert.equal(runtime.tool_count, 19);
+    assert.equal(runtime.tool_count, 15);
     assert.equal(
       runtime.tool_schema_hash,
-      '77fec371229586b76437ab2dd0b8bff3101c89d13baa5a223795a8a68d11fdb6',
+      'a79786ed09ba2e8eef30ec778453b17c81963bf943542c1f2ea0f87952e4a032',
     );
     await call('terminal_list');
-    assert.equal((await call('terminal_status', { profile })).status, 'READY');
-    await call('terminal_send', { profile, text: 'echo mcp-live-terminal' });
-    await waitFor(async () =>
-      String((await call('terminal_read', { profile })).text).includes('mcp-live-terminal'),
-    );
-    await call('terminal_interrupt', { profile });
     assert.equal(
       (
         await call('workspace_exec', {

@@ -22,6 +22,9 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json ./
 COPY src/ ./src/
+# Compile the Vercel Function solely for disposable cross-runtime verification.
+# The final Docker runner stage intentionally does not copy dist/api.
+COPY api/ ./api/
 COPY scripts/ ./scripts/
 COPY worker/ ./worker/
 COPY tests/ ./tests/

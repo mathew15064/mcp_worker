@@ -174,7 +174,30 @@ export class SchemaBuilder {
   async createTable(name: string, callback: (table: TableBlueprint) => void) {
     const blueprint = new TableBlueprint(name);
     callback(blueprint);
-    await this.adapter.exec(blueprint.toCreateSql());
+    if (this.adapter.kind === 'postgres') {
+      const definitions = blueprint.columns.map((column) => column.toSql());
+      for (const index of blueprint.indexes.filter((index) => index.unique)) {
+        definitions.push(
+          `CONSTRAINT ${quoteId(index.name)} UNIQUE (${index.columns.map(quoteId).join(', ')})`,
+        );
+      }
+      for (const fk of blueprint.foreignKeys) {
+        const suffix = fk.onDelete ? ` ON DELETE ${String(fk.onDelete).toUpperCase()}` : '';
+        definitions.push(
+          `FOREIGN KEY (${quoteId(fk.column)}) REFERENCES ${quoteId(fk.targetTable)} (${quoteId(fk.targetColumn)})${suffix}`,
+        );
+      }
+      await this.adapter.exec(
+        `CREATE TABLE IF NOT EXISTS ${quoteId(name)} (${definitions.join(', ')})`,
+      );
+      for (const index of blueprint.indexes.filter((index) => !index.unique)) {
+        await this.adapter.exec(
+          `CREATE INDEX IF NOT EXISTS ${quoteId(index.name)} ON ${quoteId(name)} (${index.columns.map(quoteId).join(', ')})`,
+        );
+      }
+    } else {
+      await this.adapter.exec(blueprint.toCreateSql());
+    }
   }
   async table(name: string, callback: (table: AlterTableBlueprint) => void) {
     const blueprint = new AlterTableBlueprint(name);

@@ -56,8 +56,8 @@ CREATE TABLE IF NOT EXISTS terminal_connection_audit (
 );
 CREATE INDEX IF NOT EXISTS idx_terminal_audit_profile ON terminal_connection_audit(terminal_profile_id, created_at DESC);
 
--- Worker tables are used by the v2 outbound transport. SQLite remains test/legacy-only,
--- but mirroring these tables keeps local fixtures compatible with the production MySQL schema.
+-- Worker tables are used by the v2 outbound transport. This SQLite schema is
+-- also the single-replica Railway production schema; changes must remain additive.
 CREATE TABLE IF NOT EXISTS workers (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,

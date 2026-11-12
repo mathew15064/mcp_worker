@@ -6,6 +6,9 @@ import sessionMiddleware from './middleware/sessionMiddleware';
 import { csrfProtection } from './middleware/csrfMiddleware';
 import workerRoutes from './routes/workerRoutes';
 import authRoutes from './routes/authRoutes';
+import setupRoutes from './routes/setupRoutes';
+import railwaySetupRoutes from './routes/railwaySetupRoutes';
+import { canonicalRailwayOrigin } from './config/railwayOrigin';
 import accountRoutes from './routes/accountRoutes';
 import adminRoutes from './routes/adminRoutes';
 import mcpOAuthRoutes from './routes/mcpOAuthRoutes';
@@ -18,20 +21,6 @@ app.use(
   '/assets',
   express.static(path.join(__dirname, 'public'), { fallthrough: false, maxAge: '1h' }),
 );
-app.use(
-  '/vendor/xterm',
-  express.static(path.join(__dirname, '../node_modules/@xterm/xterm'), {
-    fallthrough: false,
-    maxAge: '1d',
-  }),
-);
-app.use(
-  '/vendor/xterm-addon-fit',
-  express.static(path.join(__dirname, '../node_modules/@xterm/addon-fit'), {
-    fallthrough: false,
-    maxAge: '1d',
-  }),
-);
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false, limit: '64kb' }));
 app.use(sessionMiddleware);
@@ -41,12 +30,64 @@ app.get('/healthz', (req, res) => {
   const database = databaseManager.status();
   res.json({ ok: true, service: 'mcp_worker', mode: 'mcp-admin', database: database.state });
 });
-app.get('/readyz', (req, res) => {
-  const database = databaseManager.status();
-  return res
-    .status(database.operational ? 200 : 503)
-    .json({ ready: database.operational, database: database.state });
+app.get('/readyz', async (req, res, next) => {
+  try {
+    const database = databaseManager.status();
+    let railwayOriginReady = true;
+    if (process.env.MCP_PLATFORM === 'railway') {
+      try {
+        railwayOriginReady = Boolean(canonicalRailwayOrigin());
+      } catch {
+        railwayOriginReady = false;
+      }
+    }
+    const ready =
+      database.operational &&
+      railwayOriginReady &&
+      (process.env.MCP_PLATFORM !== 'vercel' || (await setupRoutes.isOwnerSetupComplete())) &&
+      (process.env.MCP_PLATFORM !== 'railway' || (await railwaySetupRoutes.isOwnerSetupComplete()));
+    // Vercel's cross-instance Worker dispatch remains under development.
+    // Even with setup complete, never advertise execution readiness until
+    // the distributed Redis broker has passed its separate acceptance gate.
+    const workerTransportReady = process.env.MCP_PLATFORM !== 'vercel';
+    return res.status(ready && workerTransportReady ? 200 : 503).json({
+      ready: ready && workerTransportReady,
+      database: database.state,
+      workerTransportReady,
+      railwayOriginReady,
+    });
+  } catch (error) {
+    return next(error);
+  }
 });
+if (process.env.MCP_PLATFORM === 'vercel') {
+  app.use('/', setupRoutes);
+  app.use(async (req, res, next) => {
+    try {
+      if (await setupRoutes.isOwnerSetupComplete()) return next();
+      res.set('Cache-Control', 'no-store');
+      if (req.method !== 'GET' && req.method !== 'HEAD')
+        return res.status(503).json({ code: 'SETUP_REQUIRED', error: 'Instance not initialized' });
+      return res.redirect('/setup');
+    } catch (error) {
+      next(error);
+    }
+  });
+}
+if (process.env.MCP_PLATFORM === 'railway') {
+  app.use('/', railwaySetupRoutes);
+  app.use(async (req, res, next) => {
+    try {
+      if (await railwaySetupRoutes.isOwnerSetupComplete()) return next();
+      res.set('Cache-Control', 'no-store');
+      if (req.method !== 'GET' && req.method !== 'HEAD')
+        return res.status(503).json({ code: 'SETUP_REQUIRED', error: 'Instance not initialized' });
+      return res.redirect('/setup');
+    } catch (error) {
+      next(error);
+    }
+  });
+}
 app.get('/', (req, res) => res.redirect('/admin'));
 
 app.use('/', workerRoutes);

@@ -8,11 +8,7 @@ import { createMcpServer } from '../src/mcp/server';
 const names = [
   'runtime_info',
   'terminal_list',
-  'terminal_status',
-  'terminal_read',
-  'terminal_send',
   'workspace_exec',
-  'terminal_interrupt',
   'artifact_collect',
   'file_read',
   'file_write',
@@ -27,14 +23,14 @@ const names = [
   'check_run',
 ];
 
-void test('TS3 catalog preserves all 19 public tool schemas and order', () => {
+void test('TS3 catalog preserves all 15 Worker-only tool schemas and order', () => {
   assert.deepEqual(
     TOOLS.map((tool) => tool.name),
     names,
   );
   assert.equal(
     runtimeInfo._test.schemaFingerprint(TOOLS),
-    '77fec371229586b76437ab2dd0b8bff3101c89d13baa5a223795a8a68d11fdb6',
+    'a79786ed09ba2e8eef30ec778453b17c81963bf943542c1f2ea0f87952e4a032',
   );
   assert.ok(TOOLS.every((tool) => typeof tool.handler === 'function'));
 });

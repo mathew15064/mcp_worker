@@ -5,6 +5,8 @@ import { rateLimit } from 'express-rate-limit';
 import databaseManager from '../db/databaseManager';
 import workerAuthService from '../services/workerAuthService';
 import workerRepository from '../repositories/workerRepository';
+import { canonicalVercelOrigin } from '../config/managedStorage';
+import { canonicalRailwayOrigin } from '../config/railwayOrigin';
 
 const router = express.Router();
 const WORKER_DIR = path.resolve(__dirname, '../../worker');
@@ -36,6 +38,18 @@ const enrollmentLimiter = rateLimit({
 });
 
 function publicBaseUrl(req: Request) {
+  // Never let a caller-controlled Host/X-Forwarded-Host select the endpoint
+  // from which a Vercel owner will download and execute a Worker installer.
+  if (process.env.MCP_PLATFORM === 'vercel') {
+    const origin = canonicalVercelOrigin();
+    if (!origin) throw new Error('Missing canonical Vercel origin for Worker installer.');
+    return origin;
+  }
+  if (process.env.MCP_PLATFORM === 'railway') {
+    const origin = canonicalRailwayOrigin();
+    if (!origin) throw new Error('Missing canonical Railway origin for Worker installer.');
+    return origin;
+  }
   const value = `${req.protocol}://${req.get('host')}`;
   const parsed = new URL(value);
   if (!['http:', 'https:'].includes(parsed.protocol))
@@ -493,6 +507,22 @@ async function createEnrollmentProfile(
   });
 }
 
+// CI builds are unsigned private artifacts. A fresh Railway clone must not
+// advertise curl-to-shell execution until a pinned signing-key distribution
+// and mandatory cross-platform verification have passed release review.
+router.use((req, res, next) => {
+  if (
+    process.env.MCP_PLATFORM === 'railway' &&
+    (req.path.startsWith('/worker/install') || req.path.startsWith('/worker/dist/'))
+  ) {
+    return res.status(503).set('Cache-Control', 'no-store').json({
+      code: 'WORKER_SIGNED_RELEASE_PENDING',
+      error: 'Verified Worker installer requires a signed and approved release.',
+    });
+  }
+  return next();
+});
+
 router.get('/worker/install.sh', (req, res, next) => {
   try {
     return res
@@ -591,7 +621,7 @@ router.get('/worker/dist/:file', (req, res) => {
 
 router.post('/worker/v1/enroll', enrollmentLimiter, async (req, res, next) => {
   try {
-    if (!databaseManager.isMysqlReady()) {
+    if (!databaseManager.isSqlReady()) {
       return res.status(503).json({
         error: 'temporarily_unavailable',
         code: databaseManager.status().state,
@@ -642,5 +672,6 @@ export = Object.assign(router, {
   macInstallerScript,
   windowsInstallerScript,
   windowsInstallerPayloadScript,
+  publicBaseUrl,
   createEnrollmentProfile,
 });

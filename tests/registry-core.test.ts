@@ -17,11 +17,7 @@ void test('MCP registry contains only coding harness primitives', () => {
   assert.deepEqual(names, [
     'runtime_info',
     'terminal_list',
-    'terminal_status',
-    'terminal_read',
-    'terminal_send',
     'workspace_exec',
-    'terminal_interrupt',
     'artifact_collect',
     'file_read',
     'file_write',
@@ -35,7 +31,7 @@ void test('MCP registry contains only coding harness primitives', () => {
     'code_search',
     'check_run',
   ]);
-  assert.equal(names.length, 19);
+  assert.equal(names.length, 15);
   assert.ok(!names.some((name) => /(notification|inbox|control|antigravity)/i.test(name)));
 });
 

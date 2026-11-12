@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import pages from '../src/http/pages';
-import ssh from '../src/services/terminalSshService';
 
 void test('TS5 renderer escapes hostile login input without changing form contract', () => {
   const html = pages.loginPage({
@@ -23,11 +22,9 @@ void test('TS5 renderer preserves Admin and OAuth secure controls', () => {
   assert.match(html, /offline_access/);
 });
 
-void test('TS5 SSH error preserves stable machine-readable failure code', () => {
-  const failure = ssh.terminalError('SSH_CONNECT_FAILED', 'connection closed');
-  assert.equal(failure.code, 'SSH_CONNECT_FAILED');
-  assert.equal(failure.message, 'connection closed');
-  const service = new ssh.TerminalSshService();
-  assert.equal(service.connectTimeoutMs, 10000);
-  assert.equal(service.commandTimeoutMs, 5000);
+void test('TS5 Worker dashboard has execution targets, not SSH profile forms', () => {
+  const html = pages.workersPage({ workers: [], profiles: [], csrfToken: 'test' });
+  assert.match(html, /New Execution Target/);
+  assert.match(html, /worker-profile-modal/);
+  assert.doesNotMatch(html, /SSH Profiles|account-ssh-modal|Attach Shell/);
 });
