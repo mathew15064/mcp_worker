@@ -171,7 +171,10 @@ void test('unapproved curl installer fails closed without installing a Worker bi
     };
     const result = await runProcess(
       'sh',
-      ['-c', `curl -fsSL ${baseUrl}/worker/install.sh -o "$HOME/installer.sh" && sh "$HOME/installer.sh"`],
+      [
+        '-c',
+        `curl -fsSL ${baseUrl}/worker/install.sh -o "$HOME/installer.sh" && sh "$HOME/installer.sh"`,
+      ],
       { env },
     );
     assert.notEqual(result.code, 0, 'unapproved public install unexpectedly succeeded');
