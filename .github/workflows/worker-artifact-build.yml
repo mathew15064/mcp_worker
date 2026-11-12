@@ -80,6 +80,15 @@ jobs:
           cache-dependency-path: worker-go/go.sum
       - name: Dependencies
         run: npm ci
+      - name: Temporary formatter and lint diagnostics (no repo writes)
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          npx eslint tests/worker-live-integration.test.ts -f json > /tmp/worker-lint.json || true
+          node -e "const m=require('/tmp/worker-lint.json')[0].messages;const c={};for(const x of m)if(x.ruleId)c[x.ruleId]=(c[x.ruleId]||0)+1;console.log('W2_CURRENT_LINT_COUNTS',JSON.stringify(c))"
+          npx prettier --write tests/http-mcp-core.test.ts tests/worker-live-integration.test.ts >/dev/null
+          git diff -- tests/http-mcp-core.test.ts tests/worker-live-integration.test.ts
+          git restore -- tests/http-mcp-core.test.ts tests/worker-live-integration.test.ts
       - name: Strict typecheck and compile test harness
         run: npm run typecheck && npm run build
       - name: Offline signature/checksum/version/rollback tests
