@@ -106,9 +106,9 @@ void test('worker curl installer uses verified standalone binaries without Node.
   assert.match(ps1, /PinnedPublicKeyB64 = ''/);
   assert.match(ps1, /openssl dgst -sha256 -verify/);
   assert.match(ps1, /Get-FileHash -Algorithm SHA256/);
-  assert.match(ps1, /bot-report-worker-windows-\\$Arch\\.exe/);
-  assert.doesNotMatch(ps1, /-ExecutionPolicy Bypass -File \\$Tmp/);
-  assert.doesNotMatch(ps1, /install-windows\\.ps1/);
+  assert.match(ps1, /bot-report-worker-windows-\$Arch\.exe/);
+  assert.doesNotMatch(ps1, /-ExecutionPolicy Bypass -File \$Tmp/);
+  assert.doesNotMatch(ps1, /install-windows\.ps1/);
 
   const windowsPayload = await fetch(`${baseUrl}/worker/install-windows.ps1`);
   assert.equal(windowsPayload.status, 200);
