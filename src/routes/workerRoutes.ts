@@ -6,6 +6,7 @@ import databaseManager from '../db/databaseManager';
 import workerAuthService from '../services/workerAuthService';
 import workerRepository from '../repositories/workerRepository';
 import { canonicalVercelOrigin } from '../config/managedStorage';
+import { canonicalRailwayOrigin } from '../config/railwayOrigin';
 
 const router = express.Router();
 const WORKER_DIR = path.resolve(__dirname, '../../worker');
@@ -42,6 +43,11 @@ function publicBaseUrl(req: Request) {
   if (process.env.MCP_PLATFORM === 'vercel') {
     const origin = canonicalVercelOrigin();
     if (!origin) throw new Error('Missing canonical Vercel origin for Worker installer.');
+    return origin;
+  }
+  if (process.env.MCP_PLATFORM === 'railway') {
+    const origin = canonicalRailwayOrigin();
+    if (!origin) throw new Error('Missing canonical Railway origin for Worker installer.');
     return origin;
   }
   const value = `${req.protocol}://${req.get('host')}`;

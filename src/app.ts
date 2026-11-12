@@ -7,6 +7,7 @@ import { csrfProtection } from './middleware/csrfMiddleware';
 import workerRoutes from './routes/workerRoutes';
 import authRoutes from './routes/authRoutes';
 import setupRoutes from './routes/setupRoutes';
+import railwaySetupRoutes from './routes/railwaySetupRoutes';
 import accountRoutes from './routes/accountRoutes';
 import adminRoutes from './routes/adminRoutes';
 import mcpOAuthRoutes from './routes/mcpOAuthRoutes';
@@ -33,7 +34,8 @@ app.get('/readyz', async (req, res, next) => {
     const database = databaseManager.status();
     const ready =
       database.operational &&
-      (process.env.MCP_PLATFORM !== 'vercel' || (await setupRoutes.isOwnerSetupComplete()));
+      (process.env.MCP_PLATFORM !== 'vercel' || (await setupRoutes.isOwnerSetupComplete())) &&
+      (process.env.MCP_PLATFORM !== 'railway' || (await railwaySetupRoutes.isOwnerSetupComplete()));
     // Vercel's cross-instance Worker dispatch remains under development.
     // Even with setup complete, never advertise execution readiness until
     // the distributed Redis broker has passed its separate acceptance gate.
@@ -52,6 +54,20 @@ if (process.env.MCP_PLATFORM === 'vercel') {
   app.use(async (req, res, next) => {
     try {
       if (await setupRoutes.isOwnerSetupComplete()) return next();
+      res.set('Cache-Control', 'no-store');
+      if (req.method !== 'GET' && req.method !== 'HEAD')
+        return res.status(503).json({ code: 'SETUP_REQUIRED', error: 'Instance not initialized' });
+      return res.redirect('/setup');
+    } catch (error) {
+      next(error);
+    }
+  });
+}
+if (process.env.MCP_PLATFORM === 'railway') {
+  app.use('/', railwaySetupRoutes);
+  app.use(async (req, res, next) => {
+    try {
+      if (await railwaySetupRoutes.isOwnerSetupComplete()) return next();
       res.set('Cache-Control', 'no-store');
       if (req.method !== 'GET' && req.method !== 'HEAD')
         return res.status(503).json({ code: 'SETUP_REQUIRED', error: 'Instance not initialized' });
