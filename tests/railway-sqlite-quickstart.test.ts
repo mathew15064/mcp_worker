@@ -151,7 +151,7 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
       code_challenge_method: 'S256',
       resource: oauth.resourceUrl,
     });
-    const consent = await fetch(base + '/oauth/authorize?' + params, {
+    const consent = await fetch(base + '/oauth/authorize?' + params.toString(), {
       headers: { ...headers, cookie: authenticatedCookie },
       redirect: 'manual',
     });
