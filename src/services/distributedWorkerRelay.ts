@@ -55,6 +55,7 @@ const LEASE_DELETE =
 // Bound admission and expiry are one Redis operation. A separate LLEN followed
 // by RPUSH lets concurrent Vercel Functions all pass the same capacity check.
 const QUEUE_PUSH =
+  'if redis.call("GET",KEYS[2]) ~= ARGV[4] then return -2 end ' +
   'if redis.call("LLEN",KEYS[1]) >= tonumber(ARGV[2]) then return -1 end ' +
   'local size = redis.call("RPUSH",KEYS[1],ARGV[1]); ' +
   'redis.call("EXPIRE",KEYS[1],tonumber(ARGV[3])); return size';
@@ -375,11 +376,13 @@ export class DistributedWorkerRelay {
     const size = Number(
       await this.redis.eval(
         QUEUE_PUSH,
-        [queueKey],
-        [json, '128', String(Math.ceil(timeout / 1000) + 30)],
+        [queueKey, this.route(workerId)],
+        [json, '128', String(Math.ceil(timeout / 1000) + 30), owner],
       ),
     );
     if (size === -1) throw fail('WORKER_BUSY', 'Worker queue is busy.', 429);
+    if (size === -2)
+      throw fail('WORKER_REPLACED', 'Worker reconnected during queue admission.');
     if (!Number.isInteger(size) || size < 1)
       throw fail('WORKER_RELAY_STORE_UNAVAILABLE', 'Worker queue admission failed.');
     // Notification is an optimization; the queue stays authoritative.
@@ -387,6 +390,7 @@ export class DistributedWorkerRelay {
 
     const answerKey = this.answer(id);
     const deadline = Date.now() + timeout + 2000;
+    let checkOwnerAfter = Date.now() + 1000;
     try {
       while (Date.now() < deadline) {
         const raw: unknown = await this.redis.get<unknown>(answerKey);
@@ -402,6 +406,14 @@ export class DistributedWorkerRelay {
             );
           }
           return result.value as T;
+        }
+        // Never retry a possibly executed command when a socket is replaced.
+        // Fail promptly so the MCP client can decide whether to retry safely.
+        if (Date.now() >= checkOwnerAfter) {
+          const active = await this.redis.get<string>(this.route(workerId));
+          if (active !== owner)
+            throw fail('WORKER_REPLACED', 'Worker connection changed during command.');
+          checkOwnerAfter = Date.now() + 1000;
         }
         await new Promise<void>((resolve) => setTimeout(resolve, 350));
       }

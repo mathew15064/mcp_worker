@@ -47,6 +47,7 @@ class MemoryRedis {
   }
   eval(_script: string, keys: string[], args: string[]): Promise<number> {
     if (_script.includes('RPUSH')) {
+      if (this.values.get(keys[1]) !== args[3]) return Promise.resolve(-2);
       const list = this.lists.get(keys[0]) || [];
       if (list.length >= Number(args[1])) return Promise.resolve(-1);
       list.push(args[0]);
@@ -319,6 +320,70 @@ void test('relay consumer refuses an injected capability-bypassing operation', a
     assert.equal(calls, 0);
     assert.equal(answer?.ok, false);
     assert.equal(answer?.error?.code, 'WORKER_CONTROL_OPERATION_DENIED');
+  } finally {
+    await relay.close();
+  }
+});
+
+void test('queue admission refuses an owner lease replaced before Redis EVAL', async () => {
+  const memory = new MemoryRedis();
+  const redis = memory as unknown as Redis;
+  const relay = new DistributedWorkerRelay({
+    redis,
+    privateSeed: 'S'.repeat(43),
+    localDispatch: () => Promise.resolve(null),
+  });
+  const id = crypto.randomUUID();
+  const route = relay.prefix + 'route:' + id;
+  const firstOwner = crypto.randomUUID();
+  const replacement = crypto.randomUUID();
+  memory.values.set(route, firstOwner);
+  const originalGet = memory.get.bind(memory);
+  let exchanged = false;
+  memory.get = <T>(key: string): Promise<T | null> => {
+    const result = originalGet<T>(key);
+    if (!exchanged && key === route) {
+      exchanged = true;
+      memory.values.set(route, replacement);
+    }
+    return result;
+  };
+  try {
+    await assert.rejects(
+      () => relay.dispatch(id, 'workspace.exec', {}, { timeoutMs: 200, enforceCapability: true }),
+      (error: unknown) =>
+        error instanceof Error && 'code' in error && error.code === 'WORKER_REPLACED',
+    );
+    assert.equal(memory.lists.size, 0, 'No request may enter a superseded Function queue');
+  } finally {
+    await relay.close();
+  }
+});
+
+void test('pending remote dispatch fails promptly if Worker owner disconnects', async () => {
+  const memory = new MemoryRedis();
+  const redis = memory as unknown as Redis;
+  const relay = new DistributedWorkerRelay({
+    redis,
+    privateSeed: 'W'.repeat(43),
+    localDispatch: () => Promise.resolve(null),
+  });
+  const id = crypto.randomUUID();
+  const route = relay.prefix + 'route:' + id;
+  memory.values.set(route, crypto.randomUUID());
+  const started = Date.now();
+  try {
+    const task = relay.dispatch(id, 'workspace.exec', {}, {
+      timeoutMs: 4000,
+      enforceCapability: true,
+    });
+    setTimeout(() => memory.values.delete(route), 100);
+    await assert.rejects(
+      task,
+      (error: unknown) =>
+        error instanceof Error && 'code' in error && error.code === 'WORKER_REPLACED',
+    );
+    assert.ok(Date.now() - started < 2500, 'Waiter should not stall for the command timeout');
   } finally {
     await relay.close();
   }
