@@ -16,9 +16,7 @@ type WorkerRouteApi = {
   windowsInstallerScript: Installer;
   windowsInstallerPayloadScript: Installer;
 };
-const workerRoutes = createRequire(__filename)(
-  '../src/routes/workerRoutes',
-) as WorkerRouteApi;
+const workerRoutes = createRequire(__filename)('../src/routes/workerRoutes') as WorkerRouteApi;
 
 const VERSION_A = '2.3.4';
 const COMMIT_A = '0123456789ab';
