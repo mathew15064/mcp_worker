@@ -317,7 +317,11 @@ export class DistributedWorkerRelay {
       // Control operations bypass capabilities only for the one approved action.
       // Do not trust an enqueued flag without revalidating it at the consumer.
       if (!req.enforceCapability && req.operation !== 'worker.self_uninstall')
-        throw fail('WORKER_CONTROL_OPERATION_DENIED', 'Unsupported worker control operation.', 403);
+        throw fail(
+          'WORKER_CONTROL_OPERATION_DENIED',
+          'Unsupported worker control operation.',
+          403,
+        );
       const value = await this.localDispatch(req.workerId, req.operation, req.payload, {
         timeoutMs: req.timeoutMs,
         enforceCapability: req.enforceCapability,

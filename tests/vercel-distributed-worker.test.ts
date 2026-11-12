@@ -174,7 +174,7 @@ void test('owner lease renewal/release cannot override newer connections', async
   }
 });
 
-void test('two independent owners sharing a Redis endpoint cannot route Worker jobs across instances', async () => {
+void test('owner namespaces isolate identical Worker IDs in a shared Redis', async () => {
   const memory = new MemoryRedis();
   const redis = memory as unknown as Redis;
   const workerId = crypto.randomUUID();
@@ -204,8 +204,14 @@ void test('two independent owners sharing a Redis endpoint cannot route Worker j
     await ownerA.register(workerId);
     await ownerB.register(workerId);
     const [answerA, answerB] = await Promise.all([
-      clientA.dispatch(workerId, 'workspace.exec', {}, { timeoutMs: 2500, enforceCapability: true }),
-      clientB.dispatch(workerId, 'workspace.exec', {}, { timeoutMs: 2500, enforceCapability: true }),
+      clientA.dispatch(workerId, 'workspace.exec', {}, {
+        timeoutMs: 2500,
+        enforceCapability: true,
+      }),
+      clientB.dispatch(workerId, 'workspace.exec', {}, {
+        timeoutMs: 2500,
+        enforceCapability: true,
+      }),
     ]);
     assert.equal(answerA, 'owner-A');
     assert.equal(answerB, 'owner-B');
@@ -213,8 +219,13 @@ void test('two independent owners sharing a Redis endpoint cannot route Worker j
     assert.equal(await clientA.isOnline(workerId), false);
     assert.equal(await clientB.isOnline(workerId), true);
     await assert.rejects(
-      () => clientA.dispatch(workerId, 'workspace.exec', {}, { timeoutMs: 100, enforceCapability: true }),
-      (error: unknown) => error instanceof Error && 'code' in error && error.code === 'WORKER_OFFLINE',
+      () =>
+        clientA.dispatch(workerId, 'workspace.exec', {}, {
+          timeoutMs: 100,
+          enforceCapability: true,
+        }),
+      (error: unknown) =>
+        error instanceof Error && 'code' in error && error.code === 'WORKER_OFFLINE',
     );
   } finally {
     await Promise.allSettled([ownerA.close(), ownerB.close(), clientA.close(), clientB.close()]);
@@ -241,14 +252,18 @@ void test('cross-Function queue admission stays bounded under concurrent dispatc
       ),
     );
     assert.equal(memory.lists.get(key)?.length, 128);
-    assert.equal(
-      result.filter((entry) => entry.status === 'rejected' && 'code' in entry.reason && entry.reason.code === 'WORKER_BUSY').length,
-      9,
-    );
-    assert.equal(
-      result.filter((entry) => entry.status === 'rejected' && 'code' in entry.reason && entry.reason.code === 'WORKER_JOB_TIMEOUT').length,
-      1,
-    );
+    const hasCode = (entry: PromiseSettledResult<unknown>, code: string) => {
+      if (entry.status !== 'rejected') return false;
+      const reason: unknown = entry.reason;
+      return (
+        typeof reason === 'object' &&
+        reason !== null &&
+        'code' in reason &&
+        reason.code === code
+      );
+    };
+    assert.equal(result.filter((entry) => hasCode(entry, 'WORKER_BUSY')).length, 9);
+    assert.equal(result.filter((entry) => hasCode(entry, 'WORKER_JOB_TIMEOUT')).length, 1);
   } finally {
     await relay.close();
   }
@@ -274,8 +289,12 @@ void test('relay consumer refuses an injected capability-bypassing operation', a
     await redis.rpush(
       relay.prefix + 'queue:' + relay.instanceId,
       JSON.stringify({
-        id, workerId, operation: 'workspace.exec', payload: {},
-        timeoutMs: 1000, enforceCapability: false,
+        id,
+        workerId,
+        operation: 'workspace.exec',
+        payload: {},
+        timeoutMs: 1000,
+        enforceCapability: false,
       }),
     );
     const answerKey = relay.prefix + 'answer:' + id;
