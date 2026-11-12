@@ -42,6 +42,20 @@ approved for **your** new project and redeploy if Vercel injected new variables.
 If the Vercel URL is missing, verify the project exposes system environment
 variables. No database URL needs to be typed into the app.
 
+### Verify the new instance
+
+After approving the Marketplace resources and completing owner setup, run the
+read-only acceptance probe from the checked-out repository:
+
+```sh
+node scripts/check-vercel-quickstart.mjs https://YOUR-NEW-PROJECT.vercel.app
+```
+
+The probe intentionally does not create resources, submit secrets or install a
+Worker. It reports which acceptance prerequisites are missing. Follow
+[the full Quickstart acceptance checklist](VERCEL_QUICKSTART_ACCEPTANCE.md)
+before declaring the two-screen workflow production-ready.
+
 ### Release boundary
 
 This is a beta template to validate deploy ergonomics, not a supported
