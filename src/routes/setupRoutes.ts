@@ -148,10 +148,12 @@ router.post('/setup', limiter, async (req, res) => {
         ),
       );
   }
+  let acquiredClaimLock = false;
   try {
-    if (ownerClaimInProgress) return res.status(409).redirect('/setup');
     if (await isOwnerSetupComplete()) return res.status(409).redirect('/login');
+    if (ownerClaimInProgress) return res.status(409).redirect('/setup');
     ownerClaimInProgress = true;
+    acquiredClaimLock = true;
     if (!databaseManager.isManagedPostgresReady()) {
       const prepared = await databaseManager.prepareManagedPostgresInitialization();
       await databaseManager.activatePrepared(prepared);
@@ -180,7 +182,7 @@ router.post('/setup', limiter, async (req, res) => {
         ),
       );
   } finally {
-    ownerClaimInProgress = false;
+    if (acquiredClaimLock) ownerClaimInProgress = false;
   }
 });
 
