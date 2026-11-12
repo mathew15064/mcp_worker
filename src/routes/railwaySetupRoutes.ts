@@ -76,17 +76,20 @@ router.post('/setup', limiter, async (req, res) => {
     return res.status(403).type('html').send(html('<p>Invalid setup key or password.</p>'));
   if (!databaseManager.isRailwaySqliteReady())
     return res.status(503).type('html').send(html('<p>Database is unavailable.</p>'));
-  if (claimInProgress) return res.status(409).redirect('/setup');
+  if (claimInProgress)
+    return res.status(409).type('html').send(html('<p>Owner setup is already running.</p>'));
   claimInProgress = true;
   try {
-    if (await isOwnerSetupComplete()) return res.status(409).redirect('/login');
+    if (await isOwnerSetupComplete())
+      return res.status(409).type('html').send(html('<p>Owner exists. Sign in at /login.</p>'));
     const hash = await bcrypt.hash(password, 12);
     const db = databaseManager.requireAdapter();
     const result = await db.execute(
       'INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO NOTHING',
       ['bootstrap.admin_password_hash', hash, new Date().toISOString()],
     );
-    if (result.changes !== 1) return res.status(409).redirect('/login');
+    if (result.changes !== 1)
+      return res.status(409).type('html').send(html('<p>Owner exists. Sign in at /login.</p>'));
     return res.redirect(303, '/login');
   } catch {
     return res
