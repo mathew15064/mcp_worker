@@ -30,13 +30,7 @@ export function managedRedisConnection(env: NodeJS.ProcessEnv = process.env) {
   ) {
     throw new Error('Redis REST connection must use HTTPS.');
   }
-  if (
-    parsed.username ||
-    parsed.password ||
-    parsed.pathname !== '/' ||
-    parsed.search ||
-    parsed.hash
-  )
+  if (parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash)
     throw new Error('Invalid Redis REST endpoint.');
   return { url: parsed.origin, token };
 }

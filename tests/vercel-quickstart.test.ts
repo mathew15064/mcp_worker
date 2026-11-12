@@ -69,10 +69,10 @@ void test('Upstash Marketplace and legacy KV names are both supported without re
     url: 'https://market.upstash.io',
     token: 'two',
   });
-  assert.deepEqual(
-    managedRedisConnection({ ...direct, ...marketplace }),
-    { url: 'https://direct.upstash.io', token: 'one' },
-  );
+  assert.deepEqual(managedRedisConnection({ ...direct, ...marketplace }), {
+    url: 'https://direct.upstash.io',
+    token: 'one',
+  });
   assert.deepEqual(
     managedRedisConnection({
       UPSTASH_REDIS_REST_URL: direct.UPSTASH_REDIS_REST_URL,

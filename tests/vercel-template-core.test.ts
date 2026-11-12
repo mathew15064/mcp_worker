@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import config from '../src/config/env';
+import mcpConfig from '../src/config/mcpConfig';
+import runtimeSettings from '../src/services/runtimeSettingsService';
 import { postgresSql } from '../src/db/adapters/postgresAdapter';
 import { SchemaBuilder } from '../src/db/schemaBuilder';
 import type { DatabaseAdapter } from '../src/db/contracts';
@@ -125,4 +127,40 @@ void test('invalid Marketplace URLs return actionable 503 instead of failing Fun
   );
   assert.equal(child.status, 0, child.stderr);
   assert.match(child.stdout, /INVALID_CONFIG_503=503/);
+});
+
+void test('Vercel OAuth issuer follows canonical project URL, not stale stored preview URL', () => {
+  const original = {
+    platform: process.env.MCP_PLATFORM,
+    production: process.env.VERCEL_PROJECT_PRODUCTION_URL,
+    preview: process.env.VERCEL_URL,
+    setting: runtimeSettings.get('mcp.public_base_url'),
+  };
+  try {
+    process.env.MCP_PLATFORM = 'vercel';
+    process.env.VERCEL_PROJECT_PRODUCTION_URL = 'owner-project.vercel.app';
+    process.env.VERCEL_URL = 'preview-1.vercel.app';
+    runtimeSettings.values.set('mcp.public_base_url', 'https://preview-old.vercel.app');
+    assert.equal(mcpConfig.issuer, 'https://owner-project.vercel.app');
+    assert.equal(mcpConfig.resourceUrl, 'https://owner-project.vercel.app/mcp');
+    assert.equal(
+      mcpConfig.metadataUrls.tokenEndpoint,
+      'https://owner-project.vercel.app/oauth/token',
+    );
+    process.env.VERCEL_PROJECT_PRODUCTION_URL = 'owner-project-new.vercel.app';
+    assert.equal(mcpConfig.issuer, 'https://owner-project-new.vercel.app');
+    delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+    process.env.VERCEL_URL = 'preview-2.vercel.app';
+    assert.equal(mcpConfig.issuer, 'https://preview-2.vercel.app');
+    delete process.env.VERCEL_URL;
+    assert.throws(() => mcpConfig.issuer, /canonical origin is unavailable/);
+  } finally {
+    if (original.platform === undefined) delete process.env.MCP_PLATFORM;
+    else process.env.MCP_PLATFORM = original.platform;
+    if (original.production === undefined) delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+    else process.env.VERCEL_PROJECT_PRODUCTION_URL = original.production;
+    if (original.preview === undefined) delete process.env.VERCEL_URL;
+    else process.env.VERCEL_URL = original.preview;
+    runtimeSettings.values.set('mcp.public_base_url', original.setting);
+  }
 });
