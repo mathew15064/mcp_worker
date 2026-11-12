@@ -461,9 +461,11 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
     redirectUris: ['http://localhost:40000/oauth/callback'],
     allowedScopes: ['bot_report.read', 'bot_report.terminal'],
   });
+  const client = registered.client;
+  assert.ok(client && registered.rawSecret);
   const verifier = crypto.randomBytes(48).toString('base64url');
   const params = new URLSearchParams({
-    client_id: registered.client.client_id,
+    client_id: client.client_id,
     redirect_uri: 'http://localhost:40000/oauth/callback',
     response_type: 'code',
     scope: 'bot_report.read bot_report.terminal',
@@ -507,7 +509,7 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
     'content-type': 'application/x-www-form-urlencoded',
     authorization:
       'Basic ' +
-      Buffer.from(registered.client.client_id + ':' + registered.rawSecret).toString('base64'),
+      Buffer.from(client.client_id + ':' + registered.rawSecret).toString('base64'),
   };
   const issued = await fetch(base + '/oauth/token', {
     method: 'POST',
