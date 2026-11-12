@@ -38,6 +38,9 @@ jobs:
         run: |
           npm run typecheck
           npm run lint
+      - name: Capture Prettier proposal (temporary diagnostics)
+        run: |
+          node -e 'const {execFileSync}=require("node:child_process"); console.log("FORMAT_URI="+encodeURIComponent(execFileSync("node_modules/.bin/prettier",["tests/railway-pr-stack.test.ts"],{encoding:"utf8"})))'
       - name: Incremental ESLint/Prettier quality gate
         env:
           QUALITY_BASE_REF: e7de57a28f4894d302a6dfb24a577ea7b38b9a08
