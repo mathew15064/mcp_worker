@@ -71,9 +71,10 @@ class SqliteSessionStore extends session.Store {
         return cb(null, null);
       }
       const data = JSON.parse(row.sess);
-      if (isRailwayAdminSession(data as SessionData)) {
+      const adminSession = data as SessionData;
+      if (isRailwayAdminSession(adminSession)) {
         const fingerprint = credentialFingerprint(this.db);
-        if (!fingerprint || (data as SessionData).adminCredentialFingerprint !== fingerprint) {
+        if (!fingerprint || adminSession.adminCredentialFingerprint !== fingerprint) {
           return this.destroy(sid, (error) => cb(error || null, null));
         }
       }

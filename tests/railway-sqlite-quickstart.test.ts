@@ -291,12 +291,11 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
       count: number;
     };
     assert.ok(session.count > 0, 'Admin setup session must survive process restart');
+    const ownerCount = db
+      .prepare('SELECT COUNT(*) AS count FROM system_settings WHERE key = ?')
+      .get('bootstrap.admin_password_hash') as { count: number };
     assert.equal(
-      (
-        db.prepare(
-          "SELECT COUNT(*) AS count FROM system_settings WHERE key = 'bootstrap.admin_password_hash'",
-        ).get() as { count: number }
-      ).count,
+      ownerCount.count,
       1,
       'Concurrent owner claims must leave exactly one bootstrap credential',
     );

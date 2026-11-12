@@ -50,17 +50,26 @@ async function withDisposableVolume(
 
 function saveSession(store: SqliteSessionStore, sid: string, data: SessionData) {
   return new Promise<void>((resolve, reject) => {
-    store.set(sid, data, (error) => (error ? reject(error) : resolve()));
+    store.set(sid, data, (error) => {
+      if (error) reject(error instanceof Error ? error : new Error('Session set failed'));
+      else resolve();
+    });
   });
 }
 function readSession(store: SqliteSessionStore, sid: string) {
   return new Promise<SessionData | null>((resolve, reject) => {
-    store.get(sid, (error, data) => (error ? reject(error) : resolve(data || null)));
+    store.get(sid, (error, data) => {
+      if (error) reject(error instanceof Error ? error : new Error('Session get failed'));
+      else resolve(data || null);
+    });
   });
 }
 function destroySession(store: SqliteSessionStore, sid: string) {
   return new Promise<void>((resolve, reject) => {
-    store.destroy(sid, (error) => (error ? reject(error) : resolve()));
+    store.destroy(sid, (error) => {
+      if (error) reject(error instanceof Error ? error : new Error('Session destroy failed'));
+      else resolve();
+    });
   });
 }
 
@@ -262,7 +271,9 @@ void test('session expiration, logout revocation and admin credential rotation',
     const db = getDb();
     const store = new SqliteSessionStore({ db });
     try {
-      const data: SessionData = { cookie: new session.Cookie({ maxAge: 60_000 }) };
+      const cookie = new session.Cookie();
+      cookie.maxAge = 60_000;
+      const data: SessionData = { cookie };
       await saveSession(store, 'ordinary', data);
       assert.ok(await readSession(store, 'ordinary'));
       db.prepare('UPDATE sessions SET expired = ? WHERE sid = ?').run(
@@ -275,11 +286,12 @@ void test('session expiration, logout revocation and admin credential rotation',
       assert.equal(await readSession(store, 'logout'), null);
 
       const adminData: SessionData = {
-        cookie: new session.Cookie({ maxAge: 60_000 }),
+        cookie: new session.Cookie(),
         userId: 'env-admin',
         role: 'admin',
         authSource: 'railway',
       };
+      adminData.cookie.maxAge = 60_000;
       const firstHash = bcrypt.hashSync('first-private-password', 10);
       db.prepare('INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, ?)').run(
         'bootstrap.admin_password_hash',
