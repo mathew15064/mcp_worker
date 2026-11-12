@@ -482,7 +482,7 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
     code_challenge_method: 'S256',
     resource: oauthConfig.resourceUrl,
   });
-  const consent = await fetch(base + '/oauth/authorize?' + params, {
+  const consent = await fetch(base + '/oauth/authorize?' + params.toString(), {
     headers: { ...forwarded, cookie: getCookie(authenticated) },
     redirect: 'manual',
   });
