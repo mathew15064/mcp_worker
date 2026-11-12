@@ -317,11 +317,7 @@ export class DistributedWorkerRelay {
       // Control operations bypass capabilities only for the one approved action.
       // Do not trust an enqueued flag without revalidating it at the consumer.
       if (!req.enforceCapability && req.operation !== 'worker.self_uninstall')
-        throw fail(
-          'WORKER_CONTROL_OPERATION_DENIED',
-          'Unsupported worker control operation.',
-          403,
-        );
+        throw fail('WORKER_CONTROL_OPERATION_DENIED', 'Unsupported worker control operation.', 403);
       const value = await this.localDispatch(req.workerId, req.operation, req.payload, {
         timeoutMs: req.timeoutMs,
         enforceCapability: req.enforceCapability,
@@ -377,11 +373,11 @@ export class DistributedWorkerRelay {
       throw fail('WORKER_REQUEST_TOO_LARGE', 'Worker request exceeds relay limit.', 413);
     const queueKey = this.prefix + 'queue:' + owner;
     const size = Number(
-      await this.redis.eval(QUEUE_PUSH, [queueKey], [
-        json,
-        '128',
-        String(Math.ceil(timeout / 1000) + 30),
-      ]),
+      await this.redis.eval(
+        QUEUE_PUSH,
+        [queueKey],
+        [json, '128', String(Math.ceil(timeout / 1000) + 30)],
+      ),
     );
     if (size === -1) throw fail('WORKER_BUSY', 'Worker queue is busy.', 429);
     if (!Number.isInteger(size) || size < 1)

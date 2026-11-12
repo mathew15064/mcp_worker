@@ -204,14 +204,24 @@ void test('owner namespaces isolate identical Worker IDs in a shared Redis', asy
     await ownerA.register(workerId);
     await ownerB.register(workerId);
     const [answerA, answerB] = await Promise.all([
-      clientA.dispatch(workerId, 'workspace.exec', {}, {
-        timeoutMs: 2500,
-        enforceCapability: true,
-      }),
-      clientB.dispatch(workerId, 'workspace.exec', {}, {
-        timeoutMs: 2500,
-        enforceCapability: true,
-      }),
+      clientA.dispatch(
+        workerId,
+        'workspace.exec',
+        {},
+        {
+          timeoutMs: 2500,
+          enforceCapability: true,
+        },
+      ),
+      clientB.dispatch(
+        workerId,
+        'workspace.exec',
+        {},
+        {
+          timeoutMs: 2500,
+          enforceCapability: true,
+        },
+      ),
     ]);
     assert.equal(answerA, 'owner-A');
     assert.equal(answerB, 'owner-B');
@@ -220,10 +230,15 @@ void test('owner namespaces isolate identical Worker IDs in a shared Redis', asy
     assert.equal(await clientB.isOnline(workerId), true);
     await assert.rejects(
       () =>
-        clientA.dispatch(workerId, 'workspace.exec', {}, {
-          timeoutMs: 100,
-          enforceCapability: true,
-        }),
+        clientA.dispatch(
+          workerId,
+          'workspace.exec',
+          {},
+          {
+            timeoutMs: 100,
+            enforceCapability: true,
+          },
+        ),
       (error: unknown) =>
         error instanceof Error && 'code' in error && error.code === 'WORKER_OFFLINE',
     );
@@ -256,10 +271,7 @@ void test('cross-Function queue admission stays bounded under concurrent dispatc
       if (entry.status !== 'rejected') return false;
       const reason: unknown = entry.reason;
       return (
-        typeof reason === 'object' &&
-        reason !== null &&
-        'code' in reason &&
-        reason.code === code
+        typeof reason === 'object' && reason !== null && 'code' in reason && reason.code === code
       );
     };
     assert.equal(result.filter((entry) => hasCode(entry, 'WORKER_BUSY')).length, 9);
