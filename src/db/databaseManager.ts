@@ -168,10 +168,7 @@ class DatabaseManager {
     // Never follow a database symlink out of the attached volume. The
     // directory is already canonicalized above, but the file also needs
     // verification before better-sqlite3 opens or creates it.
-    if (
-      fs.existsSync(config.DATABASE_PATH) &&
-      fs.lstatSync(config.DATABASE_PATH).isSymbolicLink()
-    ) {
+    if (fs.lstatSync(config.DATABASE_PATH, { throwIfNoEntry: false })?.isSymbolicLink()) {
       throw Object.assign(new Error('Railway SQLite database may not be a symlink.'), {
         code: 'RAILWAY_DB_SYMLINK_DENIED',
       });
