@@ -13,7 +13,32 @@ const limiter = rateLimit({
   legacyHeaders: false,
 });
 
+// A warm Function may have observed a blank Neon database before a different
+// Function completed Secure Setup. Recheck at most once per 10s per Function
+// instead of leaving all subsequent login requests in a /setup redirect loop.
+let lastReconnectAt = 0;
+let reconnecting: Promise<void> | null = null;
+let ownerClaimInProgress = false;
+async function refreshManagedDatabase() {
+  if (process.env.MCP_PLATFORM !== 'vercel' || databaseManager.isManagedPostgresReady()) return;
+  if (ownerClaimInProgress) return;
+  const state = databaseManager.status().state;
+  if (state !== 'CONFIGURED' && state !== 'DEGRADED') return;
+  if (reconnecting) return reconnecting;
+  const now = Date.now();
+  if (now - lastReconnectAt < 10000) return;
+  lastReconnectAt = now;
+  const pending = databaseManager.connectManagedPostgres().then(() => {});
+  reconnecting = pending;
+  try {
+    await pending;
+  } finally {
+    if (reconnecting === pending) reconnecting = null;
+  }
+}
+
 async function isOwnerSetupComplete() {
+  await refreshManagedDatabase();
   if (!databaseManager.isManagedPostgresReady()) return false;
   const db = databaseManager.getAdapter();
   const result = await db?.queryOne<{ value: string }>(
@@ -124,7 +149,9 @@ router.post('/setup', limiter, async (req, res) => {
       );
   }
   try {
+    if (ownerClaimInProgress) return res.status(409).redirect('/setup');
     if (await isOwnerSetupComplete()) return res.status(409).redirect('/login');
+    ownerClaimInProgress = true;
     if (!databaseManager.isManagedPostgresReady()) {
       const prepared = await databaseManager.prepareManagedPostgresInitialization();
       await databaseManager.activatePrepared(prepared);
@@ -152,6 +179,8 @@ router.post('/setup', limiter, async (req, res) => {
           '',
         ),
       );
+  } finally {
+    ownerClaimInProgress = false;
   }
 });
 

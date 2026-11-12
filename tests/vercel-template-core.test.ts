@@ -4,6 +4,8 @@ import { spawnSync } from 'node:child_process';
 import config from '../src/config/env';
 import mcpConfig from '../src/config/mcpConfig';
 import runtimeSettings from '../src/services/runtimeSettingsService';
+import setupRoutes from '../src/routes/setupRoutes';
+import databaseManager from '../src/db/databaseManager';
 import { postgresSql } from '../src/db/adapters/postgresAdapter';
 import { SchemaBuilder } from '../src/db/schemaBuilder';
 import type { DatabaseAdapter } from '../src/db/contracts';
@@ -162,5 +164,47 @@ void test('Vercel OAuth issuer follows canonical project URL, not stale stored p
     if (original.preview === undefined) delete process.env.VERCEL_URL;
     else process.env.VERCEL_URL = original.preview;
     runtimeSettings.values.set('mcp.public_base_url', original.setting);
+  }
+});
+
+void test('warm Vercel Function discovers Secure Setup completed by another Function', async () => {
+  const original = {
+    platform: process.env.MCP_PLATFORM,
+    ready: databaseManager.isManagedPostgresReady,
+    status: databaseManager.status,
+    reconnect: databaseManager.connectManagedPostgres,
+    adapter: databaseManager.getAdapter,
+  };
+  const mocked = databaseManager as unknown as Record<string, unknown>;
+  let state = 'CONFIGURED';
+  let rechecks = 0;
+  try {
+    process.env.MCP_PLATFORM = 'vercel';
+    mocked.isManagedPostgresReady = () => state === 'READY';
+    mocked.status = () => ({ state });
+    mocked.connectManagedPostgres = async () => {
+      rechecks += 1;
+      state = 'READY';
+    };
+    mocked.getAdapter = () => ({
+      queryOne: () => Promise.resolve({ value: 'preexisting-owner-hash' }),
+    });
+    assert.deepEqual(
+      await Promise.all([
+        setupRoutes.isOwnerSetupComplete(),
+        setupRoutes.isOwnerSetupComplete(),
+      ]),
+      [true, true],
+    );
+    assert.equal(rechecks, 1);
+    assert.equal(await setupRoutes.isOwnerSetupComplete(), true);
+    assert.equal(rechecks, 1, 'Ready Function must not repeatedly reconnect');
+  } finally {
+    if (original.platform === undefined) delete process.env.MCP_PLATFORM;
+    else process.env.MCP_PLATFORM = original.platform;
+    mocked.isManagedPostgresReady = original.ready;
+    mocked.status = original.status;
+    mocked.connectManagedPostgres = original.reconnect;
+    mocked.getAdapter = original.adapter;
   }
 });
