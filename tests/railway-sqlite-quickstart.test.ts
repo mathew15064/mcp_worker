@@ -103,6 +103,108 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
     assert.equal(metadata.issuer, 'https://private-railway.up.railway.app');
     assert.equal(metadata.token_endpoint, metadata.issuer + '/oauth/token');
 
+    // Use the actual Railway SQLite HTTP login, OAuth consent and PKCE grant,
+    // not a mocked repository or the MySQL compatibility fixture.
+    const loginPage = await fetch(base + '/login', { headers, redirect: 'manual' });
+    assert.equal(loginPage.status, 200);
+    const loginCookie = cookie(loginPage);
+    const loginCsrf = csrf(await loginPage.text());
+    assert.ok(loginCookie && loginCsrf);
+    const signedIn = await fetch(base + '/login', {
+      method: 'POST',
+      redirect: 'manual',
+      headers: {
+        ...headers,
+        cookie: loginCookie,
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        _csrf: loginCsrf,
+        username: 'admin',
+        password: 'PrivateRailwayAdmin2026!',
+        returnTo: '/',
+      }).toString(),
+    });
+    assert.equal(signedIn.status, 302);
+    const authenticatedCookie = cookie(signedIn);
+    assert.ok(authenticatedCookie);
+
+    const oauthService = (await import('../src/services/mcpOAuthService.js')).default;
+    const registered = await oauthService.registerClient({
+      displayName: 'Railway PKCE Client',
+      principalId: 'principal:railway_quickstart',
+      redirectUris: ['https://chatgpt.com/connector_platform_oauth_redirect'],
+      allowedScopes: ['bot_report.read', 'bot_report.terminal'],
+    });
+    assert.ok(registered.client);
+    const verifier = 'railway-pkce-verifier-abcdefghijklmnopqrstuvwxyz-0123456789';
+    const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+    const redirectUri = 'https://chatgpt.com/connector_platform_oauth_redirect';
+    const params = new URLSearchParams({
+      client_id: registered.client.client_id,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'bot_report.read bot_report.terminal',
+      state: 'railway-oauth-state',
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+      resource: oauth.resourceUrl,
+    });
+    const consent = await fetch(base + '/oauth/authorize?' + params, {
+      headers: { ...headers, cookie: authenticatedCookie },
+      redirect: 'manual',
+    });
+    assert.equal(consent.status, 200);
+    const consentToken = csrf(await consent.text());
+    assert.ok(consentToken);
+    const consentBody = new URLSearchParams(params);
+    consentBody.set('_csrf', consentToken);
+    consentBody.set('action', 'allow');
+    const allowed = await fetch(base + '/oauth/authorize', {
+      method: 'POST',
+      redirect: 'manual',
+      headers: {
+        ...headers,
+        cookie: authenticatedCookie,
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body: consentBody.toString(),
+    });
+    assert.equal(allowed.status, 302);
+    const redirected = new URL(allowed.headers.get('location') || '');
+    assert.equal(redirected.origin, 'https://chatgpt.com');
+    assert.equal(redirected.searchParams.get('state'), 'railway-oauth-state');
+    const authorizationCode = redirected.searchParams.get('code');
+    assert.ok(authorizationCode);
+    const grant = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code: authorizationCode,
+      redirect_uri: redirectUri,
+      resource: oauth.resourceUrl,
+      code_verifier: verifier,
+    });
+    const tokenHeaders = {
+      ...headers,
+      'content-type': 'application/x-www-form-urlencoded',
+      authorization:
+        'Basic ' +
+        Buffer.from(registered.client.client_id + ':' + registered.rawSecret).toString('base64'),
+    };
+    const granted = await fetch(base + '/oauth/token', {
+      method: 'POST',
+      headers: tokenHeaders,
+      body: grant.toString(),
+    });
+    assert.equal(granted.status, 200);
+    const grantBody = (await granted.json()) as { access_token: string };
+    assert.match(grantBody.access_token, /^br_at_/);
+    const replay = await fetch(base + '/oauth/token', {
+      method: 'POST',
+      headers: tokenHeaders,
+      body: grant.toString(),
+    });
+    assert.equal(replay.status, 400, 'Authorization code must be single-use');
+
     await new Promise<void>((resolve) => server?.close(() => resolve()));
     server = null;
     await manager.close();
