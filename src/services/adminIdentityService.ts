@@ -71,9 +71,9 @@ function legacyAuthenticate(username: unknown, password: unknown) {
 }
 
 export async function authenticate(username: unknown, password: unknown) {
-  if (process.env.MCP_PLATFORM === 'vercel') {
+  if (process.env.MCP_PLATFORM === 'vercel' || process.env.MCP_PLATFORM === 'railway') {
     const db = databaseManager.getAdapter();
-    if (!db || db.kind !== 'postgres') return null;
+    if (!db || (db.kind !== 'postgres' && db.kind !== 'sqlite')) return null;
     const row = await db.queryOne<{ value: string }>(
       'SELECT value FROM system_settings WHERE key = ?',
       ['bootstrap.admin_password_hash'],
@@ -82,7 +82,7 @@ export async function authenticate(username: unknown, password: unknown) {
     if (!timingSafeStringEqual(typeof username === 'string' ? username : '', config.ADMIN_USERNAME))
       return null;
     return (await bcrypt.compare(typeof password === 'string' ? password : '', row.value))
-      ? identity('vercel')
+      ? identity(process.env.MCP_PLATFORM)
       : null;
   }
   if (envAuthenticate(username, password)) return identity('env');
@@ -94,6 +94,12 @@ export function currentFromSession(session: AdminSession | null | undefined) {
   if (!session || session.userId !== ADMIN_ID || session.role !== 'admin') return null;
   if ((session.sessionVersion || SESSION_VERSION) !== SESSION_VERSION) return null;
   return identity(
-    session.authSource === 'legacy' ? 'legacy' : session.authSource === 'vercel' ? 'vercel' : 'env',
+    session.authSource === 'legacy'
+      ? 'legacy'
+      : session.authSource === 'vercel'
+        ? 'vercel'
+        : session.authSource === 'railway'
+          ? 'railway'
+          : 'env',
   );
 }

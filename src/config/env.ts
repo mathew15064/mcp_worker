@@ -13,7 +13,8 @@ const INSECURE_DEFAULTS = new Set([
   'change-this-to-a-secure-random-64-character-hex-string',
 ]);
 function managedSecret(purpose: string, size: number): Buffer {
-  if (process.env.MCP_PLATFORM !== 'vercel') throw new Error('Not a managed Vercel instance.');
+  if (!['vercel', 'railway'].includes(process.env.MCP_PLATFORM || ''))
+    throw new Error('Not a managed self-hosted instance.');
   const key = String(process.env.MCP_SETUP_SECRET || '');
   if (key.length < 43 || !/^[A-Za-z0-9_-]+$/.test(key)) {
     throw Object.assign(
@@ -33,7 +34,8 @@ function managedSecret(purpose: string, size: number): Buffer {
 }
 
 function getSessionSecret() {
-  if (process.env.MCP_PLATFORM === 'vercel') return managedSecret('session', 64).toString('hex');
+  if (process.env.MCP_PLATFORM === 'vercel' || process.env.MCP_PLATFORM === 'railway')
+    return managedSecret('session', 64).toString('hex');
   const secret = process.env.SESSION_SECRET;
   const production = (process.env.NODE_ENV || 'development') === 'production';
   if (production) {

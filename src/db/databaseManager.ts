@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import config from '../config/env';
 import bootstrapConfigStore from './bootstrapConfigStore';
 import { getDb } from './connection';
@@ -8,6 +9,7 @@ import { PostgresAdapter } from './adapters/postgresAdapter';
 import type { DatabaseAdapter, SqlRow } from './contracts';
 import type Database from 'better-sqlite3';
 import { MigrationRunner } from './migrationRunner';
+import { runMigrations } from './migrations';
 type MysqlInput = Parameters<typeof MysqlAdapter.create>[0];
 type SourceInfo = Awaited<ReturnType<MigrationRunner['inspectSource']>>;
 interface Candidate {
@@ -122,6 +124,9 @@ class DatabaseManager {
     if (process.env.MCP_PLATFORM === 'vercel') {
       return this.connectManagedPostgres();
     }
+    if (process.env.MCP_PLATFORM === 'railway') {
+      return this.connectRailwaySqlite();
+    }
     if (bootstrapConfigStore.exists()) {
       return this.reconnect();
     }
@@ -137,6 +142,44 @@ class DatabaseManager {
     this.state = STATES.UNCONFIGURED;
     this.adapter = null;
     this.sourceInfo = null;
+    return this.status();
+  }
+
+  /**
+   * Dedicated, single-replica Railway backend. Never use ephemeral container
+   * storage: the platform volume must match the configured SQLite directory.
+   * Schema changes are additive and idempotent via the existing SQLite schema
+   * upgrade path, run atomically before accepting HTTP connections.
+   */
+  async connectRailwaySqlite() {
+    const volumePath = process.env.RAILWAY_VOLUME_MOUNT_PATH;
+    if (!volumePath || !path.isAbsolute(volumePath)) {
+      throw Object.assign(new Error('Railway persistent volume is required.'), {
+        code: 'RAILWAY_VOLUME_MISSING',
+      });
+    }
+    const expected = path.dirname(config.DATABASE_PATH);
+    if (fs.realpathSync(volumePath) !== fs.realpathSync(expected)) {
+      throw Object.assign(new Error('SQLite database must be inside the Railway volume.'), {
+        code: 'RAILWAY_VOLUME_PATH_MISMATCH',
+      });
+    }
+    fs.accessSync(volumePath, fs.constants.R_OK | fs.constants.W_OK);
+    const db = getDb();
+    db.transaction(() => runMigrations(db))();
+    const integrity = db.pragma('quick_check', { simple: true });
+    if (integrity !== 'ok') throw new Error('SQLite integrity check failed.');
+    this.adapter = new SqliteAdapter(db);
+    this.state = STATES.READY;
+    this.initialized = true;
+    this.lastError = null;
+    this.sourceInfo = {
+      initialized: true,
+      migrationTable: false,
+      total: 1,
+      ran: 1,
+      pending: [],
+    };
     return this.status();
   }
 
@@ -261,8 +304,12 @@ class DatabaseManager {
   isManagedPostgresReady() {
     return this.state === STATES.READY && this.adapter?.kind === 'postgres';
   }
+  isRailwaySqliteReady() {
+    return this.state === STATES.READY && this.adapter?.kind === 'sqlite' &&
+      process.env.MCP_PLATFORM === 'railway';
+  }
   isSqlReady() {
-    return this.isMysqlReady() || this.isManagedPostgresReady();
+    return this.isMysqlReady() || this.isManagedPostgresReady() || this.isRailwaySqliteReady();
   }
   isSetupOnly() {
     return (
@@ -410,7 +457,7 @@ class DatabaseManager {
         ? 'postgres'
         : this.isMysqlReady()
           ? 'mysql'
-          : this.state === STATES.LEGACY_SQLITE
+          : (this.state === STATES.LEGACY_SQLITE || this.isRailwaySqliteReady())
             ? 'sqlite'
             : null,
       mysql: saved ? { ...saved, version: this.mysqlInfo?.version || null } : null,

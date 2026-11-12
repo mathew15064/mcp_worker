@@ -17,9 +17,11 @@ declare module 'express-session' {
 import config from '../config/env';
 import BoundedMemorySessionStore from '../db/memorySessionStore';
 import { UpstashSessionStore } from '../db/upstashSessionStore';
+import SqliteSessionStore from '../db/sessionStore';
 
 const secureCookie =
   process.env.MCP_PLATFORM === 'vercel' ||
+  process.env.MCP_PLATFORM === 'railway' ||
   (config.NODE_ENV === 'production'
     ? process.env.COOKIE_SECURE !== 'false'
     : process.env.COOKIE_SECURE === 'true');
@@ -27,7 +29,9 @@ const secureCookie =
 const store =
   process.env.MCP_PLATFORM === 'vercel'
     ? new UpstashSessionStore()
-    : new BoundedMemorySessionStore({
+    : process.env.MCP_PLATFORM === 'railway'
+      ? new SqliteSessionStore()
+      : new BoundedMemorySessionStore({
         maxSessions: Number.parseInt(process.env.ADMIN_SESSION_MAX || '500', 10),
       });
 

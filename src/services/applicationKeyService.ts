@@ -6,7 +6,8 @@ export function keyError(message: string) {
 }
 
 export function readKey() {
-  if (process.env.MCP_PLATFORM === 'vercel') return config.managedSecret('aes-256-gcm', 32);
+  if (process.env.MCP_PLATFORM === 'vercel' || process.env.MCP_PLATFORM === 'railway')
+    return config.managedSecret('aes-256-gcm', 32);
   const encoded = process.env.APP_ENCRYPTION_KEY || process.env.TERMINAL_CREDENTIAL_KEY;
   if (!encoded) throw keyError('Application encryption key is not configured.');
   const trimmed = encoded.trim();
