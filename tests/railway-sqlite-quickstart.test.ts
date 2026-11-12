@@ -189,7 +189,9 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
       'content-type': 'application/x-www-form-urlencoded',
       authorization:
         'Basic ' +
-        Buffer.from([registered.client.client_id, registered.rawSecret].join(':')).toString('base64'),
+        Buffer.from([registered.client.client_id, registered.rawSecret].join(':')).toString(
+          'base64',
+        ),
     };
     const granted = await fetch(base + '/oauth/token', {
       method: 'POST',
