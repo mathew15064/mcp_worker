@@ -39,3 +39,7 @@ worker/bin/WORKER_RELEASE
 
 # Compiled TypeScript and transitional JS build
 /dist/
+
+# Vercel static assets are generated during npm run build:vercel
+/public/assets/
+.vercel/

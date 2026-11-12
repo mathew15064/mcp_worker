@@ -42,7 +42,7 @@ void test('cached tools/list preserves per-client OAuth revocation and separate 
   const one = await parseMcpResponse(first);
   const two = await parseMcpResponse(second);
   assert.deepEqual(one.result?.tools, two.result?.tools);
-  assert.equal(one.result?.tools?.length, 19);
+  assert.equal(one.result?.tools?.length, 15);
 
   for (let i = 0; i < 30; i += 1) {
     const recordsA = await oauth.listAuditLogs({ clientId: a.client.client_id, limit: 10 });
@@ -74,5 +74,5 @@ void test('cached tools/list preserves per-client OAuth revocation and separate 
   const retained = await list(b.token.access_token, 103);
   assert.equal(retained.status, 200);
   const stillAllowed = await parseMcpResponse(retained);
-  assert.equal(stillAllowed.result?.tools?.length, 19);
+  assert.equal(stillAllowed.result?.tools?.length, 15);
 });

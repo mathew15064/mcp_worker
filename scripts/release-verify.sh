@@ -34,6 +34,9 @@ echo "Fresh setup elapsed seconds: $(($(date +%s)-start))" | tee "$OUT/timing.tx
 docker build --target builder -t "$ID-test:local" . >"$OUT/test-build.log" 2>&1
 docker create --name "$ID-test-builder" "$ID-test:local" >/dev/null
 docker cp "$ID-test-builder":/app/dist/tests "$TEST_TMP/"
+# Vercel-only runtime entrypoint is intentionally excluded from the Docker image.
+# Inject it solely into the disposable verification container for fail-closed tests.
+docker cp "$ID-test-builder":/app/dist/api "$TEST_TMP/"
 APP_CONTAINER=$(compose ps -q bot-report)
 [ -n "$APP_CONTAINER" ]
 docker cp "$TEST_TMP/tests" "$APP_CONTAINER":/app/dist/
@@ -52,9 +55,16 @@ pass=$(openssl rand -hex 24)
 docker run -d --name "$ID-db" --network "$ID-net" -e MYSQL_ROOT_PASSWORD="$pass" -e MYSQL_ROOT_HOST=% -e MYSQL_DATABASE=bot_report_test "$MYSQL" >/dev/null
 docker run -d --name "$ID-run" --network "$ID-net" --user root --entrypoint sh "$IMAGE" -c 'sleep 3600' >/dev/null
 # Compile the typed tests in the same builder used for the production image.
-# Do not ship test files or TypeScript dev dependencies in the runtime image.
+# Do not ship test files, Vercel entrypoints or documentation in the runtime image.
+# Supply the compiled Vercel entrypoint and template fixtures only to this
+# isolated test container; production runner remains unchanged.
 docker cp "$TEST_TMP/tests" "$ID-run":/app/dist/
-rm -rf "$TEST_TMP/tests"
+docker cp "$TEST_TMP/api" "$ID-run":/app/dist/
+docker cp README.md "$ID-run":/app/README.md
+docker cp vercel-template.json "$ID-run":/app/vercel-template.json
+docker exec "$ID-run" mkdir -p /app/docs
+docker cp docs/VERCEL_QUICKSTART.md "$ID-run":/app/docs/VERCEL_QUICKSTART.md
+rm -rf "$TEST_TMP/tests" "$TEST_TMP/api"
 docker exec "$ID-run" apk add --no-cache curl git bash ripgrep openssl >"$OUT/test-prerequisites.log" 2>&1
 # Build a distinct fixture from the same source, never from a production worker.
 docker create --name "$ID-builder" --entrypoint sh "$GO_IMAGE" -c 'cd /src && CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=2.3.4 -X main.commit=release-test-alternate" -o /tmp/alternate .' >/dev/null
@@ -67,7 +77,10 @@ i=0
 until docker exec -e MYSQL_PWD="$pass" "$ID-db" mysql -uroot -Nse 'SELECT 1' >/dev/null 2>&1; do
   i=$((i+1)); [ "$i" -lt 60 ] || exit 1; sleep 2
 done
-docker exec -e NODE_ENV=test -e BOT_REPORT_ISOLATED_WORKER_TEST=1 -e MYSQL_TEST_HOST="$ID-db" -e MYSQL_TEST_PASSWORD="$pass" -e BOT_REPORT_WORKER_UPGRADE_FIXTURE=/tmp/alternate "$ID-run" sh -c 'cd /app/dist && node --test --test-concurrency=1 tests/*.test.js' >"$OUT/regression.log" 2>&1
+docker exec -e NODE_ENV=test -e BOT_REPORT_ISOLATED_WORKER_TEST=1 -e MYSQL_TEST_HOST="$ID-db" -e MYSQL_TEST_PASSWORD="$pass" -e BOT_REPORT_WORKER_UPGRADE_FIXTURE=/tmp/alternate "$ID-run" sh -c 'cd /app && node --test --test-concurrency=1 dist/tests/*.test.js' >"$OUT/regression.log" 2>&1 || {
+  tail -100 "$OUT/regression.log" >&2
+  exit 1
+}
 tail -12 "$OUT/regression.log"
 # Native Linux manual installer install/upgrade/rollback/uninstall in an
 # isolated temporary unprivileged HOME. No systemd, enrollment or host changes.
