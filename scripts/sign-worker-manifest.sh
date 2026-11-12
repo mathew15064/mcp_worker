@@ -6,6 +6,7 @@ umask 077
 [ -n "$WORKER_RELEASE_EXPECTED_VERSION" ] && [ -n "$WORKER_RELEASE_EXPECTED_COMMIT" ] || { echo 'Release approval version/commit required' >&2; exit 2; }
 case "$WORKER_RELEASE_EXPECTED_VERSION" in *[!0-9.]*|'') echo 'Invalid expected version' >&2; exit 2;; esac
 case "$WORKER_RELEASE_EXPECTED_COMMIT" in *[!0-9a-f]*|'') echo 'Invalid expected commit' >&2; exit 2;; esac
+KEY="$1"
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$ROOT/worker/bin"
 test -f SHA256SUMS && test -f WORKER_RELEASE
@@ -24,12 +25,12 @@ sha256sum bot-report-worker-* WORKER_RELEASE | cmp -s - SHA256SUMS || {
   echo 'Noncanonical or modified SHA256SUMS' >&2; exit 1;
 }
 sha256sum -c SHA256SUMS >/dev/null
-openssl rsa -in "$1" -check -noout >/dev/null 2>&1 || { echo 'An RSA signing key is required' >&2; exit 1; }
+openssl rsa -in "$KEY" -check -noout >/dev/null 2>&1 || { echo 'An RSA signing key is required' >&2; exit 1; }
 tmp="$(mktemp ./SHA256SUMS.sig.XXXXXX)"
 pub="$(mktemp ./release-public.XXXXXX)"
 trap 'rm -f "$tmp" "$pub"' EXIT HUP INT TERM
-openssl rsa -in "$1" -pubout -out "$pub" >/dev/null 2>&1
-openssl dgst -sha256 -sign "$1" -out "$tmp" SHA256SUMS
+openssl rsa -in "$KEY" -pubout -out "$pub" >/dev/null 2>&1
+openssl dgst -sha256 -sign "$KEY" -out "$tmp" SHA256SUMS
 openssl dgst -sha256 -verify "$pub" -signature "$tmp" SHA256SUMS >/dev/null || {
   echo 'Self-verification failed' >&2; exit 1;
 }
