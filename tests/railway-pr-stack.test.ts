@@ -6,6 +6,20 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const checker = resolve(process.cwd(), 'scripts/check-railway-pr-stack.mjs');
+type StackReport = {
+  status: string;
+  safeToMergeRailwayDirectly: boolean;
+  ancestry: { vercelIsAncestor: boolean };
+  aheadBehind: { vercelToRailway: { ahead: number; behind: number } };
+  files: { sharedChanged: number; railwayIncremental: number };
+  mergeBases: { vercelRailway: string | null };
+  refs: { vercel: { sha: string }; base: { sha: string } };
+};
+
+function parseReport(stdout: string): StackReport {
+  return JSON.parse(stdout) as StackReport;
+}
+
 
 function command(cwd: string, program: string, args: string[]) {
   const result = spawnSync(program, args, { cwd, encoding: 'utf8' });
@@ -55,7 +69,7 @@ void test('stacked Vercel→Railway history is blocked under strict mode', () =>
   try {
     const result = check(cwd, '--strict');
     assert.equal(result.status, 2, result.stderr);
-    const report = JSON.parse(result.stdout);
+    const report = parseReport(result.stdout);
     assert.equal(report.status, 'BLOCKED_STACKED');
     assert.equal(report.safeToMergeRailwayDirectly, false);
     assert.equal(report.ancestry.vercelIsAncestor, true);
@@ -73,7 +87,7 @@ void test('independent sibling Railway series passes strict mode', () => {
   try {
     const result = check(cwd, '--strict');
     assert.equal(result.status, 0, result.stderr);
-    const report = JSON.parse(result.stdout);
+    const report = parseReport(result.stdout);
     assert.equal(report.status, 'PASS_INDEPENDENT');
     assert.equal(report.safeToMergeRailwayDirectly, true);
     assert.equal(report.mergeBases.vercelRailway, report.refs.base.sha);
@@ -91,7 +105,7 @@ void test('base ref drift fails closed instead of passing unrelated histories', 
     commit(cwd, 'base-advanced');
     const result = check(cwd, '--strict');
     assert.equal(result.status, 2, result.stderr);
-    assert.equal(JSON.parse(result.stdout).status, 'BLOCKED_BASE_DRIFT');
+    assert.equal(parseReport(result.stdout).status, 'BLOCKED_BASE_DRIFT');
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
