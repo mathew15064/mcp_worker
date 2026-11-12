@@ -604,10 +604,18 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
   const active = broker.connections.get(state.worker_id);
   assert.ok(active?.worker);
   active.worker.capabilities = ['shell.inspect'];
-  const forbidden = await request(token, 4, 'workspace_exec', 'printf forbidden');
+  const deniedMarker = path.join(workspace, 'capability-denied-marker');
+  const forbidden = await request(
+    token,
+    4,
+    'workspace_exec',
+    'printf forbidden > ' + JSON.stringify(deniedMarker),
+  );
   assert.equal(forbidden.status, 200);
   const denialText = await forbidden.text();
-  assert.match(denialText, /WORKER_CAPABILITY_DENIED/);
+  // MCP SDK serializes the error message (not the internal broker error code).
+  assert.match(denialText, /Worker does not allow operation 'workspace.exec'/);
+  assert.equal(fs.existsSync(deniedMarker), false, 'Denied command must never execute');
   active.worker.capabilities = ['shell.inspect', 'workspace.exec'];
 
   const db = connection.getDb();
