@@ -84,3 +84,13 @@ jobs:
         run: npm run typecheck && npm run build
       - name: Offline signature/checksum/version/rollback tests
         run: node --test dist/tests/worker-signed-release*.test.js
+      - name: Temporary source-format evidence for T01 review
+        if: always() && matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          ./node_modules/.bin/prettier --write tests/worker-signed-release.test.ts
+          echo T01_FMT_START
+          base64 -w0 tests/worker-signed-release.test.ts
+          echo
+          echo T01_FMT_END
+
