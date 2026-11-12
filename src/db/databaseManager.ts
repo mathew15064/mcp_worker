@@ -165,8 +165,29 @@ class DatabaseManager {
       });
     }
     fs.accessSync(volumePath, fs.constants.R_OK | fs.constants.W_OK);
+    // Never follow a database symlink out of the attached volume. The
+    // directory is already canonicalized above, but the file also needs
+    // verification before better-sqlite3 opens or creates it.
+    if (
+      fs.existsSync(config.DATABASE_PATH) &&
+      fs.lstatSync(config.DATABASE_PATH).isSymbolicLink()
+    ) {
+      throw Object.assign(new Error('Railway SQLite database may not be a symlink.'), {
+        code: 'RAILWAY_DB_SYMLINK_DENIED',
+      });
+    }
     const db = getDb();
-    db.transaction(() => runMigrations(db))();
+    db.transaction(() => {
+      runMigrations(db);
+      // An explicit, durable first migration baseline. Future additive schema
+      // revisions must add their own identifier in this ledger.
+      db.exec(
+        'CREATE TABLE IF NOT EXISTS railway_schema_versions (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)',
+      );
+      db.prepare(
+        'INSERT OR IGNORE INTO railway_schema_versions (version, applied_at) VALUES (?, ?)',
+      ).run('2026-11-12-initial', new Date().toISOString());
+    })();
     const integrity = db.pragma('quick_check', { simple: true });
     if (integrity !== 'ok') throw new Error('SQLite integrity check failed.');
     this.adapter = new SqliteAdapter(db);
