@@ -13,7 +13,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import https from 'node:https';
-import { spawnSync } from 'node:child_process';
+import type { Server as HttpsServer } from 'node:https';
+import type { Server as HttpServer } from 'node:http';
+import type { ChildProcess } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { EventEmitter, once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import { WebSocket } from 'ws';
@@ -82,15 +85,23 @@ void test('loopback WSS signs identity, rejects forgery, enforces capacity, and 
   };
   let heartbeatCount = 0;
   const repository = {
-    async findWorkerById(id: string) {
-      return id === workerId ? record : null;
+    findWorkerById(id: string) {
+      return Promise.resolve(id === workerId ? record : null);
     },
-    async updateWorkerPresence(_id: string, _status: string) {},
-    async touchWorker(_id: string) {
+    updateWorkerPresence(id: string, status: string) {
+      void id;
+      void status;
+      return Promise.resolve();
+    },
+    touchWorker(id: string) {
+      void id;
       heartbeatCount += 1;
+      return Promise.resolve();
     },
-    async updateWorkerCapabilities(_id: string, caps: string[]) {
+    updateWorkerCapabilities(id: string, caps: string[]) {
+      void id;
       record.capabilities = caps;
+      return Promise.resolve();
     },
   };
   const auth = new WorkerAuthService({ repository: repository as never });
@@ -102,9 +113,9 @@ void test('loopback WSS signs identity, rejects forgery, enforces capacity, and 
     defaultTimeoutMs: 100,
   });
   const server = https.createServer({ key: tls.key, cert: tls.cert });
-  broker.attach(server as never);
+  broker.attach(server);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const url = 'wss://127.0.0.1:' + (server.address() as AddressInfo).port + '/worker/v1/connect';
+  const url = 'wss://127.0.0.1:' + String((server.address() as AddressInfo).port) + '/worker/v1/connect';
   const sockets: WebSocket[] = [];
   t.after(async () => {
     broker.close();
@@ -285,9 +296,9 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
   Object.assign(process.env, vars);
   delete process.env.MCP_PUBLIC_BASE_URL;
 
-  let httpServer: import('node:http').Server | null = null;
-  let tlsServer: https.Server | null = null;
-  let child: import('node:child_process').ChildProcess | null = null;
+  let httpServer: HttpServer | null = null;
+  let tlsServer: HttpsServer | null = null;
+  let child: ChildProcess | null = null;
   const tls = certificate(root);
   const broker = (await import('../src/services/workerConnectionBroker.js')).default;
   const manager = (await import('../src/db/databaseManager.js')).default;
@@ -331,11 +342,11 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
   const app = (await import('../src/app.js')).default;
   httpServer = (await import('node:http')).createServer(app);
   tlsServer = https.createServer({ key: tls.key, cert: tls.cert }, app);
-  broker.attach(tlsServer as never);
+  broker.attach(tlsServer);
   await new Promise<void>((resolve) => httpServer?.listen(0, '127.0.0.1', resolve));
   await new Promise<void>((resolve) => tlsServer?.listen(0, '127.0.0.1', resolve));
-  const base = 'http://127.0.0.1:' + (httpServer.address() as AddressInfo).port;
-  const secure = 'https://127.0.0.1:' + (tlsServer.address() as AddressInfo).port;
+  const base = 'http://127.0.0.1:' + String((httpServer.address() as AddressInfo).port);
+  const secure = 'https://127.0.0.1:' + String((tlsServer.address() as AddressInfo).port);
   const forwarded = { 'x-forwarded-proto': 'https' };
   const getCookie = (res: Response) => (res.headers.get('set-cookie') || '').split(';')[0];
   const csrf = (html: string) => html.match(/name="_csrf" value="([^"]+)"/)?.[1] || '';
@@ -412,7 +423,7 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
   assert.equal(
     built.status,
     0,
-    'Sandbox Go build failed: ' + (built.stderr || built.error || 'unknown'),
+    'Sandbox Go build failed: ' + (built.stderr || built.error?.message || 'unknown'),
   );
   const enrolled = spawnSync(
     executable,
@@ -442,7 +453,7 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
   assert.ok(profile && profile.worker_id === state.worker_id);
 
   const spawnWorker = () => {
-    child = (require('node:child_process') as typeof import('node:child_process')).spawn(
+    child = spawn(
       executable,
       ['run'],
       { cwd: workspace, env: goEnv, stdio: 'ignore' },
