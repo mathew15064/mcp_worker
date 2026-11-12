@@ -26,6 +26,10 @@ class SqliteSessionStore extends session.Store {
     return this._customDb || getDb();
   }
 
+  close() {
+    clearInterval(this.cleanupInterval);
+  }
+
   clearExpired() {
     try {
       const now = Date.now();
