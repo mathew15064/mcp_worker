@@ -42,13 +42,15 @@ router.get('/setup', async (req, res, next) => {
     if (!databaseManager.isRailwaySqliteReady())
       return res.status(503).send(html('<p>Persistent SQLite volume is unavailable.</p>'));
     const csrf = String(req.session?.csrfToken || '').replace(/[^A-Za-z0-9_-]/g, '');
-    return res.type('html').send(html(`<p>Enter the private setup key saved during Deploy
+    return res.type('html').send(
+      html(`<p>Enter the private setup key saved during Deploy
 and choose a different Admin password (14 or more characters).</p>
 <form action="/setup" method="post"><input type="hidden" name="_csrf" value="${csrf}">
 <label>Private setup key<input type="password" name="setup_key" minlength="43" autocomplete="off" required></label>
 <label>Admin password<input type="password" name="password" minlength="14" maxlength="256" autocomplete="new-password" required></label>
 <label>Confirm password<input type="password" name="confirm_password" minlength="14" maxlength="256" autocomplete="new-password" required></label>
-<button type="submit">Create private instance</button></form>`));
+<button type="submit">Create private instance</button></form>`),
+    );
   } catch (error) {
     next(error);
   }
@@ -63,9 +65,14 @@ router.post('/setup', limiter, async (req, res) => {
   const key = typeof fields.setup_key === 'string' ? fields.setup_key : '';
   const password = typeof fields.password === 'string' ? fields.password : '';
   const confirmed = typeof fields.confirm_password === 'string' ? fields.confirm_password : '';
-  if (!timingSafeStringEqual(key, process.env.MCP_SETUP_SECRET || '') ||
-      key.length < 43 || password.length < 14 || password.length > 256 ||
-      password !== confirmed || password === key)
+  if (
+    !timingSafeStringEqual(key, process.env.MCP_SETUP_SECRET || '') ||
+    key.length < 43 ||
+    password.length < 14 ||
+    password.length > 256 ||
+    password !== confirmed ||
+    password === key
+  )
     return res.status(403).type('html').send(html('<p>Invalid setup key or password.</p>'));
   if (!databaseManager.isRailwaySqliteReady())
     return res.status(503).type('html').send(html('<p>Database is unavailable.</p>'));
@@ -82,7 +89,10 @@ router.post('/setup', limiter, async (req, res) => {
     if (result.changes !== 1) return res.status(409).redirect('/login');
     return res.redirect(303, '/login');
   } catch {
-    return res.status(503).type('html').send(html('<p>Setup failed. Verify the persistent volume and retry.</p>'));
+    return res
+      .status(503)
+      .type('html')
+      .send(html('<p>Setup failed. Verify the persistent volume and retry.</p>'));
   } finally {
     claimInProgress = false;
   }

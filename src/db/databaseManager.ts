@@ -305,8 +305,11 @@ class DatabaseManager {
     return this.state === STATES.READY && this.adapter?.kind === 'postgres';
   }
   isRailwaySqliteReady() {
-    return this.state === STATES.READY && this.adapter?.kind === 'sqlite' &&
-      process.env.MCP_PLATFORM === 'railway';
+    return (
+      this.state === STATES.READY &&
+      this.adapter?.kind === 'sqlite' &&
+      process.env.MCP_PLATFORM === 'railway'
+    );
   }
   isSqlReady() {
     return this.isMysqlReady() || this.isManagedPostgresReady() || this.isRailwaySqliteReady();
@@ -457,7 +460,7 @@ class DatabaseManager {
         ? 'postgres'
         : this.isMysqlReady()
           ? 'mysql'
-          : (this.state === STATES.LEGACY_SQLITE || this.isRailwaySqliteReady())
+          : this.state === STATES.LEGACY_SQLITE || this.isRailwaySqliteReady()
             ? 'sqlite'
             : null,
       mysql: saved ? { ...saved, version: this.mysqlInfo?.version || null } : null,

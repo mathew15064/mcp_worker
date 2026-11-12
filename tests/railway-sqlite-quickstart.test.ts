@@ -86,10 +86,7 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
     assert.equal(created.status, 303);
     assert.equal(created.headers.get('location'), '/login');
     assert.equal((await submit(process.env.MCP_SETUP_SECRET)).status, 409);
-    assert.equal(
-      (await fetch(base + '/setup', { headers, redirect: 'manual' })).status,
-      302,
-    );
+    assert.equal((await fetch(base + '/setup', { headers, redirect: 'manual' })).status, 302);
     assert.equal((await fetch(base + '/readyz', { headers })).status, 200);
     const discovery = await fetch(base + '/.well-known/oauth-authorization-server', {
       headers,
@@ -128,7 +125,7 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
       manager.resetForTests();
       const conn = await import('../src/db/connection.js');
       conn.closeDb();
-    } catch (_) {}
+    } catch {}
     for (const [key, value] of before) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -139,12 +136,12 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
 
 void test('Railway refuses ephemeral storage and forged canonical hosts', async () => {
   const config = (await import('../src/config/railwayOrigin.js')).canonicalRailwayOrigin;
-  assert.equal(config({ RAILWAY_PUBLIC_DOMAIN: 'owner.up.railway.app' }), 'https://owner.up.railway.app');
-  assert.equal(config({}), null);
-  assert.throws(
-    () => config({ RAILWAY_PUBLIC_DOMAIN: 'attacker.example' }),
-    /Railway domain/,
+  assert.equal(
+    config({ RAILWAY_PUBLIC_DOMAIN: 'owner.up.railway.app' }),
+    'https://owner.up.railway.app',
   );
+  assert.equal(config({}), null);
+  assert.throws(() => config({ RAILWAY_PUBLIC_DOMAIN: 'attacker.example' }), /Railway domain/);
   assert.throws(
     () => config({ MCP_PUBLIC_BASE_URL: 'https://user:pass@owner.example' }),
     /Invalid/,

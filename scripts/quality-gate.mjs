@@ -43,10 +43,6 @@ for (const result of results) {
   const options = await prettier.resolveConfig(result.filePath);
   if (!(await prettier.check(source, { ...options, filepath: result.filePath }))) {
     current.format[name] = crypto.createHash('sha256').update(source).digest('hex');
-    if (name.startsWith('src/') || name.startsWith('tests/')) {
-      const formatted = await prettier.format(source, { ...options, filepath: result.filePath });
-      console.error('FORMAT_DIAGNOSTIC_BEGIN:' + name + ':' + Buffer.from(formatted).toString('base64') + ':FORMAT_DIAGNOSTIC_END');
-    }
   }
 }
 if (fatal.length) {

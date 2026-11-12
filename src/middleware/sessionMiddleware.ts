@@ -32,8 +32,8 @@ const store =
     : process.env.MCP_PLATFORM === 'railway'
       ? new SqliteSessionStore()
       : new BoundedMemorySessionStore({
-        maxSessions: Number.parseInt(process.env.ADMIN_SESSION_MAX || '500', 10),
-      });
+          maxSessions: Number.parseInt(process.env.ADMIN_SESSION_MAX || '500', 10),
+        });
 
 const sessionMiddleware = session({
   store,

@@ -14,7 +14,8 @@ export function canonicalRailwayOrigin(env: NodeJS.ProcessEnv = process.env): st
     url.search ||
     url.hash ||
     !/^[a-z0-9.-]+$/i.test(url.hostname)
-  ) throw new Error('Invalid canonical Railway origin.');
+  )
+    throw new Error('Invalid canonical Railway origin.');
   // Railway-generated domains must be platform owned; custom domains are
   // explicitly supplied by the owner's own MCP_PUBLIC_BASE_URL setting.
   if (!custom && !url.hostname.endsWith('.railway.app'))
