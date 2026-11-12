@@ -151,7 +151,7 @@ class DatabaseManager {
    * Schema changes are additive and idempotent via the existing SQLite schema
    * upgrade path, run atomically before accepting HTTP connections.
    */
-  async connectRailwaySqlite() {
+  connectRailwaySqlite() {
     const volumePath = process.env.RAILWAY_VOLUME_MOUNT_PATH;
     if (!volumePath || !path.isAbsolute(volumePath)) {
       throw Object.assign(new Error('Railway persistent volume is required.'), {
