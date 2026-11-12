@@ -381,8 +381,7 @@ export class DistributedWorkerRelay {
       ),
     );
     if (size === -1) throw fail('WORKER_BUSY', 'Worker queue is busy.', 429);
-    if (size === -2)
-      throw fail('WORKER_REPLACED', 'Worker reconnected during queue admission.');
+    if (size === -2) throw fail('WORKER_REPLACED', 'Worker reconnected during queue admission.');
     if (!Number.isInteger(size) || size < 1)
       throw fail('WORKER_RELAY_STORE_UNAVAILABLE', 'Worker queue admission failed.');
     // Notification is an optimization; the queue stays authoritative.

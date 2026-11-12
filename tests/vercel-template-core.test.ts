@@ -191,10 +191,7 @@ void test('warm Vercel Function discovers Secure Setup completed by another Func
       queryOne: () => Promise.resolve({ value: 'preexisting-owner-hash' }),
     });
     assert.deepEqual(
-      await Promise.all([
-        setupRoutes.isOwnerSetupComplete(),
-        setupRoutes.isOwnerSetupComplete(),
-      ]),
+      await Promise.all([setupRoutes.isOwnerSetupComplete(), setupRoutes.isOwnerSetupComplete()]),
       [true, true],
     );
     assert.equal(rechecks, 1);

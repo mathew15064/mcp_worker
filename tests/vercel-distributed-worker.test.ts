@@ -373,10 +373,15 @@ void test('pending remote dispatch fails promptly if Worker owner disconnects', 
   memory.values.set(route, crypto.randomUUID());
   const started = Date.now();
   try {
-    const task = relay.dispatch(id, 'workspace.exec', {}, {
-      timeoutMs: 4000,
-      enforceCapability: true,
-    });
+    const task = relay.dispatch(
+      id,
+      'workspace.exec',
+      {},
+      {
+        timeoutMs: 4000,
+        enforceCapability: true,
+      },
+    );
     setTimeout(() => memory.values.delete(route), 100);
     await assert.rejects(
       task,

@@ -43,15 +43,6 @@ for (const result of results) {
   const options = await prettier.resolveConfig(result.filePath);
   if (!(await prettier.check(source, { ...options, filepath: result.filePath }))) {
     current.format[name] = crypto.createHash('sha256').update(source).digest('hex');
-    // Temporary diagnostic: exact formatting of reviewed Quickstart changes.
-    if ([
-      'src/services/distributedWorkerRelay.ts',
-      'tests/vercel-distributed-worker.test.ts',
-      'tests/vercel-template-core.test.ts'
-    ].includes(name)) {
-      const formatted = await prettier.format(source, { ...options, filepath: result.filePath });
-      console.error('FORMAT_DIAGNOSTIC_BEGIN:' + name + ':' + Buffer.from(formatted).toString('base64') + ':FORMAT_DIAGNOSTIC_END');
-    }
   }
 }
 if (fatal.length) {
