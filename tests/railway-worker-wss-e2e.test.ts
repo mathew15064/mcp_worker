@@ -431,25 +431,34 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
     0,
     'Sandbox Go build failed: ' + (built.stderr || built.error?.message || 'unknown'),
   );
-  const enrolled = spawnSync(
-    executable,
-    [
-      'login',
-      '--server',
-      secure,
-      '--token',
-      enrollment.token,
-      '--roots',
-      workspace,
-      '--name',
-      'T04-Worker',
-      '--profile',
-      'T04-Sandbox',
-      '--allow-shell',
-      '--no-start',
-    ],
-    { cwd: workspace, env: goEnv, encoding: 'utf8', timeout: 30000 },
-  );
+  // Never use spawnSync for enrollment: the HTTPS server runs in this event loop.
+  const enrolled = await new Promise<{ status: number; stderr: string }>((resolve, reject) => {
+    const command = spawn(
+      executable,
+      [
+        'login',
+        '--server',
+        secure,
+        '--token',
+        enrollment.token,
+        '--roots',
+        workspace,
+        '--name',
+        'T04-Worker',
+        '--profile',
+        'T04-Sandbox',
+        '--allow-shell',
+        '--no-start',
+      ],
+      { cwd: workspace, env: goEnv, stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 },
+    );
+    let stderr = '';
+    command.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8');
+    });
+    command.once('error', reject);
+    command.once('close', (code) => resolve({ status: code ?? 1, stderr }));
+  });
   assert.equal(enrolled.status, 0, 'Ephemeral enrollment failed: ' + enrolled.stderr);
   const state = JSON.parse(fs.readFileSync(path.join(workerHome, 'state.json'), 'utf8')) as {
     worker_id: string;
