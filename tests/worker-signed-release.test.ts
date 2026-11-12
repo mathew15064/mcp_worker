@@ -134,10 +134,13 @@ void test(
         stub,
         [
           'package main',
-          'import "os"',
+          'import ("fmt"; "os")',
           'func main() {',
-          ' if len(os.Args) > 1 && (os.Args[1] == "version" || os.Args[1] == "stop") { return }',
-          ' os.Exit(0)',
+          ' if len(os.Args) < 2 { return }',
+          ' switch os.Args[1] {',
+          ' case "status": if os.Getenv("SIGNED_TEST_RUNNING") == "1" { fmt.Println("status: RUNNING") } else { fmt.Println("status: STOPPED") }',
+          ' case "start": if os.Getenv("SIGNED_TEST_FAIL_START") == "1" { os.Exit(1) }',
+          ' }',
           '}',
           '',
         ].join('\n'),
@@ -147,7 +150,7 @@ void test(
     } else {
       fs.writeFileSync(
         fixture,
-        '#!/bin/sh\ncase "$1" in version|stop|uninstall) exit 0;; status) echo "status: STOPPED"; exit 0;; *) exit 0;; esac\n',
+        '#!/bin/sh\ncase "$1" in version|stop|uninstall) exit 0;; status) if [ "\${SIGNED_TEST_RUNNING:-0}" = 1 ]; then echo "status: RUNNING"; else echo "status: STOPPED"; fi; exit 0;; start) [ "\${SIGNED_TEST_FAIL_START:-0}" != 1 ];; *) exit 0;; esac\n',
         { mode: 0o755 },
       );
     }
@@ -221,6 +224,8 @@ void test(
         const outcome = await result;
         assert.notEqual(outcome.code, 0, label + ': unexpectedly succeeded');
         assert.deepEqual(fs.readFileSync(installed), expected, label + ': replaced runtime');
+        assert.deepEqual(fs.readFileSync(path.join(stateRoot, 'state.json')), identity);
+        assert.deepEqual(fs.readFileSync(path.join(stateRoot, 'config.json')), config);
       }
       const first = await install();
       assert.equal(first.code, 0, 'signed fresh install: ' + first.output);
@@ -233,6 +238,10 @@ void test(
         fs.readFileSync(path.join(stateRoot, 'release-commit'), 'utf8').trim(),
         COMMIT_A,
       );
+      const identity = Buffer.from('test-only-identity-sentinel');
+      const config = Buffer.from('test-only-config-sentinel');
+      fs.writeFileSync(path.join(stateRoot, 'state.json'), identity);
+      fs.writeFileSync(path.join(stateRoot, 'config.json'), config);
       await t.test('valid signed same-version reinstall', async () => {
         assert.equal((await install()).code, 0);
       });
@@ -300,10 +309,32 @@ void test(
           fs.readFileSync(path.join(stateRoot, 'release-version'), 'utf8').trim(),
           VERSION_B,
         );
+        assert.deepEqual(fs.readFileSync(path.join(stateRoot, 'state.json')), identity);
+        assert.deepEqual(fs.readFileSync(path.join(stateRoot, 'config.json')), config);
       });
       await t.test('previously valid signed release cannot downgrade', async () => {
         active = packageA;
         await unchanged('signed downgrade', install(), binaryB);
+      });
+      await t.test('failed signed upgrade restores previously installed binary', async () => {
+        active = bundle(key, file, binaryA, '2.3.6', 'aabbccddeeff');
+        await unchanged(
+          'start failure rollback',
+          install(
+            { version: '2.3.6', commit: 'aabbccddeeff', publicKeyBase64: key.publicKeyBase64 },
+            { SIGNED_TEST_RUNNING: '1', SIGNED_TEST_FAIL_START: '1' },
+          ),
+          binaryB,
+        );
+        assert.equal(
+          fs.readFileSync(path.join(stateRoot, 'release-version'), 'utf8').trim(),
+          VERSION_B,
+        );
+        assert.equal(
+          fs.readFileSync(path.join(stateRoot, 'release-commit'), 'utf8').trim(),
+          COMMIT_B,
+        );
+        active = packageB;
       });
       await t.test('same version with different signed commit is rejected', async () => {
         active = bundle(key, file, binaryB, VERSION_B, 'bbbbbbbbbbbb');
