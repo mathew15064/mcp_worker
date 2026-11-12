@@ -62,6 +62,8 @@ docker cp "$TEST_TMP/tests" "$ID-run":/app/dist/
 docker cp "$TEST_TMP/api" "$ID-run":/app/dist/
 docker cp README.md "$ID-run":/app/README.md
 docker cp vercel-template.json "$ID-run":/app/vercel-template.json
+docker exec "$ID-run" mkdir -p /app/docs
+docker cp docs/VERCEL_QUICKSTART.md "$ID-run":/app/docs/VERCEL_QUICKSTART.md
 rm -rf "$TEST_TMP/tests" "$TEST_TMP/api"
 docker exec "$ID-run" apk add --no-cache curl git bash ripgrep openssl >"$OUT/test-prerequisites.log" 2>&1
 # Build a distinct fixture from the same source, never from a production worker.
