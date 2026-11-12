@@ -123,6 +123,10 @@ need openssl
 }
 case "$PINNED_VERSION" in *[!0-9.]*|'') echo "[systemtd] invalid release version" >&2; exit 1;; esac
 case "$PINNED_COMMIT" in *[!0-9a-f]*|'') echo "[systemtd] invalid release commit" >&2; exit 1;; esac
+printf '%s\n' "$PINNED_VERSION" | grep -Eq '^[0-9]+[.][0-9]+[.][0-9]+$' ||
+  { echo "[systemtd] invalid semantic version" >&2; exit 1; }
+COMMIT_LEN="$(printf '%s' "$PINNED_COMMIT" | wc -c | tr -d ' ')"
+[ "$COMMIT_LEN" -ge 7 ] && [ "$COMMIT_LEN" -le 40 ] || { echo "[systemtd] invalid release commit length" >&2; exit 1; }
 if [ "$ACTION" = rollback ]; then
   echo "[systemtd] manual rollback prohibited; explicitly approve a signed release" >&2
   exit 1
@@ -280,9 +284,7 @@ printf '%s\n' "$INSTALL_ROOT" > "$WORKER_HOME/install-root"
 printf '%s\n' "$BIN_DIR/systemtd" > "$WORKER_HOME/bin-path"
 chmod 0700 "$WORKER_HOME"
 chmod 0600 "$WORKER_HOME/default-server" "$WORKER_HOME/install-root" "$WORKER_HOME/bin-path"
-printf '%s\\n' "$PINNED_VERSION" > "$WORKER_HOME/release-version"
-printf '%s\\n' "$PINNED_COMMIT" > "$WORKER_HOME/release-commit"
-chmod 0600 "$WORKER_HOME/release-version" "$WORKER_HOME/release-commit"
+
 
 echo "[systemtd] installed standalone runtime: $BIN_DIR/systemtd ($OS/$ARCH)"
 
@@ -381,6 +383,10 @@ if [ -f "$TMP/old" ]; then
   else OLD_HASH="$(openssl dgst -sha256 "$PREVIOUS/systemtd" | awk '{print $NF}')"; fi
   printf '%s  %s\n' "$OLD_HASH" "$FILE" > "$PREVIOUS/SHA256SUMS"
 fi
+
+printf '%s\\n' "$PINNED_VERSION" > "$WORKER_HOME/release-version"
+printf '%s\\n' "$PINNED_COMMIT" > "$WORKER_HOME/release-commit"
+chmod 0600 "$WORKER_HOME/release-version" "$WORKER_HOME/release-commit"
 
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
@@ -547,8 +553,7 @@ try {
   if (-not (Test-Path (Join-Path $WorkerHome 'default-server'))) { Set-Content -Encoding ascii -Path (Join-Path $WorkerHome 'default-server') -Value $BaseUrl }
   Set-Content -Encoding ascii -Path (Join-Path $WorkerHome 'install-root') -Value $InstallRoot
   Set-Content -Encoding ascii -Path (Join-Path $WorkerHome 'bin-path') -Value (Join-Path $Target 'bot-report-worker.exe')
-  Set-Content -Encoding ascii -Path $VersionPath -Value $PinnedVersion
-  Set-Content -Encoding ascii -Path $CommitPath -Value $PinnedCommit
+
 
   if ($env:BOT_REPORT_WORKER_SKIP_PATH -ne '1') {
     $UserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -558,6 +563,8 @@ try {
       [Environment]::SetEnvironmentVariable('Path', $NewPath, 'User')
     }
   }
+  Set-Content -Encoding ascii -Path $VersionPath -Value $PinnedVersion
+  Set-Content -Encoding ascii -Path $CommitPath -Value $PinnedCommit
   $env:Path = "$Target;$env:Path"
   Write-Host "[bot-report-worker] installed standalone runtime: $(Join-Path $Target 'bot-report-worker.exe') (windows/$Arch)"
   if (Test-Path (Join-Path $WorkerHome 'state.json')) {
