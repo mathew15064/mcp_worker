@@ -32,7 +32,7 @@ if (process.env.CI === 'true') {
         'src/db/sessionStore.ts',
         'tests/railway-storage-security.test.ts',
       ]) {
-        const original = fs.readFileSync(path.join(process.cwd(), file), 'utf8');
+        const original = fs.readFileSync(path.resolve(process.cwd(), '..', file), 'utf8');
         const clean = original.replace(
           /\/\* T03_FORMAT_PROBE_START \*\/[\s\S]*?\/\* T03_FORMAT_PROBE_END \*\/\n/,
           '',
