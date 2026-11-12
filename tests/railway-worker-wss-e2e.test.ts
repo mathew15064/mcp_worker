@@ -214,3 +214,286 @@ void test('loopback WSS signs identity, rejects forgery, enforces capacity, and 
   assert.equal(broker.pending.size, 0);
   assert.equal(broker.connections.size, 0);
 });
+
+
+/**
+ * Full E2E is opt-in outside CI because it spawns a real local Worker.
+ * Reproduce on a disposable Linux VM/container with Go >= 1.24:
+ *   BOT_REPORT_T04_GO_E2E=1 npm test
+ * It never accesses an external Railway project or an installed Worker.
+ */
+void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Worker over WSS', async (t) => {
+  if (process.env.CI !== 'true' && process.env.BOT_REPORT_T04_GO_E2E !== '1') {
+    t.skip('Real Go Worker requires an explicit disposable sandbox (or GitHub Actions CI)');
+    return;
+  }
+  if (spawnSync('go', ['version'], { stdio: 'ignore' }).status !== 0) {
+    t.skip('Go toolchain is absent: real Worker acceptance must be run on a Go-equipped sandbox');
+    return;
+  }
+  if (spawnSync('openssl', ['version'], { stdio: 'ignore' }).status !== 0) {
+    t.skip('OpenSSL is absent: cannot establish trusted test WSS');
+    return;
+  }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 't04-railway-go-'));
+  const volume = path.join(root, 'volume');
+  const workspace = path.join(root, 'workspace');
+  const workerHome = path.join(root, 'go-worker-identity');
+  fs.mkdirSync(volume, { recursive: true });
+  fs.mkdirSync(workspace, { recursive: true });
+  fs.mkdirSync(workerHome, { recursive: true, mode: 0o700 });
+  const saved = new Map<string, string | undefined>();
+  const vars: Record<string, string> = {
+    MCP_PLATFORM: 'railway',
+    MCP_SETUP_SECRET: crypto.randomBytes(32).toString('base64url'),
+    RAILWAY_VOLUME_MOUNT_PATH: volume,
+    RAILWAY_PUBLIC_DOMAIN: 'private-t04.up.railway.app',
+    DATABASE_PATH: path.join(volume, 'worker.sqlite'),
+    TRUST_PROXY: '1',
+    NODE_ENV: 'test',
+    HOST: '127.0.0.1',
+    MCP_ENABLED: 'true',
+  };
+  for (const key of [...Object.keys(vars), 'MCP_PUBLIC_BASE_URL']) saved.set(key, process.env[key]);
+  Object.assign(process.env, vars);
+  delete process.env.MCP_PUBLIC_BASE_URL;
+
+  let httpServer: import('node:http').Server | null = null;
+  let tlsServer: https.Server | null = null;
+  let child: import('node:child_process').ChildProcess | null = null;
+  const tls = certificate(root);
+  const broker = (await import('../src/services/workerConnectionBroker.js')).default;
+  const manager = (await import('../src/db/databaseManager.js')).default;
+  const connection = await import('../src/db/connection.js');
+  const terminate = async () => {
+    if (child && child.exitCode === null && !child.killed) {
+      const exit = once(child, 'exit');
+      child.kill('SIGTERM');
+      await exit;
+    }
+    child = null;
+  };
+  t.after(async () => {
+    try { await terminate(); } catch {}
+    broker.close();
+    if (tlsServer) await new Promise<void>((resolve) => tlsServer?.close(() => resolve()));
+    if (httpServer) await new Promise<void>((resolve) => httpServer?.close(() => resolve()));
+    try { await manager.close(); } catch {}
+    try { connection.closeDb(); } catch {}
+    manager.resetForTests();
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  await manager.initialize();
+  assert.equal(manager.isRailwaySqliteReady(), true);
+  assert.equal(manager.status().engine, 'sqlite');
+  const settings = (await import('../src/services/runtimeSettingsService.js')).default;
+  await settings.seedDefaults(manager.getAdapter());
+  const oauthConfig = (await import('../src/config/mcpConfig.js')).default;
+  assert.equal(oauthConfig.issuer, 'https://private-t04.up.railway.app');
+  const app = (await import('../src/app.js')).default;
+  httpServer = (await import('node:http')).createServer(app);
+  tlsServer = https.createServer({ key: tls.key, cert: tls.cert }, app);
+  broker.attach(tlsServer as never);
+  await new Promise<void>((resolve) => httpServer?.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => tlsServer?.listen(0, '127.0.0.1', resolve));
+  const base = 'http://127.0.0.1:' + (httpServer.address() as AddressInfo).port;
+  const secure = 'https://127.0.0.1:' + (tlsServer.address() as AddressInfo).port;
+  const forwarded = { 'x-forwarded-proto': 'https' };
+  const getCookie = (res: Response) => (res.headers.get('set-cookie') || '').split(';')[0];
+  const csrf = (html: string) => html.match(/name="_csrf" value="([^"]+)"/)?.[1] || '';
+  const form = (values: Record<string, string>) => new URLSearchParams(values).toString();
+
+  const first = await fetch(base + '/setup', { headers: forwarded });
+  assert.equal(first.status, 200);
+  const setupCookie = getCookie(first);
+  const setupCsrf = csrf(await first.text());
+  assert.ok(setupCookie && setupCsrf);
+  const setup = await fetch(base + '/setup', {
+    method: 'POST', redirect: 'manual',
+    headers: { ...forwarded, cookie: setupCookie, 'content-type': 'application/x-www-form-urlencoded' },
+    body: form({
+      _csrf: setupCsrf,
+      setup_key: vars.MCP_SETUP_SECRET,
+      password: 'T04LocalAdminPassword2026!',
+      confirm_password: 'T04LocalAdminPassword2026!',
+    }),
+  });
+  assert.equal(setup.status, 303);
+  const installer = await fetch(base + '/worker/install.sh', { headers: forwarded });
+  assert.equal(installer.status, 503, 'Unsigned Railway installer must remain blocked');
+  assert.equal((await installer.json() as { code: string }).code, 'WORKER_SIGNED_RELEASE_PENDING');
+
+  const login = await fetch(base + '/login', { headers: forwarded });
+  assert.equal(login.status, 200);
+  const loginCookie = getCookie(login);
+  const loginCsrf = csrf(await login.text());
+  const authenticated = await fetch(base + '/login', {
+    method: 'POST', redirect: 'manual',
+    headers: { ...forwarded, cookie: loginCookie, 'content-type': 'application/x-www-form-urlencoded' },
+    body: form({
+      _csrf: loginCsrf, username: 'admin',
+      password: 'T04LocalAdminPassword2026!',
+      returnTo: '/',
+    }),
+  });
+  assert.equal(authenticated.status, 302);
+  assert.ok(getCookie(authenticated));
+
+  const workerRepo = (await import('../src/repositories/workerRepository.js')).default;
+  const enrollment = await workerRepo.createEnrollmentToken();
+  const executable = path.join(root, 't04-worker');
+  const goEnv = {
+    HOME: workerHome,
+    BOT_REPORT_WORKER_HOME: workerHome,
+    BOT_REPORT_WORKER_SKIP_SERVICE: '1',
+    SSL_CERT_FILE: tls.certPath,
+    PATH: process.env.PATH || '/usr/bin:/bin',
+    GOTOOLCHAIN: 'auto',
+    CGO_ENABLED: '0',
+  };
+  const built = spawnSync('go', ['build', '-trimpath', '-o', executable, '.'], {
+    cwd: path.join(process.cwd(), 'worker-go'),
+    env: goEnv, encoding: 'utf8', timeout: 240000,
+  });
+  assert.equal(built.status, 0, 'Sandbox Go build failed: ' + (built.stderr || built.error || 'unknown'));
+  const enrolled = spawnSync(executable, [
+    'login', '--server', secure, '--token', enrollment.token, '--roots', workspace,
+    '--name', 'T04-Worker', '--profile', 'T04-Sandbox', '--allow-shell', '--no-start',
+  ], { cwd: workspace, env: goEnv, encoding: 'utf8', timeout: 30000 });
+  assert.equal(enrolled.status, 0, 'Ephemeral enrollment failed: ' + enrolled.stderr);
+  const state = JSON.parse(fs.readFileSync(path.join(workerHome, 'state.json'), 'utf8')) as {
+    worker_id: string;
+  };
+  assert.ok(state.worker_id, 'Go Worker must generate a new local-only Ed25519 identity');
+  const profile = await workerRepo.findProfileByName('T04-Sandbox');
+  assert.ok(profile && profile.worker_id === state.worker_id);
+
+  const spawnWorker = () => {
+    child = (require('node:child_process') as typeof import('node:child_process')).spawn(
+      executable, ['run'], { cwd: workspace, env: goEnv, stdio: 'ignore' },
+    );
+    return child;
+  };
+  spawnWorker();
+  await waitUntil(() => broker.isOnline(state.worker_id), 15000);
+  assert.equal((await broker.probeConnection(state.worker_id)).ok, true);
+
+  const oauth = (await import('../src/services/mcpOAuthService.js')).default;
+  const registered = await oauth.registerClient({
+    displayName: 'T04 Local Go MCP Client',
+    principalId: 'principal:t04_railway_go',
+    profileId: profile.id,
+    redirectUris: ['http://localhost:40000/oauth/callback'],
+    allowedScopes: ['bot_report.read', 'bot_report.terminal'],
+  });
+  const verifier = crypto.randomBytes(48).toString('base64url');
+  const params = new URLSearchParams({
+    client_id: registered.client.client_id,
+    redirect_uri: 'http://localhost:40000/oauth/callback',
+    response_type: 'code',
+    scope: 'bot_report.read bot_report.terminal',
+    state: 't04-local-pkce',
+    code_challenge: crypto.createHash('sha256').update(verifier).digest('base64url'),
+    code_challenge_method: 'S256',
+    resource: oauthConfig.resourceUrl,
+  });
+  const consent = await fetch(base + '/oauth/authorize?' + params, {
+    headers: { ...forwarded, cookie: getCookie(authenticated) }, redirect: 'manual',
+  });
+  assert.equal(consent.status, 200);
+  const consentParams = new URLSearchParams(params);
+  consentParams.set('_csrf', csrf(await consent.text()));
+  consentParams.set('action', 'allow');
+  const approved = await fetch(base + '/oauth/authorize', {
+    method: 'POST', redirect: 'manual',
+    headers: { ...forwarded, cookie: getCookie(authenticated), 'content-type': 'application/x-www-form-urlencoded' },
+    body: consentParams.toString(),
+  });
+  assert.equal(approved.status, 302);
+  const redirected = new URL(approved.headers.get('location') || '');
+  assert.equal(redirected.searchParams.get('state'), 't04-local-pkce');
+  const code = redirected.searchParams.get('code');
+  assert.ok(code);
+  const grant = form({
+    grant_type: 'authorization_code', code,
+    redirect_uri: 'http://localhost:40000/oauth/callback',
+    resource: oauthConfig.resourceUrl, code_verifier: verifier,
+  });
+  const tokenHeaders = {
+    ...forwarded, 'content-type': 'application/x-www-form-urlencoded',
+    authorization: 'Basic ' +
+      Buffer.from(registered.client.client_id + ':' + registered.rawSecret).toString('base64'),
+  };
+  const issued = await fetch(base + '/oauth/token', {
+    method: 'POST', headers: tokenHeaders, body: grant,
+  });
+  assert.equal(issued.status, 200);
+  const { access_token: token } = await issued.json() as { access_token: string };
+  assert.match(token, /^br_at_/);
+  assert.equal((await fetch(base + '/oauth/token', {
+    method: 'POST', headers: tokenHeaders, body: grant,
+  })).status, 400, 'PKCE authorization code must be single-use');
+
+  const request = (accessToken: string, id: number, name: string, command: string) =>
+    fetch(base + '/mcp', {
+      method: 'POST',
+      headers: {
+        ...forwarded,
+        authorization: 'Bearer ' + accessToken,
+        accept: 'application/json, text/event-stream',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id, method: 'tools/call',
+        params: { name, arguments: { profile: 'T04-Sandbox', command, cwd: workspace } },
+      }),
+    });
+  const invalid = await request('br_at_invalid_t04', 1, 'workspace_exec', 'true');
+  assert.equal(invalid.status, 401);
+  const call = await request(token, 2, 'workspace_exec', 'printf T04_GO_WORKER_OK');
+  assert.equal(call.status, 200);
+  const bodyText = await call.text();
+  const event = bodyText.split('\n').filter((line) => line.startsWith('data: ')).at(-1);
+  const payload = JSON.parse(event ? event.slice(6) : bodyText) as {
+    result?: { isError?: boolean; structuredContent?: { stdout_tail?: string } };
+  };
+  assert.equal(payload.result?.isError, undefined, bodyText);
+  assert.match(payload.result?.structuredContent?.stdout_tail || '', /T04_GO_WORKER_OK/);
+
+  const marker = path.join(workspace, 'non-idempotent-marker');
+  const onceCommand = "printf 'once\\n' >> " + JSON.stringify(marker);
+  const onceCall = await request(token, 3, 'workspace_exec', onceCommand);
+  assert.equal(onceCall.status, 200);
+  assert.equal(fs.readFileSync(marker, 'utf8'), 'once\n');
+
+  await terminate();
+  await waitUntil(() => !broker.isOnline(state.worker_id), 5000);
+  spawnWorker();
+  await waitUntil(() => broker.isOnline(state.worker_id), 15000);
+  assert.equal(fs.readFileSync(marker, 'utf8'), 'once\n', 'Reconnect must not replay a completed write');
+
+  // The identity remains server-side; the live socket's current capability set is authoritative.
+  const active = broker.connections.get(state.worker_id);
+  assert.ok(active?.worker);
+  active.worker.capabilities = ['shell.inspect'];
+  const forbidden = await request(token, 4, 'workspace_exec', 'printf forbidden');
+  assert.equal(forbidden.status, 200);
+  const denialText = await forbidden.text();
+  assert.match(denialText, /WORKER_CAPABILITY_DENIED/);
+  active.worker.capabilities = ['shell.inspect', 'workspace.exec'];
+
+  const db = connection.getDb();
+  assert.equal(db.pragma('quick_check', { simple: true }), 'ok');
+  db.prepare('UPDATE mcp_oauth_access_tokens SET expires_at = ?').run('2000-01-01T00:00:00.000Z');
+  const expired = await request(token, 5, 'workspace_exec', 'true');
+  assert.equal(expired.status, 401);
+
+  await terminate();
+  await waitUntil(() => !broker.isOnline(state.worker_id), 5000);
+  assert.equal((await fetch(base + '/readyz', { headers: forwarded })).status, 200);
+});
