@@ -1,6 +1,6 @@
 # T05 — Integration Review of Railway + SQLite self-hosting
 
-**Status:** BLOCKED / review-only snapshot. **No task commits cherry-picked or merged.**  
+**Status:** PARTIAL integration snapshot: exactly six T03 SQLite security files accepted on T05; all other task code excluded. No production merge or deploy.  
 **Reviewed:** 2026-11-12 (UTC). **Source of truth:** GitHub branch heads and GitHub Actions logs; worker branches are active and may advance after this snapshot.  
 **Repository:** `mathew15064/mcp_worker`  
 **Integration base:** `d5c08de9c8b982143350bdd4419af1e4fe98df7e`, Draft PR [#15](https://github.com/mathew15064/mcp_worker/pull/15)  
@@ -12,7 +12,7 @@
 |---|---|---|---|
 | T01 signed Worker | `16b72f0858d2d7b52f25929df9933edcc84006d3` | [PR #18](https://github.com/mathew15064/mcp_worker/pull/18); at this snapshot newer CI and cross-platform workflow incomplete. Previous [CI #107](https://github.com/mathew15064/mcp_worker/actions/runs/43259367369) failed lint. Older Windows suite initially failed binary replacement, but a later [Windows offline job](https://github.com/mathew15064/mcp_worker/actions/runs/43260178404) passed. CI at `7069ecd` failed old HTTP installer contract. | **BLOCKED** pending full green CI, release review, pinned signing public key |
 | T02 Railway template | `cba43211ba40063ae021da16039040201611f273` | Has source and offline tests; **no GitHub Action runs or test artifacts attached to head**. IaC test uses in-process mocked `railway/iac` helpers and explicitly does *not* validate official CLI/SDK. | **BLOCKED** pending real SDK/CLI plan verification and CI |
-| T03 SQLite security | `eeea56ea69779c9d68f7120123dd1d0968030530` | [PR #17](https://github.com/mathew15064/mcp_worker/pull/17); [CI #](https://github.com/mathew15064/mcp_worker/actions/runs/43260642364) **PASS: 125 tests, 123 pass, 2 skip**. Previously committed CI formatting probe was removed at reviewed head. Separate isolated release verification still pending at snapshot. | **PROVISIONAL ACCEPT** subject to release verification and integration checks |
+| T03 SQLite security | `eeea56ea69779c9d68f7120123dd1d0968030530` | [PR #17](https://github.com/mathew15064/mcp_worker/pull/17); [CI #](https://github.com/mathew15064/mcp_worker/actions/runs/43260642364) **PASS: 125 tests, 123 pass, 2 skip**. Previously committed CI formatting probe was removed at reviewed head. [Isolated release verification](https://github.com/mathew15064/mcp_worker/actions/runs/43260642367) PASS. | **ACCEPTED into T05 candidate** (six source files); combined CI and release verification remain separate checks |
 | T04 WSS → MCP E2E | `264709a4cd936b85f343dbdc0751ede075b11bd9` | [PR #16](https://github.com/mathew15064/mcp_worker/pull/16); earlier [CI](https://github.com/mathew15064/mcp_worker/actions/runs/43260146527) FAIL: absent non-idempotent marker in Go Worker E2E. Newer head CI queued. | **BLOCKED** pending green real Go Worker test and no-write-replay proof |
 
 All four task heads descended from the same immutable base `d5c08de9c8b982143350bdd4419af1e4fe98df7e`. The reviewed file-change sets are pairwise **disjoint**, so the merge-conflict map at file-path level is empty. This does **not** prove runtime interoperability.
@@ -61,7 +61,7 @@ Semantic dependencies remain: T01's signed release policy impacts T04's installe
 
 ## Integration policy
 
-No cherry-pick into PR #15 or into production. Current review branch contains **only T05 review documents**. A later integration commit should be created only after:
+Do not cherry-pick into PR #15 or production. This separate T05 review branch contains **two review documents plus six T03 source files**, integrated at `d5ca654c8f64bab98167b7ed376aa1a2f0e0bb53` from `eeea56ea69779c9d68f7120123dd1d0968030530`. T01/T02/T04 remain excluded. A later integration commit should be created only after:
 1. Each selected task commit is SHA-pinned and has green required CI; no lingering formatting/runtime probes.
 2. Signed installer security and Go Worker E2E actual operation are green, or the incomplete feature remains safely disabled.
 3. Conflict and semantic interface review, consolidated CI, Railway image gate, and release verification PASS.
@@ -78,3 +78,13 @@ No cherry-pick into PR #15 or into production. Current review branch contains **
 - E07: T02 SHA `cba43211ba40063ae021da16039040201611f273` and absent Actions checks; see `tests/railway-platform-config.test.ts` in that commit.
 
 **Review status is not a claim of integration or release readiness.** Re-evaluate actively moving task heads and their current run conclusions before accepting any commit.
+
+## T05 verified integration actions
+
+- Accepted only **T03 SQLite security** at [`d5ca654`](https://github.com/mathew15064/mcp_worker/commit/d5ca654c8f64bab98167b7ed376aa1a2f0e0bb53), importing exact six T03 blobs from `eeea56ea69779c9d68f7120123dd1d0968030530`. T03 [CI #](https://github.com/mathew15064/mcp_worker/actions/runs/43260642364) and [release verification](https://github.com/mathew15064/mcp_worker/actions/runs/43260642367) passed.
+- Consolidated T05 candidate verification triggered: [CI 43261916556](https://github.com/mathew15064/mcp_worker/actions/runs/43261916556) and [release 43261916744](https://github.com/mathew15064/mcp_worker/actions/runs/43261916744); inspect final conclusions before claiming PASS.
+- Created [Draft T02 validation PR #20](https://github.com/mathew15064/mcp_worker/pull/20) because T02 branch had no Actions; its first [CI run 43261747973](https://github.com/mathew15064/mcp_worker/actions/runs/43261747973) failed formatting of two new Railway tests. Official Railway SDK/CLI plan remains unverified.
+- [T01 release verification 43260726883](https://github.com/mathew15064/mcp_worker/actions/runs/43260726883) failed legacy installer regression. Signed candidate has **no production-approved public key**, so Railway HTTP 503 gate must stay.
+- [T04 CI 43260146527](https://github.com/mathew15064/mcp_worker/actions/runs/43260146527) failed Go Worker non-idempotent marker assertion; later commits require independent proof.
+
+Task branches were active during review; this report deliberately pins exact source SHAs and does not imply newly pushed commits were reviewed automatically.

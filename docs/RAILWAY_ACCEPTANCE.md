@@ -6,7 +6,7 @@
 |---|---|---|
 | Baseline Node / TypeScript / lint / Chromium / Go platforms | PASS | [Baseline CI](https://github.com/mathew15064/mcp_worker/actions/runs/43208220968): 118, 116 pass, 2 skip. |
 | Baseline local Docker SQLite volume, restart, non-root, backup/restore | PASS | [Railway image CI](https://github.com/mathew15064/mcp_worker/actions/runs/43208221015). Offline disposable volume only. |
-| T03 hardened SQLite schema / migration tests | PASS | [T03 CI](https://github.com/mathew15064/mcp_worker/actions/runs/43260642364): 125 total, 123 pass, 2 skip. Its release verification and integration are separate gates. |
+| T03 hardened SQLite schema / migration tests | PASS | [T03 CI](https://github.com/mathew15064/mcp_worker/actions/runs/43260642364): 125 total, 123 pass, 2 skip. [T03 release verification](https://github.com/mathew15064/mcp_worker/actions/runs/43260642367) PASS; combined T05 checks are separate. |
 | Secure Setup, owner uniqueness and CSRF | PASS | Baseline/T03 SQLite integration tests; live Railway setup still NOT_TESTED. |
 | Session persistence and credential revocation | PASS | T03 isolated tests on temporary SQLite; live deploy not verified. |
 | Local OAuth authorization-code S256 PKCE | PASS | Baseline SQLite integration tests; true public Railway OAuth not verified. |
@@ -22,8 +22,14 @@
 | Public one-click Railway template | BLOCKED | Not published; prerequisites and live acceptance missing. |
 | Signing-key governance and release approval | BLOCKED | Real key custody, pinned public key, version and binary release not authorized. |
 | Railway storage/compute costs and owner authorization | BLOCKED | No approval for provisioning billable Railway resources. |
-| Full four-branch integration CI | NOT_TESTED | Integration candidate deliberately not built while feature gates red. |
+| Full four-branch integration CI | BLOCKED | T05 candidate includes T03 only; T01/T02/T04 excluded. Combined [CI](https://github.com/mathew15064/mcp_worker/actions/runs/43261916556) and release must finish. |
 | PR stack / upstream Vercel separation | BLOCKED | PR #15 is stacked on PR #14. Must review merge topology before merging. |
 | Production deploy / merge | BLOCKED | Explicitly outside current review authorization. |
 
 **Overall release state: NOT READY.** Keep Draft PR #15 and all signed-installer fail-closed controls unchanged.
+
+## T05 integration snapshot
+
+- **ACCEPTED:** T03 security source `eeea56ea69779c9d68f7120123dd1d0968030530`; integration candidate commit `d5ca654c8f64bab98167b7ed376aa1a2f0e0bb53`; six modified/added files.
+- **BLOCKED:** T01 signed installer CI/release, T02 real Railway SDK and CI, T04 actual Go Worker E2E.
+- No production merge, no deployment, no new billing resources, no release signing key.
