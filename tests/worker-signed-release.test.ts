@@ -150,7 +150,7 @@ void test(
     } else {
       fs.writeFileSync(
         fixture,
-        '#!/bin/sh\ncase "$1" in version|stop|uninstall) exit 0;; status) if [ "\${SIGNED_TEST_RUNNING:-0}" = 1 ]; then echo "status: RUNNING"; else echo "status: STOPPED"; fi; exit 0;; start) [ "\${SIGNED_TEST_FAIL_START:-0}" != 1 ];; *) exit 0;; esac\n',
+        '#!/bin/sh\ncase "$1" in version|stop|uninstall) exit 0;; status) if [ "${SIGNED_TEST_RUNNING:-0}" = 1 ]; then echo "status: RUNNING"; else echo "status: STOPPED"; fi; exit 0;; start) [ "${SIGNED_TEST_FAIL_START:-0}" != 1 ];; *) exit 0;; esac\n',
         { mode: 0o755 },
       );
     }
