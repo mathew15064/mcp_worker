@@ -20,7 +20,6 @@ function parseReport(stdout: string): StackReport {
   return JSON.parse(stdout) as StackReport;
 }
 
-
 function command(cwd: string, program: string, args: string[]) {
   const result = spawnSync(program, args, { cwd, encoding: 'utf8' });
   if (result.error) throw result.error;
@@ -56,9 +55,12 @@ function fixture(stacked: boolean) {
 function check(cwd: string, ...extra: string[]) {
   return command(cwd, process.execPath, [
     checker,
-    '--base', 'base',
-    '--vercel', 'vercel',
-    '--railway', 'railway',
+    '--base',
+    'base',
+    '--vercel',
+    'vercel',
+    '--railway',
+    'railway',
     '--json',
     ...extra,
   ]);
