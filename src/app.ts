@@ -8,6 +8,7 @@ import workerRoutes from './routes/workerRoutes';
 import authRoutes from './routes/authRoutes';
 import setupRoutes from './routes/setupRoutes';
 import railwaySetupRoutes from './routes/railwaySetupRoutes';
+import { canonicalRailwayOrigin } from './config/railwayOrigin';
 import accountRoutes from './routes/accountRoutes';
 import adminRoutes from './routes/adminRoutes';
 import mcpOAuthRoutes from './routes/mcpOAuthRoutes';
@@ -32,8 +33,17 @@ app.get('/healthz', (req, res) => {
 app.get('/readyz', async (req, res, next) => {
   try {
     const database = databaseManager.status();
+    let railwayOriginReady = true;
+    if (process.env.MCP_PLATFORM === 'railway') {
+      try {
+        railwayOriginReady = Boolean(canonicalRailwayOrigin());
+      } catch {
+        railwayOriginReady = false;
+      }
+    }
     const ready =
       database.operational &&
+      railwayOriginReady &&
       (process.env.MCP_PLATFORM !== 'vercel' || (await setupRoutes.isOwnerSetupComplete())) &&
       (process.env.MCP_PLATFORM !== 'railway' || (await railwaySetupRoutes.isOwnerSetupComplete()));
     // Vercel's cross-instance Worker dispatch remains under development.
@@ -44,6 +54,7 @@ app.get('/readyz', async (req, res, next) => {
       ready: ready && workerTransportReady,
       database: database.state,
       workerTransportReady,
+      railwayOriginReady,
     });
   } catch (error) {
     return next(error);
