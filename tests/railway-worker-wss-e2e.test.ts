@@ -159,7 +159,12 @@ void test('loopback WSS signs identity, rejects forgery, enforces capacity, and 
     const socket = new WebSocket(url, { ca: tls.cert, headers });
     sockets.push(socket);
     socket.on('message', (bytes) => {
-      const msg = JSON.parse(bytes.toString()) as { type?: string; job_id?: string };
+      const data = Buffer.isBuffer(bytes)
+        ? bytes
+        : Array.isArray(bytes)
+          ? Buffer.concat(bytes)
+          : Buffer.from(bytes);
+      const msg = JSON.parse(data.toString('utf8')) as { type?: string; job_id?: string };
       if (msg.type !== 'job' || !msg.job_id) return;
       jobs.push(msg.job_id);
       if (autoReply) {
