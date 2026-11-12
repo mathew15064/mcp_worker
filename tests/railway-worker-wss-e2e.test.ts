@@ -29,9 +29,21 @@ function certificate(root: string) {
   const result = spawnSync(
     'openssl',
     [
-      'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
-      '-keyout', key, '-out', cert, '-subj', '/CN=localhost',
-      '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1',
+      'req',
+      '-x509',
+      '-newkey',
+      'rsa:2048',
+      '-nodes',
+      '-days',
+      '1',
+      '-keyout',
+      key,
+      '-out',
+      cert,
+      '-subj',
+      '/CN=localhost',
+      '-addext',
+      'subjectAltName=DNS:localhost,IP:127.0.0.1',
     ],
     { encoding: 'utf8', timeout: 15000 },
   );
@@ -40,8 +52,7 @@ function certificate(root: string) {
 }
 
 function codeIs(value: string) {
-  return (error: unknown) =>
-    error instanceof Error && 'code' in error && error.code === value;
+  return (error: unknown) => error instanceof Error && 'code' in error && error.code === value;
 }
 
 async function waitUntil(check: () => boolean, limitMs = 5000) {
@@ -71,10 +82,16 @@ void test('loopback WSS signs identity, rejects forgery, enforces capacity, and 
   };
   let heartbeatCount = 0;
   const repository = {
-    async findWorkerById(id: string) { return id === workerId ? record : null; },
+    async findWorkerById(id: string) {
+      return id === workerId ? record : null;
+    },
     async updateWorkerPresence(_id: string, _status: string) {},
-    async touchWorker(_id: string) { heartbeatCount += 1; },
-    async updateWorkerCapabilities(_id: string, caps: string[]) { record.capabilities = caps; },
+    async touchWorker(_id: string) {
+      heartbeatCount += 1;
+    },
+    async updateWorkerCapabilities(_id: string, caps: string[]) {
+      record.capabilities = caps;
+    },
   };
   const auth = new WorkerAuthService({ repository: repository as never });
   const broker = new WorkerConnectionBroker({
@@ -96,13 +113,14 @@ void test('loopback WSS signs identity, rejects forgery, enforces capacity, and 
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  const signedHeaders = (signer = keys.privateKey, nonce = crypto.randomBytes(18).toString('base64url')) => {
+  const signedHeaders = (
+    signer = keys.privateKey,
+    nonce = crypto.randomBytes(18).toString('base64url'),
+  ) => {
     const timestamp = String(Date.now());
-    const signature = crypto.sign(
-      null,
-      Buffer.from(canonicalConnectMessage({ workerId, timestamp, nonce })),
-      signer,
-    ).toString('base64');
+    const signature = crypto
+      .sign(null, Buffer.from(canonicalConnectMessage({ workerId, timestamp, nonce })), signer)
+      .toString('base64');
     return {
       'x-br-worker-id': workerId,
       'x-br-worker-timestamp': timestamp,
@@ -133,9 +151,14 @@ void test('loopback WSS signs identity, rejects forgery, enforces capacity, and 
       if (msg.type !== 'job' || !msg.job_id) return;
       jobs.push(msg.job_id);
       if (autoReply) {
-        socket.send(JSON.stringify({
-          type: 'result', job_id: msg.job_id, ok: true, result: { stdout: 'T04_TRANSPORT_OK' },
-        }));
+        socket.send(
+          JSON.stringify({
+            type: 'result',
+            job_id: msg.job_id,
+            ok: true,
+            result: { stdout: 'T04_TRANSPORT_OK' },
+          }),
+        );
       }
     });
     await once(socket, 'open');
@@ -156,10 +179,9 @@ void test('loopback WSS signs identity, rejects forgery, enforces capacity, and 
   });
   assert.equal(replayStatus, 401);
 
-  assert.deepEqual(
-    await broker.dispatch(workerId, 'workspace.exec', { command: 'true' }),
-    { stdout: 'T04_TRANSPORT_OK' },
-  );
+  assert.deepEqual(await broker.dispatch(workerId, 'workspace.exec', { command: 'true' }), {
+    stdout: 'T04_TRANSPORT_OK',
+  });
   const probe = await broker.probeConnection(workerId, { timeoutMs: 1000 });
   assert.equal(probe.ok, true);
   socket.send(JSON.stringify({ type: 'heartbeat', capabilities: ['shell.inspect'] }));
@@ -168,9 +190,12 @@ void test('loopback WSS signs identity, rejects forgery, enforces capacity, and 
     () => broker.dispatch(workerId, 'workspace.exec', {}),
     codeIs('WORKER_CAPABILITY_DENIED'),
   );
-  socket.send(JSON.stringify({
-    type: 'heartbeat', capabilities: ['shell.inspect', 'workspace.exec'],
-  }));
+  socket.send(
+    JSON.stringify({
+      type: 'heartbeat',
+      capabilities: ['shell.inspect', 'workspace.exec'],
+    }),
+  );
   await waitUntil(() => record.capabilities.includes('workspace.exec'));
 
   autoReply = false;
@@ -187,11 +212,14 @@ void test('loopback WSS signs identity, rejects forgery, enforces capacity, and 
   autoReply = true;
   socket = await connect();
   await new Promise((resolve) => setTimeout(resolve, 50));
-  assert.equal(jobs.length, countAtDisconnect, 'Non-idempotent job must not replay after reconnect');
-  assert.deepEqual(
-    await broker.dispatch(workerId, 'workspace.exec', { command: 'true' }),
-    { stdout: 'T04_TRANSPORT_OK' },
+  assert.equal(
+    jobs.length,
+    countAtDisconnect,
+    'Non-idempotent job must not replay after reconnect',
   );
+  assert.deepEqual(await broker.dispatch(workerId, 'workspace.exec', { command: 'true' }), {
+    stdout: 'T04_TRANSPORT_OK',
+  });
 
   autoReply = false;
   await assert.rejects(
@@ -214,7 +242,6 @@ void test('loopback WSS signs identity, rejects forgery, enforces capacity, and 
   assert.equal(broker.pending.size, 0);
   assert.equal(broker.connections.size, 0);
 });
-
 
 /**
  * Full E2E is opt-in outside CI because it spawns a real local Worker.
@@ -274,12 +301,18 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
     child = null;
   };
   t.after(async () => {
-    try { await terminate(); } catch {}
+    try {
+      await terminate();
+    } catch {}
     broker.close();
     if (tlsServer) await new Promise<void>((resolve) => tlsServer?.close(() => resolve()));
     if (httpServer) await new Promise<void>((resolve) => httpServer?.close(() => resolve()));
-    try { await manager.close(); } catch {}
-    try { connection.closeDb(); } catch {}
+    try {
+      await manager.close();
+    } catch {}
+    try {
+      connection.closeDb();
+    } catch {}
     manager.resetForTests();
     for (const [key, value] of saved) {
       if (value === undefined) delete process.env[key];
@@ -314,8 +347,13 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
   const setupCsrf = csrf(await first.text());
   assert.ok(setupCookie && setupCsrf);
   const setup = await fetch(base + '/setup', {
-    method: 'POST', redirect: 'manual',
-    headers: { ...forwarded, cookie: setupCookie, 'content-type': 'application/x-www-form-urlencoded' },
+    method: 'POST',
+    redirect: 'manual',
+    headers: {
+      ...forwarded,
+      cookie: setupCookie,
+      'content-type': 'application/x-www-form-urlencoded',
+    },
     body: form({
       _csrf: setupCsrf,
       setup_key: vars.MCP_SETUP_SECRET,
@@ -326,17 +364,26 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
   assert.equal(setup.status, 303);
   const installer = await fetch(base + '/worker/install.sh', { headers: forwarded });
   assert.equal(installer.status, 503, 'Unsigned Railway installer must remain blocked');
-  assert.equal((await installer.json() as { code: string }).code, 'WORKER_SIGNED_RELEASE_PENDING');
+  assert.equal(
+    ((await installer.json()) as { code: string }).code,
+    'WORKER_SIGNED_RELEASE_PENDING',
+  );
 
   const login = await fetch(base + '/login', { headers: forwarded });
   assert.equal(login.status, 200);
   const loginCookie = getCookie(login);
   const loginCsrf = csrf(await login.text());
   const authenticated = await fetch(base + '/login', {
-    method: 'POST', redirect: 'manual',
-    headers: { ...forwarded, cookie: loginCookie, 'content-type': 'application/x-www-form-urlencoded' },
+    method: 'POST',
+    redirect: 'manual',
+    headers: {
+      ...forwarded,
+      cookie: loginCookie,
+      'content-type': 'application/x-www-form-urlencoded',
+    },
     body: form({
-      _csrf: loginCsrf, username: 'admin',
+      _csrf: loginCsrf,
+      username: 'admin',
       password: 'T04LocalAdminPassword2026!',
       returnTo: '/',
     }),
@@ -358,13 +405,34 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
   };
   const built = spawnSync('go', ['build', '-trimpath', '-o', executable, '.'], {
     cwd: path.join(process.cwd(), 'worker-go'),
-    env: goEnv, encoding: 'utf8', timeout: 240000,
+    env: goEnv,
+    encoding: 'utf8',
+    timeout: 240000,
   });
-  assert.equal(built.status, 0, 'Sandbox Go build failed: ' + (built.stderr || built.error || 'unknown'));
-  const enrolled = spawnSync(executable, [
-    'login', '--server', secure, '--token', enrollment.token, '--roots', workspace,
-    '--name', 'T04-Worker', '--profile', 'T04-Sandbox', '--allow-shell', '--no-start',
-  ], { cwd: workspace, env: goEnv, encoding: 'utf8', timeout: 30000 });
+  assert.equal(
+    built.status,
+    0,
+    'Sandbox Go build failed: ' + (built.stderr || built.error || 'unknown'),
+  );
+  const enrolled = spawnSync(
+    executable,
+    [
+      'login',
+      '--server',
+      secure,
+      '--token',
+      enrollment.token,
+      '--roots',
+      workspace,
+      '--name',
+      'T04-Worker',
+      '--profile',
+      'T04-Sandbox',
+      '--allow-shell',
+      '--no-start',
+    ],
+    { cwd: workspace, env: goEnv, encoding: 'utf8', timeout: 30000 },
+  );
   assert.equal(enrolled.status, 0, 'Ephemeral enrollment failed: ' + enrolled.stderr);
   const state = JSON.parse(fs.readFileSync(path.join(workerHome, 'state.json'), 'utf8')) as {
     worker_id: string;
@@ -375,7 +443,9 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
 
   const spawnWorker = () => {
     child = (require('node:child_process') as typeof import('node:child_process')).spawn(
-      executable, ['run'], { cwd: workspace, env: goEnv, stdio: 'ignore' },
+      executable,
+      ['run'],
+      { cwd: workspace, env: goEnv, stdio: 'ignore' },
     );
     return child;
   };
@@ -403,15 +473,21 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
     resource: oauthConfig.resourceUrl,
   });
   const consent = await fetch(base + '/oauth/authorize?' + params, {
-    headers: { ...forwarded, cookie: getCookie(authenticated) }, redirect: 'manual',
+    headers: { ...forwarded, cookie: getCookie(authenticated) },
+    redirect: 'manual',
   });
   assert.equal(consent.status, 200);
   const consentParams = new URLSearchParams(params);
   consentParams.set('_csrf', csrf(await consent.text()));
   consentParams.set('action', 'allow');
   const approved = await fetch(base + '/oauth/authorize', {
-    method: 'POST', redirect: 'manual',
-    headers: { ...forwarded, cookie: getCookie(authenticated), 'content-type': 'application/x-www-form-urlencoded' },
+    method: 'POST',
+    redirect: 'manual',
+    headers: {
+      ...forwarded,
+      cookie: getCookie(authenticated),
+      'content-type': 'application/x-www-form-urlencoded',
+    },
     body: consentParams.toString(),
   });
   assert.equal(approved.status, 302);
@@ -420,24 +496,38 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
   const code = redirected.searchParams.get('code');
   assert.ok(code);
   const grant = form({
-    grant_type: 'authorization_code', code,
+    grant_type: 'authorization_code',
+    code,
     redirect_uri: 'http://localhost:40000/oauth/callback',
-    resource: oauthConfig.resourceUrl, code_verifier: verifier,
+    resource: oauthConfig.resourceUrl,
+    code_verifier: verifier,
   });
   const tokenHeaders = {
-    ...forwarded, 'content-type': 'application/x-www-form-urlencoded',
-    authorization: 'Basic ' +
+    ...forwarded,
+    'content-type': 'application/x-www-form-urlencoded',
+    authorization:
+      'Basic ' +
       Buffer.from(registered.client.client_id + ':' + registered.rawSecret).toString('base64'),
   };
   const issued = await fetch(base + '/oauth/token', {
-    method: 'POST', headers: tokenHeaders, body: grant,
+    method: 'POST',
+    headers: tokenHeaders,
+    body: grant,
   });
   assert.equal(issued.status, 200);
-  const { access_token: token } = await issued.json() as { access_token: string };
+  const { access_token: token } = (await issued.json()) as { access_token: string };
   assert.match(token, /^br_at_/);
-  assert.equal((await fetch(base + '/oauth/token', {
-    method: 'POST', headers: tokenHeaders, body: grant,
-  })).status, 400, 'PKCE authorization code must be single-use');
+  assert.equal(
+    (
+      await fetch(base + '/oauth/token', {
+        method: 'POST',
+        headers: tokenHeaders,
+        body: grant,
+      })
+    ).status,
+    400,
+    'PKCE authorization code must be single-use',
+  );
 
   const request = (accessToken: string, id: number, name: string, command: string) =>
     fetch(base + '/mcp', {
@@ -449,7 +539,9 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        jsonrpc: '2.0', id, method: 'tools/call',
+        jsonrpc: '2.0',
+        id,
+        method: 'tools/call',
         params: { name, arguments: { profile: 'T04-Sandbox', command, cwd: workspace } },
       }),
     });
@@ -458,7 +550,10 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
   const call = await request(token, 2, 'workspace_exec', 'printf T04_GO_WORKER_OK');
   assert.equal(call.status, 200);
   const bodyText = await call.text();
-  const event = bodyText.split('\n').filter((line) => line.startsWith('data: ')).at(-1);
+  const event = bodyText
+    .split('\n')
+    .filter((line) => line.startsWith('data: '))
+    .at(-1);
   const payload = JSON.parse(event ? event.slice(6) : bodyText) as {
     result?: { isError?: boolean; structuredContent?: { stdout_tail?: string } };
   };
@@ -475,7 +570,11 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
   await waitUntil(() => !broker.isOnline(state.worker_id), 5000);
   spawnWorker();
   await waitUntil(() => broker.isOnline(state.worker_id), 15000);
-  assert.equal(fs.readFileSync(marker, 'utf8'), 'once\n', 'Reconnect must not replay a completed write');
+  assert.equal(
+    fs.readFileSync(marker, 'utf8'),
+    'once\n',
+    'Reconnect must not replay a completed write',
+  );
 
   // The identity remains server-side; the live socket's current capability set is authoritative.
   const active = broker.connections.get(state.worker_id);
