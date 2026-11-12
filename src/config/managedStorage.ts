@@ -4,9 +4,21 @@
 import { Redis } from '@upstash/redis';
 
 export function managedRedisConnection(env: NodeJS.ProcessEnv = process.env) {
-  const url = env.UPSTASH_REDIS_REST_URL || env.KV_REST_API_URL || '';
-  const token = env.UPSTASH_REDIS_REST_TOKEN || env.KV_REST_API_TOKEN || '';
-  if (!url || !token) return null;
+  // Never mix the URL from one integration alias with the token from another.
+  // A partially injected provider pair must fail closed rather than authenticate
+  // a different Redis endpoint using unrelated credentials.
+  const directUrl = env.UPSTASH_REDIS_REST_URL || '';
+  const directToken = env.UPSTASH_REDIS_REST_TOKEN || '';
+  const kvUrl = env.KV_REST_API_URL || '';
+  const kvToken = env.KV_REST_API_TOKEN || '';
+  const pair =
+    directUrl && directToken
+      ? { url: directUrl, token: directToken }
+      : kvUrl && kvToken
+        ? { url: kvUrl, token: kvToken }
+        : null;
+  if (!pair) return null;
+  const { url, token } = pair;
   const parsed = new URL(url);
   if (
     parsed.protocol !== 'https:' &&
@@ -18,7 +30,15 @@ export function managedRedisConnection(env: NodeJS.ProcessEnv = process.env) {
   ) {
     throw new Error('Redis REST connection must use HTTPS.');
   }
-  return { url, token };
+  if (
+    parsed.username ||
+    parsed.password ||
+    parsed.pathname !== '/' ||
+    parsed.search ||
+    parsed.hash
+  )
+    throw new Error('Invalid Redis REST endpoint.');
+  return { url: parsed.origin, token };
 }
 
 export function managedRedis(env: NodeJS.ProcessEnv = process.env) {

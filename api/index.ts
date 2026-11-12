@@ -16,9 +16,20 @@ process.env.MCP_PLATFORM = 'vercel';
 const required: string[] = [];
 if (!process.env.MCP_SETUP_SECRET || !/^[A-Za-z0-9_-]{43,}$/.test(process.env.MCP_SETUP_SECRET))
   required.push('MCP_SETUP_SECRET');
-if (!managedRedisConnection()) required.push('Upstash Redis');
+const invalid: string[] = [];
+try {
+  if (!managedRedisConnection()) required.push('Upstash Redis');
+} catch {
+  required.push('Upstash Redis');
+  invalid.push('Upstash Redis');
+}
 if (!hasManagedPostgres()) required.push('Neon PostgreSQL');
-if (!canonicalVercelOrigin()) required.push('Vercel URL');
+try {
+  if (!canonicalVercelOrigin()) required.push('Vercel URL');
+} catch {
+  required.push('Vercel URL');
+  invalid.push('Vercel URL');
+}
 const readyToStart = required.length === 0;
 
 const failClosed: RequestListener = (req, res) => {
@@ -28,7 +39,12 @@ const failClosed: RequestListener = (req, res) => {
   if (req.url === '/readyz' || req.url === '/healthz' || req.url?.startsWith('/.well-known/')) {
     res.setHeader('Content-Type', 'application/json');
     res.end(
-      JSON.stringify({ ready: false, code: 'SETUP_PREREQUISITES_MISSING', missing: required }),
+      JSON.stringify({
+        ready: false,
+        code: 'SETUP_PREREQUISITES_MISSING',
+        missing: required,
+        invalid,
+      }),
     );
     return;
   }

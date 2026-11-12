@@ -69,6 +69,26 @@ void test('Upstash Marketplace and legacy KV names are both supported without re
     url: 'https://market.upstash.io',
     token: 'two',
   });
+  assert.deepEqual(
+    managedRedisConnection({ ...direct, ...marketplace }),
+    { url: 'https://direct.upstash.io', token: 'one' },
+  );
+  assert.deepEqual(
+    managedRedisConnection({
+      UPSTASH_REDIS_REST_URL: direct.UPSTASH_REDIS_REST_URL,
+      KV_REST_API_TOKEN: marketplace.KV_REST_API_TOKEN,
+    }),
+    null,
+    'unrelated provider credentials must never be paired',
+  );
+  assert.deepEqual(
+    managedRedisConnection({
+      UPSTASH_REDIS_REST_URL: direct.UPSTASH_REDIS_REST_URL,
+      ...marketplace,
+    }),
+    { url: 'https://market.upstash.io', token: 'two' },
+    'complete legacy credentials may be used when direct integration is incomplete',
+  );
   assert.ok(managedRedis(marketplace) instanceof Redis);
   assert.equal(
     managedRedisConnection({ UPSTASH_REDIS_REST_URL: direct.UPSTASH_REDIS_REST_URL }),
@@ -94,6 +114,17 @@ void test('Upstash Marketplace and legacy KV names are both supported without re
     managedRedisConnection({ KV_REST_API_URL: 'http://127.0.0.1:8979', KV_REST_API_TOKEN: 'x' }),
     { url: 'http://127.0.0.1:8979', token: 'x' },
   );
+  for (const endpoint of [
+    'https://token@redis.example',
+    'https://redis.example/another-path',
+    'https://redis.example?password=leak',
+    'https://redis.example/#fragment',
+  ]) {
+    assert.throws(
+      () => managedRedisConnection({ KV_REST_API_URL: endpoint, KV_REST_API_TOKEN: 'x' }),
+      /Invalid Redis REST endpoint/,
+    );
+  }
 });
 
 void test('Canonical Vercel URL is automatic and cannot be replaced with a supplied request host', () => {

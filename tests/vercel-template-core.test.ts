@@ -96,3 +96,33 @@ void test('Vercel entrypoint has an explicit fail-closed prerequisite page, not 
   assert.equal(child.status, 0, child.stderr);
   assert.match(child.stdout, /FAIL_CLOSED=503/);
 });
+
+void test('invalid Marketplace URLs return actionable 503 instead of failing Function module import', () => {
+  const child = spawnSync(
+    process.execPath,
+    [
+      '-e',
+      `
+    for(const key of ['MCP_SETUP_SECRET','DATABASE_URL','POSTGRES_URL','UPSTASH_REDIS_REST_URL','UPSTASH_REDIS_REST_TOKEN','KV_REST_API_URL','KV_REST_API_TOKEN','VERCEL_PROJECT_PRODUCTION_URL','VERCEL_URL']) delete process.env[key];
+    process.env.MCP_SETUP_SECRET = 'A'.repeat(43);
+    process.env.KV_REST_API_URL = 'http://unsafe.invalid';
+    process.env.KV_REST_API_TOKEN = 'redacted';
+    process.env.VERCEL_URL = 'https://wrong.example/path';
+    const server = require('./dist/api/index.js').default;
+    server.listen(0,'127.0.0.1',async()=>{
+      try {
+        const res=await fetch('http://127.0.0.1:'+server.address().port+'/readyz');
+        const body=await res.json();
+        if(res.status!==503 || body.code!=='SETUP_PREREQUISITES_MISSING')process.exitCode=2;
+        if(JSON.stringify(body.invalid)!=='["Upstash Redis","Vercel URL"]')process.exitCode=3;
+        if(JSON.stringify(body).includes('redacted'))process.exitCode=4;
+        console.log('INVALID_CONFIG_503='+String(res.status));
+      } finally { server.close(); }
+    });
+  `,
+    ],
+    { encoding: 'utf8', timeout: 8000, cwd: process.cwd(), env: { ...process.env } },
+  );
+  assert.equal(child.status, 0, child.stderr);
+  assert.match(child.stdout, /INVALID_CONFIG_503=503/);
+});
