@@ -46,6 +46,13 @@ class MemoryRedis {
     return Promise.resolve(1);
   }
   eval(_script: string, keys: string[], args: string[]): Promise<number> {
+    if (_script.includes('RPUSH')) {
+      const list = this.lists.get(keys[0]) || [];
+      if (list.length >= Number(args[1])) return Promise.resolve(-1);
+      list.push(args[0]);
+      this.lists.set(keys[0], list);
+      return Promise.resolve(list.length);
+    }
     if (this.values.get(keys[0]) !== args[0]) return Promise.resolve(0);
     if (_script.includes('DEL')) return this.del(keys[0]);
     return Promise.resolve(this.values.has(keys[0]) ? 1 : 0);
@@ -164,5 +171,124 @@ void test('owner lease renewal/release cannot override newer connections', async
     await a.close();
     await b.close();
     await outsider.close();
+  }
+});
+
+void test('two independent owners sharing a Redis endpoint cannot route Worker jobs across instances', async () => {
+  const memory = new MemoryRedis();
+  const redis = memory as unknown as Redis;
+  const workerId = crypto.randomUUID();
+  const options = { redis, pollIntervalMs: 100 };
+  const ownerA = new DistributedWorkerRelay({
+    ...options,
+    privateSeed: 'A'.repeat(43),
+    localDispatch: () => Promise.resolve('owner-A'),
+  });
+  const ownerB = new DistributedWorkerRelay({
+    ...options,
+    privateSeed: 'B'.repeat(43),
+    localDispatch: () => Promise.resolve('owner-B'),
+  });
+  const clientA = new DistributedWorkerRelay({
+    ...options,
+    privateSeed: 'A'.repeat(43),
+    localDispatch: () => Promise.reject(new Error('not local')),
+  });
+  const clientB = new DistributedWorkerRelay({
+    ...options,
+    privateSeed: 'B'.repeat(43),
+    localDispatch: () => Promise.reject(new Error('not local')),
+  });
+  try {
+    assert.notEqual(ownerA.prefix, ownerB.prefix);
+    await ownerA.register(workerId);
+    await ownerB.register(workerId);
+    const [answerA, answerB] = await Promise.all([
+      clientA.dispatch(workerId, 'workspace.exec', {}, { timeoutMs: 2500, enforceCapability: true }),
+      clientB.dispatch(workerId, 'workspace.exec', {}, { timeoutMs: 2500, enforceCapability: true }),
+    ]);
+    assert.equal(answerA, 'owner-A');
+    assert.equal(answerB, 'owner-B');
+    await ownerA.unregister(workerId);
+    assert.equal(await clientA.isOnline(workerId), false);
+    assert.equal(await clientB.isOnline(workerId), true);
+    await assert.rejects(
+      () => clientA.dispatch(workerId, 'workspace.exec', {}, { timeoutMs: 100, enforceCapability: true }),
+      (error: unknown) => error instanceof Error && 'code' in error && error.code === 'WORKER_OFFLINE',
+    );
+  } finally {
+    await Promise.allSettled([ownerA.close(), ownerB.close(), clientA.close(), clientB.close()]);
+  }
+});
+
+void test('cross-Function queue admission stays bounded under concurrent dispatch', async () => {
+  const memory = new MemoryRedis();
+  const redis = memory as unknown as Redis;
+  const relay = new DistributedWorkerRelay({
+    redis,
+    privateSeed: 'Q'.repeat(43),
+    localDispatch: () => Promise.resolve(null),
+  });
+  const workerId = crypto.randomUUID();
+  const target = '00000000-0000-4000-8000-000000000000';
+  const key = relay.prefix + 'queue:' + target;
+  try {
+    await redis.set(relay.prefix + 'route:' + workerId, target);
+    memory.lists.set(key, Array(127).fill('{}'));
+    const result = await Promise.allSettled(
+      Array.from({ length: 10 }, () =>
+        relay.dispatch(workerId, 'workspace.exec', {}, { timeoutMs: 100, enforceCapability: true }),
+      ),
+    );
+    assert.equal(memory.lists.get(key)?.length, 128);
+    assert.equal(
+      result.filter((entry) => entry.status === 'rejected' && 'code' in entry.reason && entry.reason.code === 'WORKER_BUSY').length,
+      9,
+    );
+    assert.equal(
+      result.filter((entry) => entry.status === 'rejected' && 'code' in entry.reason && entry.reason.code === 'WORKER_JOB_TIMEOUT').length,
+      1,
+    );
+  } finally {
+    await relay.close();
+  }
+});
+
+void test('relay consumer refuses an injected capability-bypassing operation', async () => {
+  const memory = new MemoryRedis();
+  const redis = memory as unknown as Redis;
+  const workerId = crypto.randomUUID();
+  let calls = 0;
+  const relay = new DistributedWorkerRelay({
+    redis,
+    privateSeed: 'R'.repeat(43),
+    pollIntervalMs: 100,
+    localDispatch: () => {
+      calls += 1;
+      return Promise.resolve('wrong');
+    },
+  });
+  try {
+    await relay.register(workerId);
+    const id = 'r_' + crypto.randomUUID();
+    await redis.rpush(
+      relay.prefix + 'queue:' + relay.instanceId,
+      JSON.stringify({
+        id, workerId, operation: 'workspace.exec', payload: {},
+        timeoutMs: 1000, enforceCapability: false,
+      }),
+    );
+    const answerKey = relay.prefix + 'answer:' + id;
+    let answer: { ok?: boolean; error?: { code?: string } } | null = null;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      answer = await redis.get(answerKey);
+      if (answer) break;
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    }
+    assert.equal(calls, 0);
+    assert.equal(answer?.ok, false);
+    assert.equal(answer?.error?.code, 'WORKER_CONTROL_OPERATION_DENIED');
+  } finally {
+    await relay.close();
   }
 });

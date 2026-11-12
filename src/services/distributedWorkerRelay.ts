@@ -52,6 +52,12 @@ const LEASE_TOUCH =
   'if redis.call("GET",KEYS[1]) == ARGV[1] then return redis.call("EXPIRE",KEYS[1],ARGV[2]) else return 0 end';
 const LEASE_DELETE =
   'if redis.call("GET",KEYS[1]) == ARGV[1] then return redis.call("DEL",KEYS[1]) else return 0 end';
+// Bound admission and expiry are one Redis operation. A separate LLEN followed
+// by RPUSH lets concurrent Vercel Functions all pass the same capacity check.
+const QUEUE_PUSH =
+  'if redis.call("LLEN",KEYS[1]) >= tonumber(ARGV[2]) then return -1 end ' +
+  'local size = redis.call("RPUSH",KEYS[1],ARGV[1]); ' +
+  'redis.call("EXPIRE",KEYS[1],tonumber(ARGV[3])); return size';
 
 const fail = (code: string, message: string, status = 503): Error =>
   Object.assign(new Error(message), { code, status });
@@ -295,6 +301,9 @@ export class DistributedWorkerRelay {
       typeof req.payload !== 'object' ||
       Array.isArray(req.payload) ||
       typeof req.timeoutMs !== 'number' ||
+      !Number.isFinite(req.timeoutMs) ||
+      req.timeoutMs < 100 ||
+      req.timeoutMs > 240_000 ||
       typeof req.enforceCapability !== 'boolean'
     )
       return;
@@ -305,6 +314,10 @@ export class DistributedWorkerRelay {
         (await this.redis.get<string>(this.route(req.workerId))) !== this.instanceId
       )
         throw fail('WORKER_DISCONNECTED', 'Worker connection is no longer current.');
+      // Control operations bypass capabilities only for the one approved action.
+      // Do not trust an enqueued flag without revalidating it at the consumer.
+      if (!req.enforceCapability && req.operation !== 'worker.self_uninstall')
+        throw fail('WORKER_CONTROL_OPERATION_DENIED', 'Unsupported worker control operation.', 403);
       const value = await this.localDispatch(req.workerId, req.operation, req.payload, {
         timeoutMs: req.timeoutMs,
         enforceCapability: req.enforceCapability,
@@ -359,10 +372,16 @@ export class DistributedWorkerRelay {
     if (Buffer.byteLength(json, 'utf8') > 768 * 1024)
       throw fail('WORKER_REQUEST_TOO_LARGE', 'Worker request exceeds relay limit.', 413);
     const queueKey = this.prefix + 'queue:' + owner;
-    const size = await this.redis.llen(queueKey);
-    if (size >= 128) throw fail('WORKER_BUSY', 'Worker queue is busy.', 429);
-    await this.redis.rpush(queueKey, json);
-    await this.redis.expire(queueKey, Math.ceil(timeout / 1000) + 30);
+    const size = Number(
+      await this.redis.eval(QUEUE_PUSH, [queueKey], [
+        json,
+        '128',
+        String(Math.ceil(timeout / 1000) + 30),
+      ]),
+    );
+    if (size === -1) throw fail('WORKER_BUSY', 'Worker queue is busy.', 429);
+    if (!Number.isInteger(size) || size < 1)
+      throw fail('WORKER_RELAY_STORE_UNAVAILABLE', 'Worker queue admission failed.');
     // Notification is an optimization; the queue stays authoritative.
     await this.redis.publish(this.channel(owner), 'new-job').catch(() => {});
 
