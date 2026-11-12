@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { Redis } from '@upstash/redis';
+import { managedRedis, managedRedisConnection } from '../config/managedStorage';
 import type { WorkerPayload } from './workerProtocol';
 
 /**
@@ -102,7 +103,7 @@ export class DistributedWorkerRelay {
   private subscriptionTask: Promise<void> | null = null;
 
   constructor({
-    redis = Redis.fromEnv(),
+    redis = managedRedis(),
     privateSeed = process.env.MCP_SETUP_SECRET || '',
     localDispatch,
     onLeaseLost,
@@ -123,7 +124,7 @@ export class DistributedWorkerRelay {
     this.useRealtimeNotification =
       process.env.MCP_PLATFORM === 'vercel' &&
       redis instanceof Redis &&
-      Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+      Boolean(managedRedisConnection());
   }
 
   private route(workerId: string) {
@@ -201,8 +202,9 @@ export class DistributedWorkerRelay {
   }
 
   private async subscriptionLoop() {
-    const base = process.env.UPSTASH_REDIS_REST_URL || '';
-    const token = process.env.UPSTASH_REDIS_REST_TOKEN || '';
+    const creds = managedRedisConnection();
+    const base = creds?.url || '';
+    const token = creds?.token || '';
     if (!base || !token) return;
     while (this.connected.size) {
       const controller = new AbortController();

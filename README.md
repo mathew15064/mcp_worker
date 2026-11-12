@@ -15,6 +15,18 @@ credentials. Browser SSH/terminal consoles and user/admin SSH Profiles are remov
 The Admin UI focuses on OAuth Clients, Workers (including Execution Targets), Audit
 and system settings. The terminal_list tool still lists Worker aliases for compatibility.
 
+## Two-screen Vercel Quickstart (beta — not a production release)
+
+[![Deploy to Vercel — development beta](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fmathew15064%2Fmcp_worker%2Ftree%2Ffeature%2Fvercel-selfhost-20261112&project-name=mcp-worker-private&repository-name=mcp-worker-private&env=MCP_SETUP_SECRET&envDescription=Enter+one+freshly+generated+private+43-character+base64url+key.+Keep+it+in+your+password+manager%3B+it+protects+your+independent+instance.&envLink=https%3A%2F%2Fgithub.com%2Fmathew15064%2Fmcp_worker%2Fblob%2Ffeature%2Fvercel-selfhost-20261112%2Fdocs%2FVERCEL_QUICKSTART.md&products=%5B%7B%22type%22%3A%22integration%22%2C%22protocol%22%3A%22storage%22%2C%22productSlug%22%3A%22neon%22%2C%22integrationSlug%22%3A%22neon%22%7D%2C%7B%22type%22%3A%22integration%22%2C%22protocol%22%3A%22storage%22%2C%22productSlug%22%3A%22upstash-kv%22%2C%22integrationSlug%22%3A%22upstash%22%7D%5D)
+
+**Deploy → Secure Setup → Dashboard.** Neon and Upstash are requested in
+the Vercel Deploy flow. One private owner-generated key is entered during
+Deploy and again when claiming the Admin account. The database and Redis
+credentials are automatically injected; no SSH or manual `.env` editing.
+
+[Read the two-screen guide](docs/VERCEL_QUICKSTART.md). Not yet suitable
+for production until live Worker WSS and signed installer tests pass.
+
 ## Version and release policy
 
 The published V2 main branch is the historical baseline; this Worker-only refactor exposes 15 MCP tools over outbound Go Worker transport. Stable releases will use versioned Git tags. This repository contains the V2 source release candidate. Public source access does not imply a stable signed release. See [the public release roadmap](docs/PUBLIC_RELEASE_ROADMAP.md).

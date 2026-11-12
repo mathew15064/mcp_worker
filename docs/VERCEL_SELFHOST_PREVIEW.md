@@ -56,25 +56,29 @@ the original author or other forks.
 5. **No external security/release approval**, signed artifacts or GitHub
    source sync. The source branch is not a public template yet.
 
-## Intended consumer deployment flow
+## Two-screen Quickstart beta
 
-1. Click Deploy with Vercel on the public, reviewed release (not enabled yet).
-2. Vercel clones source into a new repository and project.
-3. Add managed Neon and Upstash to that project via Marketplace. Vercel
-   injects POSTGRES_URL or DATABASE_URL and UPSTASH_REDIS_REST_URL/TOKEN.
-   The new owner must approve their providers/plans, including any charges.
-4. Configure a unique MCP_SETUP_SECRET in Vercel's protected Project
-   Environment Variables before deploying. It must be a random 43+ character
-   base64url key from a trusted password manager or secure random generator.
-   Never use the example key, save it in Git, paste it in chat, or share it
-   with the author. This is the **one unavoidable manual secret** that proves
-   the deployer controls the project.
-5. Once runtime checks pass, open /setup, provide that secret and choose a
-   distinct, strong Admin password. The wizard saves only the password hash
-   and locks further owner claims.
-6. Open OAuth Clients, create a ChatGPT client, and enroll a Worker whose
-   binary and identity are local to that owner. Test authenticated MCP
-   tools/list, runtime_info and workspace_exec.
+The new `vercel-template.json` requests Neon Postgres and Upstash Redis
+as **two managed products in the Vercel Deploy flow**, preselected via
+the Deploy Button `products` query parameter. The user approves their own
+provider plan and any charges. Vercel injects storage connection variables
+automatically; no database URL or Redis token is manually pasted.
+
+The Deploy Button additionally requests one **`MCP_SETUP_SECRET`** field
+filled privately by the new owner inside the Vercel deployment form.
+Secrets are **never passed as values in URL parameters or public defaults**.
+Compatible Upstash environment aliases are detected at runtime
+(`UPSTASH_REDIS_REST_URL/TOKEN` or `KV_REST_API_URL/TOKEN`), and the
+canonical origin is derived from Vercel's system environment.
+
+After deployment, the owner opens `/setup`, enters that same secret and
+creates a unique Admin password. Database initialization and password
+hashing happen in the app, and further owner claims are permanently locked.
+
+The source button and exact workflow are documented in
+[VERCEL_QUICKSTART.md](VERCEL_QUICKSTART.md). **This is a developer preview,
+not a supported production release**; the Worker binary installer and
+real provider/WSS isolation acceptance gates below remain outstanding.
 
 ## GitHub / Vercel authorization prerequisite
 

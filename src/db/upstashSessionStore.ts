@@ -1,6 +1,7 @@
 import session, { type SessionData } from 'express-session';
 import crypto from 'node:crypto';
-import { Redis } from '@upstash/redis';
+import type { Redis } from '@upstash/redis';
+import { managedRedis } from '../config/managedStorage';
 
 type Callback = (error?: unknown) => void;
 type GetCallback = (error: unknown, data?: SessionData | null) => void;
@@ -14,12 +15,11 @@ export class UpstashSessionStore extends session.Store {
   private readonly prefix: string;
   constructor() {
     super();
-    if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN)
-      throw new Error('MCP_SETUP_REQUIRES_REDIS: connect Upstash Redis in Vercel Storage.');
+
     const seed = process.env.MCP_SETUP_SECRET || '';
     if (seed.length < 43)
       throw new Error('MCP_SETUP_SECRET must be a random 43+ character secret.');
-    this.redis = Redis.fromEnv();
+    this.redis = managedRedis();
     this.prefix =
       'mw:session:' + crypto.createHash('sha256').update(seed).digest('hex').slice(0, 20) + ':';
   }

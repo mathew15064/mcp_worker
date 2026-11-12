@@ -1,12 +1,14 @@
 import databaseManager from '../db/databaseManager';
 import type { DatabaseAdapter } from '../db/contracts';
 
+import { canonicalVercelOrigin } from '../config/managedStorage';
+
 const DEFAULTS = Object.freeze({
   'mcp.enabled': process.env.MCP_ENABLED !== 'false' ? 'true' : 'false',
   'mcp.public_base_url': String(
     process.env.MCP_PUBLIC_BASE_URL ||
-      (process.env.MCP_PLATFORM === 'vercel' && process.env.VERCEL_PROJECT_PRODUCTION_URL
-        ? 'https://' + process.env.VERCEL_PROJECT_PRODUCTION_URL
+      (process.env.MCP_PLATFORM === 'vercel'
+        ? canonicalVercelOrigin() || 'http://localhost:3333'
         : 'http://localhost:3333'),
   ).replace(/\/+$/, ''),
   'mcp.access_token_ttl_seconds': String(
@@ -96,8 +98,8 @@ class RuntimeSettingsService {
     } catch (_) {}
     const existing = new Set(rows.map((row) => String(row.key)));
     const currentBase = String(
-      (process.env.MCP_PLATFORM === 'vercel' && process.env.VERCEL_PROJECT_PRODUCTION_URL
-        ? 'https://' + process.env.VERCEL_PROJECT_PRODUCTION_URL
+      (process.env.MCP_PLATFORM === 'vercel'
+        ? canonicalVercelOrigin()
         : process.env.MCP_PUBLIC_BASE_URL) || DEFAULTS['mcp.public_base_url'],
     ).replace(/\/+$/, '');
     const seed = { ...DEFAULTS, 'mcp.public_base_url': currentBase };

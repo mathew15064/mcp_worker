@@ -84,7 +84,7 @@ router.get('/setup', async (req, res, next) => {
       .type('html')
       .send(
         page(
-          `<p>Neon is connected. Finish setup once, using the private setup key you entered in your Vercel Project environment settings.</p><form action="/setup" method="post"><input type="hidden" name="_csrf" value="${safe(csrf)}"><label>Private setup key<input name="setup_key" type="password" autocomplete="off" minlength="43" required></label><label>Admin password (14+ characters)<input name="password" type="password" autocomplete="new-password" minlength="14" maxlength="256" required></label><label>Confirm password<input name="confirm_password" type="password" autocomplete="new-password" minlength="14" maxlength="256" required></label><button type="submit">Create private instance</button></form>`,
+          `<p>Neon is connected. Finish setup once, using the private setup key you entered during Deploy (and saved in your password manager).</p><form action="/setup" method="post"><input type="hidden" name="_csrf" value="${safe(csrf)}"><label>Private setup key<input name="setup_key" type="password" autocomplete="off" minlength="43" required></label><label>Admin password (14+ characters)<input name="password" type="password" autocomplete="new-password" minlength="14" maxlength="256" required></label><label>Confirm password<input name="confirm_password" type="password" autocomplete="new-password" minlength="14" maxlength="256" required></label><button type="submit">Create private instance</button></form>`,
           csrf,
         ),
       );
