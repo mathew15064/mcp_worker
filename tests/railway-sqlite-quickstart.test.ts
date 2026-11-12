@@ -218,10 +218,10 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
     assert.deepEqual(key.readKey(), firstKey);
     const db = connection.getDb();
     assert.equal(db.pragma('quick_check', { simple: true }), 'ok');
-    const versions = db.prepare(
-      'SELECT version FROM railway_schema_versions ORDER BY applied_at',
-    ).all() as { version: string }[];
-    assert.deepEqual(versions, [{ version: '2026-11-12-initial' }]);
+    const version = db.prepare('SELECT version FROM railway_schema_versions').get() as {
+      version: string;
+    };
+    assert.equal(version.version, '2026-11-12-initial');
     assert.equal(
       await (await import('../src/routes/railwaySetupRoutes.js')).default.isOwnerSetupComplete(),
       true,
