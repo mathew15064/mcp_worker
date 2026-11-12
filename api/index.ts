@@ -3,7 +3,7 @@
  * Do not import the application until per-instance secret and Redis are present:
  * failing closed must not accidentally create process-memory sessions.
  */
-import { createServer } from 'node:http';
+import { createServer, type Server as HttpServer } from 'node:http';
 import type { RequestListener } from 'node:http';
 
 process.env.MCP_PLATFORM = 'vercel';
@@ -35,6 +35,7 @@ const failClosed: RequestListener = (req, res) => {
 };
 
 let serve: RequestListener = failClosed;
+let server: HttpServer;
 let init: Promise<void> = Promise.resolve();
 
 if (readyToStart) {
@@ -66,9 +67,11 @@ if (readyToStart) {
         }
       });
   };
-  const server = createServer((req, res) => serve(req, res));
+  server = createServer((req, res) => serve(req, res));
   workerBroker.attach(server);
-  module.exports = server;
 } else {
-  module.exports = createServer(failClosed);
+  server = createServer(failClosed);
 }
+
+// Standard Vercel Node.js WebSocket Function export.
+export default server;

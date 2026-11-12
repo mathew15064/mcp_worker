@@ -76,7 +76,7 @@ void test('Vercel entrypoint has an explicit fail-closed prerequisite page, not 
       '-e',
       `
     for(const key of ['MCP_SETUP_SECRET','DATABASE_URL','POSTGRES_URL','UPSTASH_REDIS_REST_URL','UPSTASH_REDIS_REST_TOKEN','VERCEL_PROJECT_PRODUCTION_URL']) delete process.env[key];
-    const server = require('./dist/api/index.js');
+    const server = require('./dist/api/index.js').default;
     server.listen(0,'127.0.0.1',async()=>{
       const res=await fetch('http://127.0.0.1:'+server.address().port+'/readyz');
       const body=await res.json();

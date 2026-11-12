@@ -25,6 +25,7 @@ interface Notifier {
   sendWorkerResourceAlert(value: AlertPayload): unknown;
 }
 import ownerNotificationService from './ownerNotificationService';
+import { DistributedWorkerRelay } from './distributedWorkerRelay';
 type WorkerRecord = NonNullable<Awaited<ReturnType<typeof workerRepository.findWorkerById>>>;
 type WorkerSocket = WebSocket & { workerId?: string; worker?: WorkerRecord };
 type WorkerRequest = IncomingMessage & { workerAuth?: { worker: WorkerRecord } };
@@ -112,6 +113,7 @@ class WorkerConnectionBroker {
   wss: WebSocketServer | null;
   server: HttpServer | null;
   upgradeHandler: ((request: WorkerRequest, socket: Duplex, head: Buffer) => void) | null;
+  distributed: DistributedWorkerRelay | null;
   constructor({
     authService = workerAuthService,
     repository = workerRepository,
@@ -142,6 +144,18 @@ class WorkerConnectionBroker {
     this.wss = null;
     this.server = null;
     this.upgradeHandler = null;
+    this.distributed =
+      process.env.MCP_PLATFORM === 'vercel'
+        ? new DistributedWorkerRelay({
+            localDispatch: (workerId, operation, payload, opts) =>
+              this.dispatchInternal(workerId, operation, payload, {
+                ...opts,
+                remoteAllowed: false,
+              }),
+            onLeaseLost: (workerId) =>
+              this.disconnect(workerId, { code: 4001, reason: 'distributed-connection-replaced' }),
+          })
+        : null;
   }
 
   attach(server: HttpServer) {
@@ -212,6 +226,11 @@ class WorkerConnectionBroker {
     }
     ws.workerId = workerId;
     ws.worker = worker;
+    if (this.distributed) {
+      void this.distributed.register(workerId).catch(() => {
+        this.disconnect(workerId, { code: 1011, reason: 'redis-unavailable' });
+      });
+    }
     Promise.resolve(this.repository.updateWorkerPresence(workerId, 'online')).catch(() => {});
 
     try {
@@ -346,6 +365,7 @@ class WorkerConnectionBroker {
     if (!ws?.workerId) return;
     if (this.connections.get(ws.workerId) === ws) {
       this.connections.delete(ws.workerId);
+      if (this.distributed) void this.distributed.unregister(ws.workerId).catch(() => {});
       Promise.resolve(this.repository.updateWorkerPresence(ws.workerId, 'offline')).catch(() => {});
     }
     for (const [jobId, pending] of this.pending.entries()) {
@@ -373,6 +393,11 @@ class WorkerConnectionBroker {
   isOnline(workerId: string) {
     const ws = this.connections.get(workerId);
     return Boolean(ws && ws.readyState === WebSocket.OPEN);
+  }
+
+  async isOnlineDistributed(workerId: string): Promise<boolean> {
+    if (this.isOnline(workerId)) return true;
+    return this.distributed ? this.distributed.isOnline(workerId) : false;
   }
 
   // Ping the live outbound WebSocket. Offline Workers cannot receive commands.
@@ -501,9 +526,22 @@ class WorkerConnectionBroker {
     {
       timeoutMs = null,
       enforceCapability = true,
-    }: DispatchOptions & { enforceCapability?: boolean } = {},
+      remoteAllowed = true,
+    }: DispatchOptions & { enforceCapability?: boolean; remoteAllowed?: boolean } = {},
   ): Promise<T> {
     const ws = this.connections.get(workerId);
+    if ((!ws || ws.readyState !== WebSocket.OPEN) && this.distributed && remoteAllowed) {
+      const worker = await this.repository.findWorkerById(workerId);
+      if (!worker) throw brokerError('WORKER_NOT_FOUND', 'Worker not found.', 404);
+      if (!worker.enabled)
+        throw brokerError('WORKER_DISABLED', 'Worker identity is disabled.', 403);
+      if (enforceCapability && !worker.capabilities.includes(operation))
+        throw brokerError('WORKER_CAPABILITY_DENIED', 'Worker does not allow this operation.', 403);
+      return this.distributed.dispatch<T>(workerId, operation, payload, {
+        timeoutMs: Math.max(100, Math.min(Number(timeoutMs) || this.defaultTimeoutMs, 240000)),
+        enforceCapability,
+      });
+    }
     if (!ws || ws.readyState !== WebSocket.OPEN)
       throw brokerError('WORKER_OFFLINE', 'Worker is not connected.');
     const worker = await this.repository.findWorkerById(workerId);
@@ -652,6 +690,7 @@ class WorkerConnectionBroker {
     this.wss = null;
     this.server = null;
     this.upgradeHandler = null;
+    if (this.distributed) void this.distributed.close().catch(() => {});
   }
 }
 

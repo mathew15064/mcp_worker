@@ -105,7 +105,7 @@ async function requireActiveOwnedWorker(workerId: string, ownerUserId: string) {
   const worker = await workerRepo.findWorkerByIdForOwner(workerId, ownerUserId);
   if (!worker)
     throw Object.assign(new Error('Worker not found.'), { code: 'WORKER_NOT_FOUND', status: 404 });
-  if (!worker.enabled || worker.status !== 'online' || !workerBroker.isOnline(worker.id)) {
+  if (!worker.enabled || !(await workerBroker.isOnlineDistributed(worker.id))) {
     throw Object.assign(new Error('Execution targets require an enabled, online Worker.'), {
       code: 'WORKER_NOT_ONLINE',
       status: 409,
@@ -200,12 +200,14 @@ router.get('/account/workers/connection-status', async (req, res, next) => {
         ? await workerBroker.probeConnection(checkId)
         : null;
     return res.json({
-      workers: workers.map((worker) => ({
-        id: worker.id,
-        enabled: worker.enabled,
-        connected: worker.enabled && workerBroker.isOnline(worker.id),
-        last_seen_at: worker.last_seen_at,
-      })),
+      workers: await Promise.all(
+        workers.map(async (worker) => ({
+          id: worker.id,
+          enabled: worker.enabled,
+          connected: worker.enabled && (await workerBroker.isOnlineDistributed(worker.id)),
+          last_seen_at: worker.last_seen_at,
+        })),
+      ),
       probe: probe ? { id: checkId, ...probe } : null,
     });
   } catch (error) {
@@ -217,12 +219,17 @@ router.get('/account/workers', async (req, res, next) => {
   try {
     return res.type('html').send(
       workersPage({
-        workers: (await workerRepo.listWorkersByOwner(req.currentUser.id))
-          .filter((item): item is NonNullable<typeof item> => item !== null)
-          .map((worker) => ({
-            ...worker,
-            status: worker.enabled && workerBroker.isOnline(worker.id) ? 'online' : 'offline',
-          })),
+        workers: await Promise.all(
+          (await workerRepo.listWorkersByOwner(req.currentUser.id))
+            .filter((item): item is NonNullable<typeof item> => item !== null)
+            .map(async (worker) => ({
+              ...worker,
+              status:
+                worker.enabled && (await workerBroker.isOnlineDistributed(worker.id))
+                  ? ('online' as const)
+                  : ('offline' as const),
+            })),
+        ),
         profiles: (await workerRepo.listProfilesByOwner(req.currentUser.id)).filter(
           (profile): profile is NonNullable<typeof profile> => profile !== null,
         ),

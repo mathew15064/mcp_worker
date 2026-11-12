@@ -34,21 +34,22 @@ the original author or other forks.
 
 ## Why the public Deploy Button is still blocked
 
-1. **Distributed Worker broker** is incomplete. WebSocket connections on
-   Vercel Functions are tied to one Function instance, and other instances
-   cannot dispatch to that local in-memory Worker map. Redis presence/queue,
-   cross-instance job delivery, reconnect, timeouts and multi-instance tests
-   are still required. Existing single-process broker is not safe to claim as
-   fully operational on Vercel. The Vercel HTTP readiness endpoint must be
-   kept unready until this is solved.
-2. **Installer artifacts**: Go Worker binaries are not in Git. The Docker
-   distribution bundles precompiled Worker binaries, while a fresh Vercel
-   GitHub clone currently has only worker/bin/.gitkeep. A versioned,
-   checksum-verified and preferably signed Worker release distribution must be
-   implemented before installers can succeed.
-3. **End-to-end owner setup** is not yet accepted on a deployed Vercel project.
-   A local simulation returned 503 during setup and requires further
-   investigation. PostgreSQL migrations alone have passed.
+1. **Production distributed Worker acceptance remains incomplete.** This branch
+   implements Redis connection leases, cross-instance job queues and results,
+   capability enforcement, SSE notifications and fallback polling. Two
+   simulated Function instances can pass a Worker MCP job and reject forbidden
+   capabilities. Real Upstash SSE, Vercel WebSocket duration/reconnect, queue
+   retries and provider cost must still pass live acceptance. The Vercel
+   readiness endpoint intentionally remains 503 until then.
+2. **Installer artifacts are still unavailable** in a fresh Git clone.
+   The new manual GitHub Actions Worker artifact workflow can build and verify
+   cross-platform binaries, but does not publish or sign them. A versioned,
+   signed or attested GitHub release and verified installer retrieval still
+   need implementation before Worker installation can succeed.
+3. **Live owner setup acceptance remains pending.** A PostgreSQL SQL conversion
+   issue was fixed. A clean PostgreSQL 16 database plus a local Upstash Redis
+   REST mock now completes migration, private owner claim, Admin login and
+   locked setup. Genuine Upstash and Vercel HTTPS remain unverified.
 4. **No independent two-owner isolation test** or OAuth/PKCE+WSS tool call on
    real Vercel. Verify that two fresh GitHub/Vercel projects have distinct
    databases, Redis, tokens and encryption keys and cannot access each other.
@@ -93,12 +94,17 @@ the original author or other forks.
 
 ## Current verification
 
-- npm run typecheck: pass
-- npm test: 101 tests, 96 pass, 5 skipped, 0 failed (before additional tests)
-- npm run build:vercel: pass; public/assets includes admin.js and admin.css
-- PostgreSQL 16: 13/13 existing schema migrations applied successfully
-- Independent Vercel deployment, distributed Worker MCP, owner wizard and
-  binary installer from a fresh clone: **NOT VERIFIED**
+- TypeScript build/typecheck: pass
+- Node regression tests: 103 tests, 98 pass, 5 skipped, no failures
+- Chromium browser tests: 12/12 pass
+- Quality baseline: no new lint/format debt
+- PostgreSQL 16: 13/13 schema migrations applied
+- Blank PostgreSQL database with simulated Upstash REST: secure claim, login,
+  locked setup and 15 MCP tool catalog pass
+- Distributed relay with two simulated Function instances: successful job,
+  rejected forbidden capability, protected lease transitions
+- Independent Vercel deployment with genuine Neon/Upstash, real Worker WSS
+  and verified installer from a fresh clone: **NOT YET VERIFIED**
 
 ## References
 

@@ -15,7 +15,7 @@ function sqlError(error: unknown): unknown {
 export function postgresSql(source: string): string {
   let sql = source
     .replace(/`([^`]+)`/g, '"$1"')
-    .replace(/DATABASE\(\)/gi, 'current_schema()')
+    .replace(/\bDATABASE\(\)/gi, 'current_schema()')
     .replace(/\bLONGTEXT\b/gi, 'TEXT')
     .replace(/\bTINYINT\(1\)/gi, 'SMALLINT')
     .replace(/\bINT\b/gi, 'INTEGER')

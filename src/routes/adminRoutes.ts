@@ -92,7 +92,7 @@ async function requireActiveAdminWorker(workerId: string) {
       code: 'WORKER_NOT_FOUND',
       status: 404,
     });
-  if (!worker.enabled || !workerBroker.isOnline(worker.id)) {
+  if (!worker.enabled || !(await workerBroker.isOnlineDistributed(worker.id))) {
     throw Object.assign(new Error('Execution targets require an enabled, online Worker.'), {
       code: 'WORKER_NOT_ONLINE',
       status: 409,
@@ -215,11 +215,17 @@ router.get('/admin/onboarding', async (req, res, next) => {
         oauthRepo.hasAdminRuntimeCall(),
       ]);
       const activeWorkerIds = new Set(
-        workers
-          .filter(
-            (w): w is NonNullable<typeof w> =>
-              w !== null && w.enabled && workerBroker.isOnline(w.id),
+        (
+          await Promise.all(
+            workers
+              .filter((w): w is NonNullable<typeof w> => w !== null && w.enabled)
+              .map(async (w) => ({
+                id: w.id,
+                online: await workerBroker.isOnlineDistributed(w.id),
+              })),
           )
+        )
+          .filter((w) => w.online)
           .map((w) => w.id),
       );
       workerReady = profiles.some(
@@ -484,13 +490,16 @@ router.get('/admin/workers/connection-status', requireDataStore, async (req, res
         ? await workerBroker.probeConnection(checkId)
         : null;
     res.set('Cache-Control', 'no-store');
-    return res.json({
-      workers: workers.map((worker) => ({
+    const status = await Promise.all(
+      workers.map(async (worker) => ({
         id: worker.id,
         enabled: worker.enabled,
-        connected: worker.enabled && workerBroker.isOnline(worker.id),
+        connected: worker.enabled && (await workerBroker.isOnlineDistributed(worker.id)),
         last_seen_at: worker.last_seen_at,
       })),
+    );
+    return res.json({
+      workers: status,
       probe: probe ? { id: checkId, ...probe } : null,
     });
   } catch (error) {
@@ -504,12 +513,17 @@ router.get('/admin/workers', requireDataStore, async (req, res, next) => {
       workerRepo.listWorkers(),
       workerRepo.listProfiles(),
     ]);
-    const workers = storedWorkers
-      .filter((v): v is NonNullable<typeof v> => v !== null)
-      .map((worker) => ({
-        ...worker,
-        status: worker.enabled && workerBroker.isOnline(worker.id) ? 'online' : 'offline',
-      }));
+    const workers = await Promise.all(
+      storedWorkers
+        .filter((v): v is NonNullable<typeof v> => v !== null)
+        .map(async (worker) => ({
+          ...worker,
+          status:
+            worker.enabled && (await workerBroker.isOnlineDistributed(worker.id))
+              ? ('online' as const)
+              : ('offline' as const),
+        })),
+    );
     return res.type('html').send(
       workersPage({
         workers,

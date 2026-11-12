@@ -85,6 +85,8 @@ const env = {
     return Number.isFinite(value) && value > 0 ? value : 5;
   },
   get TRUST_PROXY() {
+    // Vercel always terminates TLS before forwarding to the Node Function.
+    if (process.env.MCP_PLATFORM === 'vercel') return 1;
     if (process.env.TRUST_PROXY === 'true') return true;
     if (process.env.TRUST_PROXY === 'false') return false;
     if (process.env.TRUST_PROXY !== undefined) {

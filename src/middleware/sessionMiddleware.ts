@@ -19,9 +19,10 @@ import BoundedMemorySessionStore from '../db/memorySessionStore';
 import { UpstashSessionStore } from '../db/upstashSessionStore';
 
 const secureCookie =
-  config.NODE_ENV === 'production'
+  process.env.MCP_PLATFORM === 'vercel' ||
+  (config.NODE_ENV === 'production'
     ? process.env.COOKIE_SECURE !== 'false'
-    : process.env.COOKIE_SECURE === 'true';
+    : process.env.COOKIE_SECURE === 'true');
 
 const store =
   process.env.MCP_PLATFORM === 'vercel'
