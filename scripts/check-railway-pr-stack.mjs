@@ -97,7 +97,7 @@ function count(left, right) {
 
 function changed(left, right) {
   if (!left) return [];
-  const output = git(['diff', '--name-only', '--no-renames', left, right]);
+  const output = git(['diff', '--name-only', '--find-renames', left, right]);
   return output ? output.split('\n').sort() : [];
 }
 
