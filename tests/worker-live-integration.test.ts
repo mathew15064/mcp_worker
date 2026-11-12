@@ -493,6 +493,7 @@ void test(
     const identityBefore = fs.readFileSync(statePath);
     const configBefore = fs.readFileSync(path.join(workerHome, 'config.json'));
     const binaryBefore = fs.readFileSync(currentBinary);
+    await waitFor(() => workerBroker.isOnline(worker.id));
     const scriptPath = path.join(dir, 'unapproved-public-install.sh');
     const download = await runCommand(
       'curl',
@@ -500,14 +501,27 @@ void test(
       { cwd: workRoot, env: cliEnv },
     );
     assert.equal(download.status, 0, download.stderr);
+    await waitFor(() => workerBroker.isOnline(worker.id));
     const blocked = await runCommand('sh', [scriptPath], { cwd: workRoot, env: cliEnv });
     assert.notEqual(blocked.status, 0, 'unapproved installer changed running Worker');
     assert.match(blocked.stderr, /signed release not approved/i);
+    await waitFor(() => workerBroker.isOnline(worker.id));
     assert.deepEqual(fs.readFileSync(currentBinary), binaryBefore);
     assert.deepEqual(fs.readFileSync(statePath), identityBefore);
     assert.deepEqual(fs.readFileSync(path.join(workerHome, 'config.json')), configBefore);
     assert.ok(workerBroker.isOnline(worker.id));
-    console.log('LIFECYCLE PASS: pending public installer cannot mutate live identity, config or binary');
+    assert.equal(
+      (await terminalMcpService.workspaceExec('Live Worker Profile', 'printf pending-verified', {
+        cwd: workRoot,
+      })).stdout,
+      'pending-verified',
+    );
+    assert.equal(typeof workerBroker.attach, 'function');
+    assert.equal(typeof workerRepo.findWorkerByName, 'function');
+    assert.equal(typeof terminalMcpService.status, 'function');
+    console.log(
+      'LIFECYCLE PASS: pending public installer cannot mutate live identity, config or binary',
+    );
 
     const uninstallResult = await runCommand(cliPath, ['uninstall'], {
       cwd: workRoot,
