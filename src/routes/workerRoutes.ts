@@ -530,14 +530,14 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Unable to stop existing runtime' }
   }
   Copy-Item $Downloaded $Next
-  if (Test-Path $Existing) { [IO.File]::Replace($Next, $Existing, $null) }
+  if (Test-Path $Existing) { [IO.File]::Replace($Next, $Existing, (Join-Path $Tmp 'replace-backup.exe')) }
   else { Move-Item $Next $Existing }
   if ($WasRunning) {
     & $Existing start
     if ($LASTEXITCODE -ne 0) {
       & $Existing stop | Out-Null
       Copy-Item $Old $Next
-      [IO.File]::Replace($Next, $Existing, $null)
+      [IO.File]::Replace($Next, $Existing, (Join-Path $Tmp 'restore-backup.exe'))
       & $Existing start
       throw 'Replacement failed; previous binary restored'
     }
