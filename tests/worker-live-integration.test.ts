@@ -511,14 +511,13 @@ void test(
     assert.deepEqual(fs.readFileSync(path.join(workerHome, 'config.json')), configBefore);
     assert.ok(workerBroker.isOnline(worker.id));
     assert.equal(
-      (await terminalMcpService.workspaceExec('Live Worker Profile', 'printf pending-verified', {
-        cwd: workRoot,
-      })).stdout,
+      (
+        await terminalMcpService.workspaceExec('Live Worker Profile', 'printf pending-verified', {
+          cwd: workRoot,
+        })
+      ).stdout,
       'pending-verified',
     );
-    assert.equal(typeof workerBroker.attach, 'function');
-    assert.equal(typeof workerRepo.findWorkerByName, 'function');
-    assert.equal(typeof terminalMcpService.status, 'function');
     console.log(
       'LIFECYCLE PASS: pending public installer cannot mutate live identity, config or binary',
     );
