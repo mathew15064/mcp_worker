@@ -170,10 +170,10 @@ void test('Vercel OAuth issuer follows canonical project URL, not stale stored p
 void test('warm Vercel Function discovers Secure Setup completed by another Function', async () => {
   const original = {
     platform: process.env.MCP_PLATFORM,
-    ready: databaseManager.isManagedPostgresReady,
-    status: databaseManager.status,
-    reconnect: databaseManager.connectManagedPostgres,
-    adapter: databaseManager.getAdapter,
+    ready: databaseManager.isManagedPostgresReady.bind(databaseManager),
+    status: databaseManager.status.bind(databaseManager),
+    reconnect: databaseManager.connectManagedPostgres.bind(databaseManager),
+    adapter: databaseManager.getAdapter.bind(databaseManager),
   };
   const mocked = databaseManager as unknown as Record<string, unknown>;
   let state = 'CONFIGURED';
@@ -182,9 +182,10 @@ void test('warm Vercel Function discovers Secure Setup completed by another Func
     process.env.MCP_PLATFORM = 'vercel';
     mocked.isManagedPostgresReady = () => state === 'READY';
     mocked.status = () => ({ state });
-    mocked.connectManagedPostgres = async () => {
+    mocked.connectManagedPostgres = () => {
       rechecks += 1;
       state = 'READY';
+      return Promise.resolve();
     };
     mocked.getAdapter = () => ({
       queryOne: () => Promise.resolve({ value: 'preexisting-owner-hash' }),
