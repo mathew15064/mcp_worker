@@ -103,9 +103,9 @@ void test('fresh schema, WAL, online backup and offline restore are consistent',
       );
       assert.equal(
         (
-          restored
-            .prepare('SELECT COUNT(*) AS count FROM railway_schema_versions')
-            .get() as { count: number }
+          restored.prepare('SELECT COUNT(*) AS count FROM railway_schema_versions').get() as {
+            count: number;
+          }
         ).count,
         1,
       );
@@ -119,9 +119,9 @@ void test('fresh schema, WAL, online backup and offline restore are consistent',
     assert.equal(databaseManager.isRailwaySqliteReady(), true);
     assert.equal(
       (
-        getDb()
-          .prepare('SELECT value FROM system_settings WHERE key = ?')
-          .get('backup.marker') as { value: string }
+        getDb().prepare('SELECT value FROM system_settings WHERE key = ?').get('backup.marker') as {
+          value: string;
+        }
       ).value,
       'committed-before-backup',
     );
@@ -168,9 +168,9 @@ void test('legacy SQLite upgrade preserves rows and runs idempotently', async ()
       });
       assert.equal(
         (
-          db
-            .prepare('SELECT COUNT(*) AS count FROM railway_schema_versions')
-            .get() as { count: number }
+          db.prepare('SELECT COUNT(*) AS count FROM railway_schema_versions').get() as {
+            count: number;
+          }
         ).count,
         1,
       );
@@ -205,17 +205,17 @@ void test('unknown schema versions refuse startup without deleting data', async 
     try {
       assert.equal(
         (
-          readonly
-            .prepare('SELECT value FROM system_settings WHERE key = ?')
-            .get('keep.me') as { value: string }
+          readonly.prepare('SELECT value FROM system_settings WHERE key = ?').get('keep.me') as {
+            value: string;
+          }
         ).value,
         'valuable',
       );
       assert.equal(
         (
-          readonly
-            .prepare('SELECT COUNT(*) AS count FROM railway_schema_versions')
-            .get() as { count: number }
+          readonly.prepare('SELECT COUNT(*) AS count FROM railway_schema_versions').get() as {
+            count: number;
+          }
         ).count,
         2,
       );
