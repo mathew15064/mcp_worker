@@ -105,7 +105,7 @@ USER root
 
 # Health check targeting internal HTTP port 80 using Node.js built-in fetch
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:80/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || '80') + '/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 
 # Entrypoint with existing database safety guard
 ENTRYPOINT ["docker-entrypoint-railway.sh"]
