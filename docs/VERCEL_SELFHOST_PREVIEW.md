@@ -76,6 +76,16 @@ the original author or other forks.
    binary and identity are local to that owner. Test authenticated MCP
    tools/list, runtime_info and workspace_exec.
 
+## GitHub / Vercel authorization prerequisite
+
+The owner must connect their GitHub account in Vercel before Git-based
+deployments can fetch this public repository. This consent is unavoidable;
+a ChatGPT GitHub connector does not grant Vercel Git repository access.
+In the first exploratory Vercel deployment the build failed with
+git_info_fail before any source compilation because the connected Vercel
+account did not expose a GitHub namespace. No application data or secrets
+were provisioned. Re-test Git clone/build after the owner connects GitHub.
+
 ## Operational boundaries
 
 - A Vercel instance must never connect to alive.locallhost.shop or its MySQL,
