@@ -278,7 +278,7 @@ void test('signer requires approved version, canonical checksums and RSA private
       }, root);
     }
     assert.notEqual(sign(VERSION_B).code, 0, 'wrong approval version accepted');
-    fs.writeFileSync(path.join(bin, 'SHA256SUMS'), sums().replace(hash('WORKER_RELEASE'), '0'.repeat(64)));
+    fs.writeFileSync(path.join(bin, 'SHA256SUMS'), sums().replace(/^[0-9a-f]{64}/, '0'.repeat(64)));
     assert.notEqual(sign(VERSION_A).code, 0, 'tampered checksum accepted');
     fs.writeFileSync(path.join(bin, 'SHA256SUMS'), sums());
     assert.equal(sign(VERSION_A).code, 0, 'signed candidate failed');
