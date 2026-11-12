@@ -23,6 +23,8 @@ jobs:
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '26.13.0'
@@ -36,6 +38,10 @@ jobs:
         run: |
           npm run typecheck
           npm run lint
+      - name: Incremental ESLint/Prettier quality gate
+        env:
+          QUALITY_BASE_REF: e7de57a28f4894d302a6dfb24a577ea7b38b9a08
+        run: npm run quality:check
       - name: Run isolated synthetic Git ancestry tests
         run: |
           npm run build
