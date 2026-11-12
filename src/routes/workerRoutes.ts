@@ -507,6 +507,22 @@ async function createEnrollmentProfile(
   });
 }
 
+// CI builds are unsigned private artifacts. A fresh Railway clone must not
+// advertise curl-to-shell execution until a pinned signing-key distribution
+// and mandatory cross-platform verification have passed release review.
+router.use((req, res, next) => {
+  if (
+    process.env.MCP_PLATFORM === 'railway' &&
+    (req.path.startsWith('/worker/install') || req.path.startsWith('/worker/dist/'))
+  ) {
+    return res.status(503).set('Cache-Control', 'no-store').json({
+      code: 'WORKER_SIGNED_RELEASE_PENDING',
+      error: 'Verified Worker installer requires a signed and approved release.',
+    });
+  }
+  return next();
+});
+
 router.get('/worker/install.sh', (req, res, next) => {
   try {
     return res

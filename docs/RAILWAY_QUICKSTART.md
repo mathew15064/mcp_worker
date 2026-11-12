@@ -42,3 +42,8 @@ then runs Node as the unprivileged node user.
 This file defines reviewable Railway resources but is NOT a published
 Railway Template. Publishing a template or creating a paid project needs
 a separate owner approval after live acceptance.
+
+The Railway beta intentionally returns HTTP 503 WORKER_SIGNED_RELEASE_PENDING
+on Worker installer and binary download endpoints until the signed release
+pipeline and pinned public-key verification are approved. Do not bypass this
+by running unsigned binaries on a new production instance.

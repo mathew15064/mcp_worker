@@ -88,6 +88,10 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
     assert.equal((await submit(process.env.MCP_SETUP_SECRET)).status, 409);
     assert.equal((await fetch(base + '/setup', { headers, redirect: 'manual' })).status, 302);
     assert.equal((await fetch(base + '/readyz', { headers })).status, 200);
+    const unsignedInstaller = await fetch(base + '/worker/install.sh', { headers });
+    assert.equal(unsignedInstaller.status, 503);
+    const unsignedBody = (await unsignedInstaller.json()) as { code: string };
+    assert.equal(unsignedBody.code, 'WORKER_SIGNED_RELEASE_PENDING');
     const discovery = await fetch(base + '/.well-known/oauth-authorization-server', {
       headers,
     });
