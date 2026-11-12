@@ -58,6 +58,9 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
     if (!address || typeof address === 'string') throw new Error('Missing server address');
     const base = 'http://127.0.0.1:' + address.port;
     const headers = { 'x-forwarded-proto': 'https' };
+    const gated = await fetch(base + '/admin', { headers, redirect: 'manual' });
+    assert.equal(gated.status, 302, 'Admin must be inaccessible before owner claim');
+    assert.equal(gated.headers.get('location'), '/setup');
     const initial = await fetch(base + '/setup', { headers, redirect: 'manual' });
     assert.equal(initial.status, 200);
     const firstCookie = cookie(initial);
@@ -80,12 +83,69 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
           confirm_password: 'PrivateRailwayAdmin2026!',
         }).toString(),
       });
+    const invalidCsrf = await fetch(base + '/setup', {
+      method: 'POST',
+      redirect: 'manual',
+      headers: {
+        ...headers,
+        cookie: firstCookie,
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        _csrf: 'invalid',
+        setup_key: process.env.MCP_SETUP_SECRET || '',
+        password: 'PrivateRailwayAdmin2026!',
+        confirm_password: 'PrivateRailwayAdmin2026!',
+      }).toString(),
+    });
+    assert.equal(invalidCsrf.status, 403);
     const denied = await submit('A'.repeat(43));
     assert.equal(denied.status, 403);
-    const created = await submit(process.env.MCP_SETUP_SECRET);
-    assert.equal(created.status, 303);
-    assert.equal(created.headers.get('location'), '/login');
-    assert.equal((await submit(process.env.MCP_SETUP_SECRET)).status, 409);
+    const shortPassword = await fetch(base + '/setup', {
+      method: 'POST',
+      redirect: 'manual',
+      headers: {
+        ...headers,
+        cookie: firstCookie,
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        _csrf: token,
+        setup_key: process.env.MCP_SETUP_SECRET || '',
+        password: 'too-short',
+        confirm_password: 'too-short',
+      }).toString(),
+    });
+    assert.equal(shortPassword.status, 403);
+    const rivalPage = await fetch(base + '/setup', { headers, redirect: 'manual' });
+    const rivalCookie = cookie(rivalPage);
+    const rivalCsrf = csrf(await rivalPage.text());
+    assert.ok(rivalCookie && rivalCsrf);
+    const rivalClaim = () =>
+      fetch(base + '/setup', {
+        method: 'POST',
+        redirect: 'manual',
+        headers: {
+          ...headers,
+          cookie: rivalCookie,
+          'content-type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          _csrf: rivalCsrf,
+          setup_key: process.env.MCP_SETUP_SECRET || '',
+          password: 'PrivateRailwayAdmin2026!',
+          confirm_password: 'PrivateRailwayAdmin2026!',
+        }).toString(),
+      });
+    const claims = await Promise.all([submit(process.env.MCP_SETUP_SECRET || ''), rivalClaim()]);
+    assert.deepEqual(
+      claims.map((response) => response.status).sort(),
+      [303, 409],
+      'Only one of two concurrent first-owner claims may succeed',
+    );
+    const created = claims.find((response) => response.status === 303);
+    assert.equal(created?.headers.get('location'), '/login');
+    assert.equal((await submit(process.env.MCP_SETUP_SECRET || '')).status, 409);
     assert.equal((await fetch(base + '/setup', { headers, redirect: 'manual' })).status, 302);
     assert.equal((await fetch(base + '/readyz', { headers })).status, 200);
     const unsignedInstaller = await fetch(base + '/worker/install.sh', { headers });
@@ -128,6 +188,7 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
     assert.equal(signedIn.status, 302);
     const authenticatedCookie = cookie(signedIn);
     assert.ok(authenticatedCookie);
+    assert.notEqual(authenticatedCookie, loginCookie, 'Login must regenerate the session ID');
 
     const oauthService = (await import('../src/services/mcpOAuthService.js')).default;
     const registered = await oauthService.registerClient({
@@ -230,6 +291,72 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
       count: number;
     };
     assert.ok(session.count > 0, 'Admin setup session must survive process restart');
+    const ownerCount = db
+      .prepare('SELECT COUNT(*) AS count FROM system_settings WHERE key = ?')
+      .get('bootstrap.admin_password_hash') as { count: number };
+    assert.equal(
+      ownerCount.count,
+      1,
+      'Concurrent owner claims must leave exactly one bootstrap credential',
+    );
+    server = http.createServer(app);
+    await new Promise<void>((resolve) => server?.listen(0, '127.0.0.1', resolve));
+    const restartedAddress = server.address();
+    if (!restartedAddress || typeof restartedAddress === 'string') {
+      throw new Error('Missing restarted server address');
+    }
+    const restartedBase = 'http://127.0.0.1:' + restartedAddress.port;
+    const persistedAdmin = await fetch(restartedBase + '/admin', {
+      headers: { ...headers, cookie: authenticatedCookie },
+      redirect: 'manual',
+    });
+    assert.equal(persistedAdmin.status, 200, 'Authenticated session must survive restart');
+    const adminCsrf = csrf(await persistedAdmin.text());
+    assert.ok(adminCsrf);
+    const logout = await fetch(restartedBase + '/logout', {
+      method: 'POST',
+      redirect: 'manual',
+      headers: {
+        ...headers,
+        cookie: authenticatedCookie,
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({ _csrf: adminCsrf }).toString(),
+    });
+    assert.equal(logout.status, 302);
+    assert.equal(
+      (
+        await fetch(restartedBase + '/admin', {
+          headers: { ...headers, cookie: authenticatedCookie },
+          redirect: 'manual',
+        })
+      ).status,
+      302,
+      'Logged-out session must not retain Admin access',
+    );
+    let rateLimited = false;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const result = await fetch(restartedBase + '/setup', {
+        method: 'POST',
+        redirect: 'manual',
+        headers: {
+          ...headers,
+          cookie: firstCookie,
+          'content-type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          _csrf: token,
+          setup_key: 'X'.repeat(43),
+          password: 'PrivateRailwayAdmin2026!',
+          confirm_password: 'PrivateRailwayAdmin2026!',
+        }).toString(),
+      });
+      if (result.status === 429) {
+        rateLimited = true;
+        break;
+      }
+    }
+    assert.equal(rateLimited, true, 'Repeated setup attempts must be rate-limited');
   } finally {
     if (server) await new Promise<void>((resolve) => server?.close(() => resolve()));
     try {

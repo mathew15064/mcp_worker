@@ -7,6 +7,7 @@ declare module 'express-session' {
     role?: string;
     sessionVersion?: number;
     authSource?: string;
+    adminCredentialFingerprint?: string;
     returnTo?: string;
     flashError?: string;
     flashSuccess?: string;

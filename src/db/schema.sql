@@ -112,7 +112,6 @@ CREATE TABLE IF NOT EXISTS mcp_oauth_clients (
   last_authorized_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_mcp_clients_status ON mcp_oauth_clients(status);
-CREATE INDEX IF NOT EXISTS idx_mcp_clients_owner_user ON mcp_oauth_clients(owner_user_id);
 
 CREATE TABLE IF NOT EXISTS mcp_oauth_authorization_codes (
   id TEXT PRIMARY KEY,
