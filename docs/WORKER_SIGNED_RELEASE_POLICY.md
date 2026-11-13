@@ -16,12 +16,13 @@ public tag, GitHub Release, installer, binary, deployment or key creation.
   redirects; only disposable loopback verification fixtures permit HTTP. The
   Windows script disallows redirects. The release origin must be separately
   reviewed and controlled by the owner.
-- The reviewed pin supplies **all** of: strict `x.y.z` version, 12–40 lowercase
-  hex commit prefix, base64-encoded PEM RSA public key, and (only for an explicit
+- The reviewed pin supplies **all** of: strict `x.y.z` version, full 40-character lowercase
+  source SHA, base64-encoded PEM RSA public key and independently approved
+  RSA SPKI DER SHA-256 fingerprint, and (only for an explicit
   rotation) `previousPublicKeySha256`. None is configurable by an environment
   trust-key override. Missing pins fail closed. Each semantic version component
-  has no leading zero except `0`. Git review must verify the commit prefix
-  resolves unambiguously to the approved immutable source.
+  has no leading zero except `0`. Git review and offline signing require exact full SHA equality, never an
+  abbreviated commit prefix.
 - The detached RSA/SHA-256 signature authenticates the **exact bytes** of
   `SHA256SUMS`. That manifest authenticates `WORKER_RELEASE` (exact
   `version=...\ncommit=...\n`) and every platform binary. Installers verify
@@ -29,14 +30,14 @@ public tag, GitHub Release, installer, binary, deployment or key creation.
   **executed downloaded binary** must print a single-line identity with
   `systemtd x.y.z commit=<sha> runtime=...`, matching signed metadata before
   replacement; merely exiting successfully on `version` is insufficient.
-  The release signer requires a canonical manifest containing exactly eight
-  binaries and `WORKER_RELEASE` (nine entries), with no duplicate, extra or
-  symbolic-link artifacts. No signing workflow is permitted in public CI.
+  The release signer and installers require the exact canonical sorted nine-entry
+  manifest, with lowercase checksums, LF endings and no missing, additional,
+  reordered or signer-symlink artifacts. No signing workflow is permitted in public CI.
 - After first successful install, the installer records the SPKI DER SHA-256
   fingerprint in `release-key-sha256` alongside `release-version` and
-  `release-commit`. Subsequent releases must match that key, must not move
-  backward in semantic version, and must not reuse a version for a different
-  commit. Missing/corrupt key records fail closed; migration requires a
+  `release-commit` and `release-manifest-sha256`. Subsequent releases must
+  match that key, never downgrade semver and never reuse the version for
+  different source or manifest digest. Missing/corrupt key records fail closed; migration requires a
   dedicated reviewed procedure rather than silent adoption.
 - An **authorized one-way key rotation** requires a newly reviewed installer
   pin signed by the **new** key, plus the exact **old** SPKI SHA-256 in
@@ -83,11 +84,11 @@ HTTP header, user input or self-signed manifest as authority to change roots.
    isolated, clean workspace; confirm `git rev-parse HEAD`,
    `git status --porcelain` (empty), commit ancestry and review of source
    dependencies. Pick a unique never-reused semver without leading zeros,
-   and independently record the first 12 or more characters of the commit.
-   The signer checks the approved commit prefix against `git rev-parse HEAD`,
+   and independently record the full 40 characters of the commit.
+   The signer checks exact approved 40-character commit equality to `git rev-parse HEAD`,
    refuses dirty sources and symlink manifest/metadata. Do **not** create a tag.
 2. Build locally using the approved exact values, e.g.
-   `VERSION=X.Y.Z COMMIT=123456789abc ./scripts/build-worker-go.sh`
+   `VERSION=X.Y.Z COMMIT="$(git rev-parse HEAD)" ./scripts/build-worker-go.sh`
    (replace examples with approved real values). Check
    `cat worker/bin/WORKER_RELEASE`, verify the commit matches the checked-out
    source, `(cd worker/bin && sha256sum -c SHA256SUMS)`, and inspect all nine
@@ -98,16 +99,16 @@ HTTP header, user input or self-signed manifest as authority to change roots.
    then `./scripts/test-signed-worker-local.sh`. This runs Node typecheck,
    build, loopback signed-fixture/negative tests, Go tests with a Go >=1.24
    toolchain, and a temporary local Linux/amd64 Go build with an embedded
-   test-only identity. Optionally set `SIGNED_WORKER_CROSS_BUILD=1` to
-   cross-compile macOS and Windows binaries **only into a deleted temporary
-   directory**. A cross-build is not a native installer execution. Run all
+   test-only identity. The PC verifier also runs Go 1.24 race/vet and checks two matching
+   SHA-256 builds for each of the eight target architectures in a temporary
+   deleted directory. A cross-build is not a native installer execution. Run all
    other required Node/integration and native installer tests on each real
    target OS **locally** before release; otherwise mark each unavailable
    target **NOT_TESTED**, never PASS. Store private local test logs and hashes;
    do not execute, rely on or upload anything via GitHub Actions/CI.
 4. In the owner-only signing environment, obtain the private key securely
    **outside** the repository, verify permission `0600` or `0400`, and run
-   `WORKER_RELEASE_EXPECTED_VERSION=X.Y.Z WORKER_RELEASE_EXPECTED_COMMIT=123456789abc WORKER_RELEASE_EXPECTED_PUBLIC_KEY_SHA256=<independently-approved-64-char-SPKI-sha256> ./scripts/sign-worker-manifest.sh /absolute/outside-source/private.pem`.
+   `WORKER_RELEASE_EXPECTED_VERSION=X.Y.Z WORKER_RELEASE_EXPECTED_COMMIT="$(git rev-parse HEAD)" WORKER_RELEASE_EXPECTED_PUBLIC_KEY_SHA256=<independently-approved-64-char-SPKI-sha256> ./scripts/sign-worker-manifest.sh /absolute/outside-source/private.pem`.
    The signer rejects stale signatures and refuses any private key whose derived
    SPKI SHA-256 differs from the separately approved fingerprint. Sign only
    after a fresh unsigned build. The three expected fields are manual
@@ -131,9 +132,10 @@ HTTP header, user input or self-signed manifest as authority to change roots.
 
 ## Read-only status contract for Admin/onboarding consumers (T5)
 
-Import `railwayWorkerDistributionBlocked(): boolean` from
-`src/services/workerReleaseGate.ts` to display **Railway signed release
-pending**. A `true` value is a hard **NO-GO** and must suppress public
+Use `workerSignedReleaseReadiness()` for an immutable NO_GO contract,
+`WORKER_SIGNED_RELEASE_PENDING` and anticipated Railway HTTP 503;
+use `railwayWorkerDistributionBlocked()` for route suppression. Both are
+exported from `src/services/workerReleaseGate.ts`. A `true` value is a hard **NO-GO** and must suppress public
 installation instructions; it is not an installer-token or signing API. On
 non-Railway local development this function can be `false` even when the
 shipped installer has empty release pins and refuses execution: consumers
@@ -173,15 +175,80 @@ public repositories or artifact services.
 
 ### Owner approval record (currently all pending)
 
-| Gate | Required evidence | Status |
-| --- | --- | --- |
-| Immutable source & complete provenance | Reviewed 40-char SHA, unambiguous prefix, native version output | PENDING |
-| Key custody | Owner-held external RSA key, SPKI fingerprint independently verified | PENDING |
-| Root policy | Old/new fingerprint and separate rotation approval if applicable | PENDING |
-| Signed package | Nine hashes, detached signature, independent verification | PENDING |
-| Security | Local Node and Go verification, three-OS native negative/lifecycle tests, failure recovery | PENDING |
-| Distribution & ops | HTTPS origin, isolation, owner recovery runbook and explicit release decision | PENDING |
-| Publish authorization | Separate explicit owner approval; no automatic release or deployment | PENDING |
+| Gate                                   | Required evidence                                                                          | Status  |
+| -------------------------------------- | ------------------------------------------------------------------------------------------ | ------- |
+| Immutable source & complete provenance | Reviewed 40-char SHA, unambiguous prefix, native version output                            | PENDING |
+| Key custody                            | Owner-held external RSA key, SPKI fingerprint independently verified                       | PENDING |
+| Root policy                            | Old/new fingerprint and separate rotation approval if applicable                           | PENDING |
+| Signed package                         | Nine hashes, detached signature, independent verification                                  | PENDING |
+| Security                               | Local Node and Go verification, three-OS native negative/lifecycle tests, failure recovery | PENDING |
+| Distribution & ops                     | HTTPS origin, isolation, owner recovery runbook and explicit release decision              | PENDING |
+| Publish authorization                  | Separate explicit owner approval; no automatic release or deployment                       | PENDING |
 
 **Current decision: NO-GO** — no key, public binary, tag, Release or production
 installer can be published based on this document alone.
+
+## Owner production signing approval checklist — PENDING
+
+The owner must sign a separate review record binding the exact 40-character
+source commit, unique strict semver, independent RSA SPKI DER SHA-256
+fingerprint, approved HTTPS origin, full nine-item canonical manifest,
+signature digest, native acceptance results, and the rollout/freeze plan.
+T2 creates no production key, binary, signature, tag, deployment or publish.
+
+- [ ] Independently review source provenance, exact SHA, clean checkout,
+      dependencies and local-only deterministic build inputs.
+- [ ] Select a never-reused version and approve complete release tuple
+      (version, 40-character source SHA, SPKI fingerprint, nine artifact digests,
+      signed manifest digest, canonical origin and tested installer source).
+- [ ] Appoint owner-only key custodians with two-person access, offline/HSM
+      custody and backup escrow. Prefer RSA-3072+ subject to security review;
+      no key may be stored in git, Actions/CI, containers, Drive or chat.
+- [ ] An independent reviewer checks key SPKI DER fingerprint and pinned
+      base64 PEM, detached signature, hashes, build logs and all native results.
+      Authenticated HTTPS alone does not authenticate an untrusted installer.
+- [ ] Confirm GitHub Actions disabled before any later push; obtain distinct
+      approvals for signing, source push, registry digest, billing, Railway deploy
+      and template publish. No env var substitutes for source-controlled approval.
+- [ ] Owner and key custodian explicitly approve or reject the exact tuple,
+      authorized rollout ring, monitoring/freeze triggers and rollback contact.
+      Only a later separately reviewed code change can remove the Railway 503.
+
+## Native acceptance requirements — NOT_TESTED means no native evidence
+
+| Target                        | Native tests required before publication                                                                                                   | T2                          |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------- |
+| Linux/amd64 PC                | Signed loopback shell fixture plus real compiled Go version, identity, tamper, replay, upgrade, downgrade, rotation, failed-start recovery | PASS (local only)           |
+| Linux arm64/386/armv7         | Actual CPU/VM run, signed installer lifecycle and safe recovery                                                                            | NOT_TESTED (cross-compiled) |
+| macOS Intel and Apple Silicon | Native sh install, curl/OpenSSL/shasum, permissions, signed upgrade, tamper, identity preservation, interrupted install and TLS failures   | NOT_TESTED                  |
+| Windows x64 and ARM64         | Native PowerShell and OpenSSL, path/ACL/reparse protection, signed installer, reboot, wrong-key, redirects, rollback and recovery          | NOT_TESTED                  |
+| Privileged Linux systemd      | Disposable native service install, enable/reboot, user/unit isolation, crash-restart, upgrade, interrupted failure and recovery            | NOT_TESTED                  |
+
+Record exact hardware/VM, OS, architecture, command, toolchain version,
+UTC timestamp, exit code and sanitized logs for each case. Cross-builds do
+not substitute for native execution. No Windows/macOS PowerShell or native
+privileged systemd run was performed in this T2 task.
+
+## Freeze, revoke, rollback and trust-root recovery
+
+On suspicion of compromise, immediately freeze public distribution, keep
+Railway /worker/install* and /worker/dist/* returning HTTP 503, preserve
+cryptographic evidence, notify operators and revoke affected endpoints.
+Never bypass with env flags, unsigned artifacts or unreviewed public keys.
+
+An automatic failed-start recovery may restore the _previous verified local_
+binary while retaining its old version, full commit, key fingerprint and
+manifest digest. Manual downgrade remains prohibited. To recover from a
+defective release, obtain separate owner approval for a higher unique semver
+built from a reviewed known-good full source commit, sign offline with the
+approved uncompromised key, then run native recovery acceptance again.
+
+If the trust root is compromised, do not treat the old key as recovery
+authority. Require incident-specific owner approval of a new custodian/root,
+out-of-band review of old/new SPKI fingerprints and controlled re-enrollment
+or manual recovery. Rotations are one-way with strictly higher semver.
+Legacy records lacking a signed manifest digest fail closed and require
+separate audited migration; never silently inherit prior trust.
+
+**NO-GO remains in effect:** no production key, approval, binary or artifact
+has been published, and the Railway installer HTTP 503 must remain active.

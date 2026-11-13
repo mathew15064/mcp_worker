@@ -13,6 +13,7 @@ type ApprovedWorkerRelease = Readonly<{
   version: string;
   commit: string;
   publicKeyBase64: string;
+  publicKeySha256: string; // approved RSA SPKI DER SHA-256
   // Only for an owner-reviewed, one-way rotation from an installed trust root.
   previousPublicKeySha256?: string;
 }>;
@@ -20,6 +21,7 @@ const APPROVED_WORKER_RELEASE: ApprovedWorkerRelease = Object.freeze({
   version: '',
   commit: '',
   publicKeyBase64: '',
+  publicKeySha256: '',
   previousPublicKeySha256: '',
 });
 
@@ -80,6 +82,7 @@ function unixInstallerScript(
   const pinnedVersion = shellSingleQuote(approved.version);
   const pinnedCommit = shellSingleQuote(approved.commit);
   const pinnedKey = shellSingleQuote(approved.publicKeyBase64);
+  const pinnedKeySha256 = shellSingleQuote(approved.publicKeySha256);
   const previousKey = shellSingleQuote(approved.previousPublicKeySha256 || '');
   return `#!/bin/sh
 set -eu
@@ -89,6 +92,7 @@ EXPECTED_OS=${osName}
 PINNED_VERSION=${pinnedVersion}
 PINNED_COMMIT=${pinnedCommit}
 PINNED_PUBLIC_KEY_B64=${pinnedKey}
+PINNED_PUBLIC_KEY_SHA256=${pinnedKeySha256}
 PINNED_PREVIOUS_KEY_SHA256=${previousKey}
 INSTALL_ROOT="${'${BOT_REPORT_WORKER_INSTALL_ROOT:-$HOME/.local/share/bot-report-worker}'}"
 BIN_DIR="${'${BOT_REPORT_WORKER_BIN_DIR:-$HOME/.local/bin}'}"
@@ -135,7 +139,7 @@ esac
 download_release_file() {
   curl -fsSL --max-redirs 0 --proto "=$DOWNLOAD_SCHEME" --proto-redir "=$DOWNLOAD_SCHEME" "$BASE_URL/worker/dist/$1" -o "$2"
 }
-[ -n "$PINNED_VERSION" ] && [ -n "$PINNED_COMMIT" ] && [ -n "$PINNED_PUBLIC_KEY_B64" ] || {
+[ -n "$PINNED_VERSION" ] && [ -n "$PINNED_COMMIT" ] && [ -n "$PINNED_PUBLIC_KEY_B64" ] && [ -n "$PINNED_PUBLIC_KEY_SHA256" ] || {
   echo "[systemtd] signed release not approved" >&2; exit 1;
 }
 case "$PINNED_VERSION" in *[!0-9.]*|'') echo "[systemtd] invalid release version" >&2; exit 1;; esac
@@ -146,7 +150,7 @@ fi
 printf '%s\n' "$PINNED_VERSION" | grep -Eq '^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$' ||
   { echo "[systemtd] invalid semantic version" >&2; exit 1; }
 COMMIT_LEN="$(printf '%s' "$PINNED_COMMIT" | wc -c | tr -d ' ')"
-[ "$COMMIT_LEN" -ge 12 ] && [ "$COMMIT_LEN" -le 40 ] || { echo "[systemtd] invalid release commit length" >&2; exit 1; }
+[ "$COMMIT_LEN" -eq 40 ] || { echo "[systemtd] invalid release commit length" >&2; exit 1; }
 if [ "$ACTION" = rollback ]; then
   echo "[systemtd] manual rollback prohibited; explicitly approve a signed release" >&2
   exit 1
@@ -186,11 +190,30 @@ openssl rsa -pubin -in "$TMP/release-key.pem" -noout >/dev/null 2>&1 || {
 }
 openssl pkey -pubin -in "$TMP/release-key.pem" -outform DER -out "$TMP/release-key.der" 2>/dev/null || exit 1
 PINNED_KEY_SHA256="$(openssl dgst -sha256 "$TMP/release-key.der" | awk '{print $NF}')"
+printf '%s' "$PINNED_PUBLIC_KEY_SHA256" | grep -Eq '^[0-9a-f]{64}$' &&
+  [ "$PINNED_KEY_SHA256" = "$PINNED_PUBLIC_KEY_SHA256" ] || {
+  echo "[systemtd] pinned RSA SPKI fingerprint mismatch" >&2; exit 1;
+}
 download_release_file SHA256SUMS "$TMP/SHA256SUMS"
 download_release_file SHA256SUMS.sig "$TMP/SHA256SUMS.sig"
 openssl dgst -sha256 -verify "$TMP/release-key.pem" -signature "$TMP/SHA256SUMS.sig" "$TMP/SHA256SUMS" >/dev/null || {
   echo "[systemtd] signature verification failed" >&2; exit 1;
 }
+# Signed release must contain exactly the canonical, sorted nine-entry inventory.
+[ "$(wc -l < "$TMP/SHA256SUMS" | tr -d ' ')" = 9 ] &&
+LC_ALL=C awk '
+  BEGIN { split("bot-report-worker-darwin-amd64 bot-report-worker-darwin-arm64 bot-report-worker-linux-386 bot-report-worker-linux-amd64 bot-report-worker-linux-arm64 bot-report-worker-linux-armv7 bot-report-worker-windows-amd64.exe bot-report-worker-windows-arm64.exe WORKER_RELEASE", names, " ") }
+  {
+    digest=substr($0,1,64)
+    if (NR>9 || length($0)!=66+length(names[NR]) ||
+        length(digest)!=64 || digest ~ /[^0-9a-f]/ ||
+        substr($0,65,2)!="  " || substr($0,67)!=names[NR]) exit 1
+  }
+  END { if (NR!=9) exit 1 }
+' "$TMP/SHA256SUMS" || {
+  echo "[systemtd] signed checksum inventory is not canonical" >&2; exit 1;
+}
+RELEASE_MANIFEST_SHA256="$(openssl dgst -sha256 "$TMP/SHA256SUMS" | awk '{print $NF}')"
 manifest_hash() {
   awk -v file="$1" '
     $2 == file { count++; value=$1 }
@@ -211,20 +234,23 @@ ACTUAL_RELEASE="$(openssl dgst -sha256 "$TMP/WORKER_RELEASE" | awk '{print $NF}'
 RECORDED_VERSION="$WORKER_HOME/release-version"
 RECORDED_COMMIT="$WORKER_HOME/release-commit"
 RECORDED_KEY="$WORKER_HOME/release-key-sha256"
+RECORDED_MANIFEST="$WORKER_HOME/release-manifest-sha256"
 OLD_VERSION=''
 OLD_COMMIT=''
 if [ -f "$SYSTEMTD" ] && [ ! -f "$RECORDED_VERSION" ]; then
   echo "[systemtd] existing runtime lacks verified release record" >&2; exit 1
 fi
-if [ -e "$RECORDED_VERSION" ] || [ -e "$RECORDED_COMMIT" ] || [ -e "$RECORDED_KEY" ]; then
-  [ -f "$RECORDED_VERSION" ] && [ -f "$RECORDED_COMMIT" ] && [ -f "$RECORDED_KEY" ] &&
-    [ ! -L "$RECORDED_VERSION" ] && [ ! -L "$RECORDED_COMMIT" ] && [ ! -L "$RECORDED_KEY" ] || {
+if [ -e "$RECORDED_VERSION" ] || [ -e "$RECORDED_COMMIT" ] || [ -e "$RECORDED_KEY" ] || [ -e "$RECORDED_MANIFEST" ]; then
+  [ -f "$RECORDED_VERSION" ] && [ -f "$RECORDED_COMMIT" ] && [ -f "$RECORDED_KEY" ] && [ -f "$RECORDED_MANIFEST" ] &&
+    [ ! -L "$RECORDED_VERSION" ] && [ ! -L "$RECORDED_COMMIT" ] && [ ! -L "$RECORDED_KEY" ] && [ ! -L "$RECORDED_MANIFEST" ] || {
     echo "[systemtd] incomplete or unsafe release record" >&2; exit 1;
   }
   OLD_VERSION="$(cat "$RECORDED_VERSION")"
   OLD_COMMIT="$(cat "$RECORDED_COMMIT")"
   OLD_KEY_SHA256="$(cat "$RECORDED_KEY")"
+  OLD_MANIFEST_SHA256="$(cat "$RECORDED_MANIFEST")"
   printf '%s' "$OLD_KEY_SHA256" | grep -Eq '^[0-9a-f]{64}$' || { echo "[systemtd] invalid recorded trust root" >&2; exit 1; }
+  printf '%s' "$OLD_MANIFEST_SHA256" | grep -Eq '^[0-9a-f]{64}$' || { echo "[systemtd] invalid recorded manifest" >&2; exit 1; }
   if [ "$OLD_KEY_SHA256" != "$PINNED_KEY_SHA256" ]; then
     [ "$PINNED_PREVIOUS_KEY_SHA256" = "$OLD_KEY_SHA256" ] && [ "$OLD_VERSION" != "$PINNED_VERSION" ] || {
       echo "[systemtd] unapproved signing trust-root replacement" >&2; exit 1;
@@ -242,8 +268,10 @@ if [ -e "$RECORDED_VERSION" ] || [ -e "$RECORDED_COMMIT" ] || [ -e "$RECORDED_KE
       if (("v" b[i])>("v" a[i])) exit 0
     }
   }' || { echo "[systemtd] signed release rollback rejected" >&2; exit 1; }
-  if [ "$OLD_VERSION" = "$PINNED_VERSION" ] && [ "$OLD_COMMIT" != "$PINNED_COMMIT" ]; then
-    echo "[systemtd] release version reused for another commit" >&2; exit 1
+  if [ "$OLD_VERSION" = "$PINNED_VERSION" ]; then
+    [ "$OLD_COMMIT" = "$PINNED_COMMIT" ] && [ "$OLD_MANIFEST_SHA256" = "$RELEASE_MANIFEST_SHA256" ] || {
+      echo "[systemtd] release version reused for a different commit or manifest" >&2; exit 1;
+    }
   fi
 fi
 download_release_file "$FILE" "$TMP/systemtd"
@@ -434,7 +462,8 @@ fi
 printf '%s\\n' "$PINNED_VERSION" > "$WORKER_HOME/release-version"
 printf '%s\\n' "$PINNED_COMMIT" > "$WORKER_HOME/release-commit"
 printf '%s\\n' "$PINNED_KEY_SHA256" > "$WORKER_HOME/release-key-sha256"
-chmod 0600 "$WORKER_HOME/release-version" "$WORKER_HOME/release-commit" "$WORKER_HOME/release-key-sha256"
+printf '%s\\n' "$RELEASE_MANIFEST_SHA256" > "$WORKER_HOME/release-manifest-sha256"
+chmod 0600 "$WORKER_HOME/release-version" "$WORKER_HOME/release-commit" "$WORKER_HOME/release-key-sha256" "$WORKER_HOME/release-manifest-sha256"
 
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
@@ -474,17 +503,19 @@ function windowsInstallerPayloadScript(
   const pinnedVersion = powershellSingleQuote(approved.version);
   const pinnedCommit = powershellSingleQuote(approved.commit);
   const pinnedKey = powershellSingleQuote(approved.publicKeyBase64);
+  const pinnedKeySha256 = powershellSingleQuote(approved.publicKeySha256);
   const previousKey = powershellSingleQuote(approved.previousPublicKeySha256 || '');
   return `$ErrorActionPreference = 'Stop'
 $BaseUrl = ${base}
 $PinnedVersion = ${pinnedVersion}
 $PinnedCommit = ${pinnedCommit}
 $PinnedPublicKeyB64 = ${pinnedKey}
+$PinnedPublicKeySha256 = ${pinnedKeySha256}
 $PinnedPreviousKeySha256 = ${previousKey}
-if (-not $PinnedVersion -or -not $PinnedCommit -or -not $PinnedPublicKeyB64) { throw 'Signed release not approved' }
+if (-not $PinnedVersion -or -not $PinnedCommit -or -not $PinnedPublicKeyB64 -or -not $PinnedPublicKeySha256) { throw 'Signed release not approved' }
 # The only HTTP exception is a locally bound, disposable verification fixture.
 if ($BaseUrl -cnotmatch '^https://[a-zA-Z0-9.-]+(:[0-9]{1,5})?$' -and $BaseUrl -cnotmatch '^http://(127\\.0\\.0\\.1|localhost):[0-9]{1,5}$') { throw 'HTTPS release origin required' }
-if ($PinnedVersion -cnotmatch '^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$' -or $PinnedCommit -cnotmatch '^[0-9a-f]{12,40}$') { throw 'Invalid release pin' }
+if ($PinnedVersion -cnotmatch '^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$' -or $PinnedCommit -cnotmatch '^[0-9a-f]{40}$') { throw 'Invalid release pin' }
 if ($PinnedPreviousKeySha256 -and $PinnedPreviousKeySha256 -cnotmatch '^[0-9a-f]{64}$') { throw 'Invalid prior trust root' }
 Get-Command openssl -ErrorAction Stop | Out-Null
 $InstallRoot = if ($env:BOT_REPORT_WORKER_INSTALL_ROOT) { $env:BOT_REPORT_WORKER_INSTALL_ROOT } else { Join-Path $env:LOCALAPPDATA 'BotReportWorker' }
@@ -528,11 +559,26 @@ try {
   & openssl pkey -pubin -in $KeyPath -outform DER -out $PublicDer 2>$null
   if ($LASTEXITCODE -ne 0) { throw 'Cannot fingerprint pinned public key' }
   $PinnedKeySha256 = (Get-FileHash -Algorithm SHA256 $PublicDer).Hash.ToLowerInvariant()
+  if ($PinnedPublicKeySha256 -cnotmatch '^[0-9a-f]{64}$' -or $PinnedKeySha256 -cne $PinnedPublicKeySha256) { throw 'Pinned RSA SPKI fingerprint mismatch' }
   Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -Uri "$BaseUrl/worker/dist/SHA256SUMS" -OutFile $Sums
   Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -Uri "$BaseUrl/worker/dist/SHA256SUMS.sig" -OutFile $Signature
   & openssl dgst -sha256 -verify $KeyPath -signature $Signature $Sums | Out-Null
   if ($LASTEXITCODE -ne 0) { throw 'Manifest signature verification failed' }
-  $Entries = @(Get-Content $Sums | ForEach-Object {
+  # Enforce the same nine-entry canonical manifest accepted by the offline signer.
+  $RawSums = [IO.File]::ReadAllText($Sums, [Text.Encoding]::ASCII)
+  if (-not $RawSums.EndsWith("\`n") -or $RawSums.Contains("\`r")) { throw 'Noncanonical checksum line endings' }
+  $ManifestNames = @('bot-report-worker-darwin-amd64','bot-report-worker-darwin-arm64',
+    'bot-report-worker-linux-386','bot-report-worker-linux-amd64','bot-report-worker-linux-arm64',
+    'bot-report-worker-linux-armv7','bot-report-worker-windows-amd64.exe',
+    'bot-report-worker-windows-arm64.exe','WORKER_RELEASE')
+  $CanonicalLines = @($RawSums.Substring(0, $RawSums.Length - 1).Split("\`n"))
+  if ($CanonicalLines.Count -ne $ManifestNames.Count) { throw 'Invalid signed checksum inventory size' }
+  for ($i=0; $i -lt $ManifestNames.Count; $i++) {
+    if ($CanonicalLines[$i] -cnotmatch '^[0-9a-f]{64}  ' -or
+        $CanonicalLines[$i].Substring(66) -cne $ManifestNames[$i]) { throw 'Noncanonical signed checksum inventory' }
+  }
+  $ReleaseManifestSha256 = (Get-FileHash -Algorithm SHA256 $Sums).Hash.ToLowerInvariant()
+  $Entries = @($CanonicalLines | ForEach-Object {
     if ($_ -cnotmatch '^([0-9a-fA-F]{64})  (.+)$') { throw 'Malformed checksum manifest' }
     [pscustomobject]@{ Hash = $Matches[1].ToLowerInvariant(); Name = $Matches[2] }
   })
@@ -552,23 +598,26 @@ try {
   $VersionPath = Join-Path $WorkerHome 'release-version'
   $CommitPath = Join-Path $WorkerHome 'release-commit'
   $KeyRecordPath = Join-Path $WorkerHome 'release-key-sha256'
+  $ManifestRecordPath = Join-Path $WorkerHome 'release-manifest-sha256'
   $Existing = Join-Path $Target 'bot-report-worker.exe'
   if ((Test-Path $Existing) -and -not (Test-Path $VersionPath)) { throw 'Existing runtime lacks verified release record' }
-  if ((Test-Path $VersionPath) -or (Test-Path $CommitPath) -or (Test-Path $KeyRecordPath)) {
-    if (-not (Test-Path $VersionPath) -or -not (Test-Path $CommitPath) -or -not (Test-Path $KeyRecordPath)) { throw 'Incomplete release record' }
-    foreach ($Record in @($VersionPath,$CommitPath,$KeyRecordPath)) {
+  if ((Test-Path $VersionPath) -or (Test-Path $CommitPath) -or (Test-Path $KeyRecordPath) -or (Test-Path $ManifestRecordPath)) {
+    if (-not (Test-Path $VersionPath) -or -not (Test-Path $CommitPath) -or -not (Test-Path $KeyRecordPath) -or -not (Test-Path $ManifestRecordPath)) { throw 'Incomplete release record' }
+    foreach ($Record in @($VersionPath,$CommitPath,$KeyRecordPath,$ManifestRecordPath)) {
       if ((Get-Item -LiteralPath $Record).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Unsafe release record' }
     }
     $OldVersion = (Get-Content $VersionPath -Raw).Trim()
     $OldCommit = (Get-Content $CommitPath -Raw).Trim()
     $OldKeySha256 = (Get-Content $KeyRecordPath -Raw).Trim()
+    $OldManifestSha256 = (Get-Content $ManifestRecordPath -Raw).Trim()
+    if ($OldManifestSha256 -cnotmatch '^[0-9a-f]{64}$') { throw 'Malformed recorded manifest digest' }
     if ($OldKeySha256 -cnotmatch '^[0-9a-f]{64}$') { throw 'Malformed recorded trust root' }
     if ($OldKeySha256 -cne $PinnedKeySha256 -and ($PinnedPreviousKeySha256 -cne $OldKeySha256 -or $PinnedVersion -ceq $OldVersion)) {
       throw 'Unapproved signing trust-root replacement'
     }
     if ($OldVersion -notmatch '^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$') { throw 'Malformed release record' }
     if ([version]$PinnedVersion -lt [version]$OldVersion) { throw 'Signed release rollback rejected' }
-    if ($OldVersion -ceq $PinnedVersion -and $OldCommit -cne $PinnedCommit) { throw 'Release version reused for another commit' }
+    if ($OldVersion -ceq $PinnedVersion -and ($OldCommit -cne $PinnedCommit -or $OldManifestSha256 -cne $ReleaseManifestSha256)) { throw 'Release version reused for a different commit or manifest' }
   }
   Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -Uri "$BaseUrl/worker/dist/$File" -OutFile $Downloaded
   $Expected = ExpectedHash $File
@@ -633,6 +682,7 @@ try {
   Set-Content -Encoding ascii -Path $VersionPath -Value $PinnedVersion
   Set-Content -Encoding ascii -Path $CommitPath -Value $PinnedCommit
   Set-Content -Encoding ascii -Path $KeyRecordPath -Value $PinnedKeySha256
+  Set-Content -Encoding ascii -Path $ManifestRecordPath -Value $ReleaseManifestSha256
   $env:Path = "$Target;$env:Path"
   Write-Host "[bot-report-worker] installed standalone runtime: $(Join-Path $Target 'bot-report-worker.exe') (windows/$Arch)"
   if (Test-Path (Join-Path $WorkerHome 'state.json')) {

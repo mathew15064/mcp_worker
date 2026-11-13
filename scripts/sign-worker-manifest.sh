@@ -2,23 +2,20 @@
 # Offline approval-only signing. Never place a real private key in source/CI.
 set -eu
 umask 077
-[ "$#" -eq 1 ] || { echo "Usage: WORKER_RELEASE_EXPECTED_VERSION=x.y.z WORKER_RELEASE_EXPECTED_COMMIT=hex WORKER_RELEASE_EXPECTED_PUBLIC_KEY_SHA256=64-lowercase-hex $0 /absolute/private-key.pem" >&2; exit 2; }
+[ "$#" -eq 1 ] || { echo "Usage: WORKER_RELEASE_EXPECTED_VERSION=x.y.z WORKER_RELEASE_EXPECTED_COMMIT=full40hex WORKER_RELEASE_EXPECTED_PUBLIC_KEY_SHA256=64-lowercase-hex $0 /absolute/private-key.pem" >&2; exit 2; }
 [ -n "${WORKER_RELEASE_EXPECTED_VERSION:-}" ] && [ -n "${WORKER_RELEASE_EXPECTED_COMMIT:-}" ] && [ -n "${WORKER_RELEASE_EXPECTED_PUBLIC_KEY_SHA256:-}" ] || { echo 'Release approval version/commit/public-key fingerprint required' >&2; exit 2; }
 printf '%s' "$WORKER_RELEASE_EXPECTED_PUBLIC_KEY_SHA256" | grep -Eq '^[0-9a-f]{64}$' || { echo 'Approved SPKI SHA-256 must be 64 lowercase hex characters' >&2; exit 2; }
 case "$WORKER_RELEASE_EXPECTED_VERSION" in *[!0-9.]*|'') echo 'Invalid expected version' >&2; exit 2;; esac
 case "$WORKER_RELEASE_EXPECTED_COMMIT" in *[!0-9a-f]*|'') echo 'Invalid expected commit' >&2; exit 2;; esac
 printf '%s' "$WORKER_RELEASE_EXPECTED_VERSION" | grep -Eq '^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$' || { echo 'Invalid semantic version' >&2; exit 2; }
-printf '%s' "$WORKER_RELEASE_EXPECTED_COMMIT" | grep -Eq '^[0-9a-f]{12,40}$' || { echo 'Expected commit must be 12-40 hex characters' >&2; exit 2; }
+printf '%s' "$WORKER_RELEASE_EXPECTED_COMMIT" | grep -Eq '^[0-9a-f]{40}$' || { echo 'Expected commit must be exactly 40 lowercase hexadecimal characters' >&2; exit 2; }
 KEY="$1"
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-# Sign only a clean, reviewed Git source and its exact approved commit prefix.
+# Sign only a clean, independently reviewed Git source at its exact full 40-character commit.
 SOURCE_COMMIT="$(git -C "$ROOT" rev-parse --verify HEAD 2>/dev/null)" || {
   echo 'Cannot verify immutable Git source commit' >&2; exit 2;
 }
-case "$SOURCE_COMMIT" in
-  "$WORKER_RELEASE_EXPECTED_COMMIT"*) ;;
-  *) echo 'Approved release commit does not match source HEAD' >&2; exit 2;;
-esac
+[ "$SOURCE_COMMIT" = "$WORKER_RELEASE_EXPECTED_COMMIT" ] || { echo 'Approved release commit does not exactly match source HEAD' >&2; exit 2; }
 [ -z "$(git -C "$ROOT" status --porcelain --untracked-files=normal)" ] || {
   echo 'Refusing to sign from a dirty source tree' >&2; exit 2;
 }

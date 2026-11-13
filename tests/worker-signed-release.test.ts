@@ -8,11 +8,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { workerSignedReleaseReadiness } from '../src/services/workerReleaseGate';
 
 type ApprovedRelease = {
   version: string;
   commit: string;
   publicKeyBase64: string;
+  publicKeySha256: string;
   previousPublicKeySha256?: string;
 };
 type Installer = (baseUrl: string, approval?: ApprovedRelease) => string;
@@ -25,9 +27,9 @@ type WorkerRouteApi = {
 const workerRoutes = createRequire(__filename)('../src/routes/workerRoutes') as WorkerRouteApi;
 
 const VERSION_A = '2.3.4';
-const COMMIT_A = '0123456789ab';
+const COMMIT_A = '0123456789abcdef0123456789abcdef01234567';
 const VERSION_B = '2.3.5';
-const COMMIT_B = '112233445566';
+const COMMIT_B = '1122334455667788990011223344556677889900';
 
 function hash(data: Buffer | string) {
   return crypto.createHash('sha256').update(data).digest('hex');
@@ -52,8 +54,29 @@ function bundle(
   commit: string,
 ): Package {
   const metadata = Buffer.from('version=' + version + '\ncommit=' + commit + '\n');
+  // A real release must carry the complete, ordered eight-platform inventory.
+  const platforms = [
+    'bot-report-worker-darwin-amd64',
+    'bot-report-worker-darwin-arm64',
+    'bot-report-worker-linux-386',
+    'bot-report-worker-linux-amd64',
+    'bot-report-worker-linux-arm64',
+    'bot-report-worker-linux-armv7',
+    'bot-report-worker-windows-amd64.exe',
+    'bot-report-worker-windows-arm64.exe',
+  ];
   const sums = Buffer.from(
-    hash(binary) + '  ' + file + '\n' + hash(metadata) + '  WORKER_RELEASE\n',
+    platforms
+      .map(
+        (name) =>
+          hash(name === file ? binary : Buffer.from('test-only-placeholder:' + name)) +
+          '  ' +
+          name +
+          '\n',
+      )
+      .join('') +
+      hash(metadata) +
+      '  WORKER_RELEASE\n',
   );
   return {
     binary,
@@ -88,6 +111,18 @@ function execute(
     });
   });
 }
+
+void test('read-only source gate cannot self-authorize a production release', () => {
+  assert.deepEqual(workerSignedReleaseReadiness(), {
+    code: 'WORKER_SIGNED_RELEASE_PENDING',
+    decision: 'NO_GO',
+    signingKeyApproved: false,
+    signedArtifactsApproved: false,
+    productionDistributionApproved: false,
+    railwayInstallerHttpStatus: 503,
+  });
+  assert.equal(Object.isFrozen(workerSignedReleaseReadiness()), true);
+});
 
 void test('no approved release is embedded in any downloadable installer', () => {
   for (const source of [
@@ -261,8 +296,8 @@ void test(
     const binaryA = await makeBinary(VERSION_A, COMMIT_A);
     const binaryB = await makeBinary(VERSION_B, COMMIT_B);
     const binaryWrongCommit = await makeBinary(VERSION_B, COMMIT_A);
-    const binaryC = await makeBinary('2.3.7', 'aabbccddeeff');
-    const binaryD = await makeBinary('2.3.6', 'aabbccddeeff');
+    const binaryC = await makeBinary('2.3.7', 'aabbccddeeff00112233445566778899aabbccdd');
+    const binaryD = await makeBinary('2.3.6', 'aabbccddeeff00112233445566778899aabbccdd');
     const packageA = bundle(key, file, binaryA, VERSION_A, COMMIT_A);
     const packageB = bundle(key, file, binaryB, VERSION_B, COMMIT_B);
     let active: Package = packageA;
@@ -310,6 +345,7 @@ void test(
           version: VERSION_A,
           commit: COMMIT_A,
           publicKeyBase64: key.publicKeyBase64,
+          publicKeySha256: key.fingerprint,
         },
         extra: NodeJS.ProcessEnv = {},
       ) {
@@ -344,7 +380,7 @@ void test(
           ? COMMIT_A
           : expected.equals(binaryB)
             ? COMMIT_B
-            : 'aabbccddeeff';
+            : 'aabbccddeeff00112233445566778899aabbccdd';
         const expectedFingerprint = expected.equals(binaryC) ? wrong.fingerprint : key.fingerprint;
         assert.equal(
           fs.readFileSync(path.join(stateRoot, 'release-version'), 'utf8').trim(),
@@ -382,12 +418,67 @@ void test(
         fs.readFileSync(path.join(stateRoot, 'release-key-sha256'), 'utf8').trim(),
         key.fingerprint,
       );
+      assert.equal(
+        fs.readFileSync(path.join(stateRoot, 'release-manifest-sha256'), 'utf8').trim(),
+        hash(packageA.sums),
+      );
       const identity = Buffer.from('test-only-identity-sentinel');
       const config = Buffer.from('test-only-config-sentinel');
       fs.writeFileSync(path.join(stateRoot, 'state.json'), identity);
       fs.writeFileSync(path.join(stateRoot, 'config.json'), config);
       await t.test('valid signed same-version reinstall', async () => {
         assert.equal((await install()).code, 0);
+      });
+      await t.test('signed same version and commit cannot replay altered manifest', async () => {
+        active = bundle(
+          key,
+          file,
+          Buffer.concat([binaryA, Buffer.from('\n# different build\n')]),
+          VERSION_A,
+          COMMIT_A,
+        );
+        await unchanged('same-version manifest replay', install());
+        active = packageA;
+      });
+      await t.test('signed noncanonical inventory with valid signature is rejected', async () => {
+        for (const invalid of [
+          packageA.sums.toString().split('\n').slice(0, -2).join('\n') + '\n',
+          packageA.sums.toString() + hash('unexpected') + '  extra-file\n',
+          packageA.sums.toString().replace('bot-report-worker-linux-386', '../unauthorized-file'),
+          packageA.sums
+            .toString()
+            .replace('bot-report-worker-darwin-amd64', 'bot-report-worker-Darwin-amd64'),
+        ]) {
+          const sums = Buffer.from(invalid);
+          active = { ...packageA, sums, signature: crypto.sign('sha256', sums, key.privateKey) };
+          await unchanged('noncanonical signed inventory', install());
+        }
+        active = packageA;
+      });
+      await t.test(
+        'approved fingerprint mismatch is rejected independent of key bytes',
+        async () => {
+          await unchanged(
+            'wrong pinned SPKI digest',
+            install({
+              version: VERSION_A,
+              commit: COMMIT_A,
+              publicKeyBase64: key.publicKeyBase64,
+              publicKeySha256: wrong.fingerprint,
+            }),
+          );
+        },
+      );
+      await t.test('abbreviated SHA is rejected despite valid signature', async () => {
+        await unchanged(
+          'short source SHA',
+          install({
+            version: VERSION_A,
+            commit: COMMIT_A.slice(0, 12),
+            publicKeyBase64: key.publicKeyBase64,
+            publicKeySha256: key.fingerprint,
+          }),
+        );
       });
       await t.test('leading-zero semantic version is rejected', async () => {
         await unchanged(
@@ -396,6 +487,7 @@ void test(
             version: '02.3.4',
             commit: COMMIT_A,
             publicKeyBase64: key.publicKeyBase64,
+            publicKeySha256: key.fingerprint,
           }),
         );
       });
@@ -406,6 +498,7 @@ void test(
             version: VERSION_A,
             commit: 'deadbeef',
             publicKeyBase64: key.publicKeyBase64,
+            publicKeySha256: key.fingerprint,
           }),
         );
       });
@@ -417,6 +510,7 @@ void test(
             version: VERSION_B,
             commit: COMMIT_B,
             publicKeyBase64: key.publicKeyBase64,
+            publicKeySha256: key.fingerprint,
           }),
         );
         active = packageA;
@@ -431,6 +525,7 @@ void test(
               version: VERSION_B,
               commit: COMMIT_B,
               publicKeyBase64: key.publicKeyBase64,
+              publicKeySha256: key.fingerprint,
             }),
           );
           active = packageA;
@@ -468,6 +563,7 @@ void test(
             version: VERSION_A,
             commit: COMMIT_A,
             publicKeyBase64: wrong.publicKeyBase64,
+            publicKeySha256: wrong.fingerprint,
           }),
         );
       });
@@ -493,6 +589,7 @@ void test(
           version: VERSION_B,
           commit: COMMIT_B,
           publicKeyBase64: key.publicKeyBase64,
+          publicKeySha256: key.fingerprint,
         });
         assert.equal(upgraded.code, 0, 'signed upgrade: ' + upgraded.output);
         assert.deepEqual(fs.readFileSync(installed), binaryB);
@@ -523,6 +620,7 @@ void test(
             version: lowerVersion,
             commit: COMMIT_B,
             publicKeyBase64: key.publicKeyBase64,
+            publicKeySha256: key.fingerprint,
           });
           assert.notEqual(downgraded.code, 0, 'rounded semver accepted a rollback');
           assert.match(downgraded.output, /rollback rejected/i);
@@ -538,11 +636,16 @@ void test(
         await unchanged('signed downgrade', install(), binaryB);
       });
       await t.test('failed signed upgrade restores previously installed binary', async () => {
-        active = bundle(key, file, binaryD, '2.3.6', 'aabbccddeeff');
+        active = bundle(key, file, binaryD, '2.3.6', 'aabbccddeeff00112233445566778899aabbccdd');
         await unchanged(
           'start failure rollback',
           install(
-            { version: '2.3.6', commit: 'aabbccddeeff', publicKeyBase64: key.publicKeyBase64 },
+            {
+              version: '2.3.6',
+              commit: 'aabbccddeeff00112233445566778899aabbccdd',
+              publicKeyBase64: key.publicKeyBase64,
+              publicKeySha256: key.fingerprint,
+            },
             { SIGNED_TEST_RUNNING: '1', SIGNED_TEST_FAIL_START: '1' },
           ),
           binaryB,
@@ -558,21 +661,23 @@ void test(
         active = packageB;
       });
       await t.test('same version with different signed commit is rejected', async () => {
-        active = bundle(key, file, binaryB, VERSION_B, 'bbbbbbbbbbbb');
+        active = bundle(key, file, binaryB, VERSION_B, 'bbbbbbbbbbbb1111222233334444555566667777');
         await unchanged(
           'version reuse',
           install({
             version: VERSION_B,
-            commit: 'bbbbbbbbbbbb',
+            commit: 'bbbbbbbbbbbb1111222233334444555566667777',
             publicKeyBase64: key.publicKeyBase64,
+            publicKeySha256: key.fingerprint,
           }),
           binaryB,
         );
       });
       const rotated = {
         version: '2.3.7',
-        commit: 'aabbccddeeff',
+        commit: 'aabbccddeeff00112233445566778899aabbccdd',
         publicKeyBase64: wrong.publicKeyBase64,
+        publicKeySha256: wrong.fingerprint,
       };
       await t.test('new signer is not trusted without an approved rotation', async () => {
         active = bundle(wrong, file, binaryC, rotated.version, rotated.commit);
@@ -613,29 +718,42 @@ void test(
         );
       });
       await t.test('old trust root cannot silently take control after rotation', async () => {
-        active = bundle(key, file, binaryA, '2.3.8', 'aabbccddeeff');
+        active = bundle(key, file, binaryA, '2.3.8', 'aabbccddeeff00112233445566778899aabbccdd');
         await unchanged(
           'root regression',
           install({
             version: '2.3.8',
-            commit: 'aabbccddeeff',
+            commit: 'aabbccddeeff00112233445566778899aabbccdd',
             publicKeyBase64: key.publicKeyBase64,
+            publicKeySha256: key.fingerprint,
           }),
           binaryC,
         );
       });
       await t.test('rotation from an unlisted previous root fails closed', async () => {
-        active = bundle(key, file, binaryA, '2.3.8', 'aabbccddeeff');
+        active = bundle(key, file, binaryA, '2.3.8', 'aabbccddeeff00112233445566778899aabbccdd');
         await unchanged(
           'wrong rotation predecessor',
           install({
             version: '2.3.8',
-            commit: 'aabbccddeeff',
+            commit: 'aabbccddeeff00112233445566778899aabbccdd',
             publicKeyBase64: key.publicKeyBase64,
+            publicKeySha256: key.fingerprint,
             previousPublicKeySha256: '0'.repeat(64),
           }),
           binaryC,
         );
+      });
+      await t.test('corrupted installed manifest record fails closed', async () => {
+        const record = path.join(stateRoot, 'release-manifest-sha256');
+        const prior = fs.readFileSync(record);
+        try {
+          fs.writeFileSync(record, 'not-a-sha256\n');
+          active = bundle(wrong, file, binaryC, rotated.version, rotated.commit);
+          await unchanged('corrupt recorded manifest', install(rotated), binaryC);
+        } finally {
+          fs.writeFileSync(record, prior);
+        }
       });
       await t.test('corrupted installed trust record fails closed', async () => {
         fs.writeFileSync(path.join(stateRoot, 'release-key-sha256'), 'corrupt\n');
@@ -750,6 +868,11 @@ void test(
         'short commit accepted',
       );
       assert.notEqual((await sign('02.3.4')).code, 0, 'leading-zero version accepted');
+      assert.notEqual(
+        (await sign(VERSION_A, privatePath, approvedCommit.slice(0, 12))).code,
+        0,
+        'abbreviated approved commit accepted',
+      );
       fs.writeFileSync(path.join(root, 'unexpected-source-file'), 'dirty');
       assert.notEqual((await sign(VERSION_A)).code, 0, 'dirty source tree signed');
       fs.rmSync(path.join(root, 'unexpected-source-file'));
