@@ -68,9 +68,8 @@ LABEL org.opencontainers.image.revision="${BOT_REPORT_GIT_SHA}" \
       org.opencontainers.image.created="${BOT_REPORT_BUILD_TIME}" \
       org.bot-report.node-base="${BOT_REPORT_NODE_IMAGE}"
 
-# Set production bootstrap defaults. MySQL connection details are configured from
-# the Admin UI and persisted encrypted under /app/data. DATABASE_PATH remains only
-# as the optional legacy SQLite import source for existing installations.
+# Railway's primary persistent database is SQLite on the mounted /app/data volume.
+# Never run this image with ephemeral database storage or an external DB dependency.
 ENV NODE_ENV=production \
     PORT=80 \
     HOST=0.0.0.0 \
