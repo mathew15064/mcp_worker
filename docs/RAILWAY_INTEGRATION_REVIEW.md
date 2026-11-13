@@ -1,3 +1,52 @@
+# Railway + SQLite — Wave 2 Integration Review
+
+**Decision: PARTIAL ACCEPTANCE / RELEASE BLOCKED.**
+**Reviewed: 2026-11-13 (UTC+07).** GitHub-verified, no live Railway project. The section below supersedes the historical Wave 1 snapshot, which is preserved after the divider.
+
+## Exact reviewed sources
+
+| Workstream | SHA pinned | Decision | Evidence |
+|---|---|---|---|
+| W2-T01 Signed Worker | a2c2e5588f5e1e358f8183aa317676c8680ce5a3 | ACCEPT (offline signing code; no public release) | [CI](https://github.com/mathew15064/mcp_worker/actions/runs/43267904490), [offline Linux/macOS/Windows matrix](https://github.com/mathew15064/mcp_worker/actions/runs/43267904508), [release verification](https://github.com/mathew15064/mcp_worker/actions/runs/43267904512): PASS |
+| W2-T02 Railway IaC/Docker | cf803093fcf8ab608f004c0780e4d9b76f71fff0 | ACCEPT for review-only SDK/Docker preview | [CI](https://github.com/mathew15064/mcp_worker/actions/runs/43266686798) PASS after cancelled macOS job rerun; [Railway image](https://github.com/mathew15064/mcp_worker/actions/runs/43266687078), [release](https://github.com/mathew15064/mcp_worker/actions/runs/43266686747): PASS |
+| W2-T03 Actual Worker WSS/OAuth/MCP | 49971755d8090d33ad98b18b91592d274334fc44 | ACCEPT offline E2E | [CI](https://github.com/mathew15064/mcp_worker/actions/runs/43265791695), [non-skippable Go Worker E2E](https://github.com/mathew15064/mcp_worker/actions/runs/43265791778), [release](https://github.com/mathew15064/mcp_worker/actions/runs/43265791742): PASS |
+| W2-T04 PR stack/readiness | 2e47eac1002fc5467f61364d52d7710924299bc7 | ACCEPT safety guard; deliberate release blocker | [CI](https://github.com/mathew15064/mcp_worker/actions/runs/43335716743) and [release](https://github.com/mathew15064/mcp_worker/actions/runs/43335716557) PASS. [Stack guard](https://github.com/mathew15064/mcp_worker/actions/runs/43335716637): unit PASS, ancestry BLOCKED_STACKED intentionally fails. |
+
+All four task branches descend directly from immutable Wave 2 baseline e7de57a28f4894d302a6dfb24a577ea7b38b9a08. GitHub compared their changed paths; **no pairwise file-path overlaps**. The shared baseline already includes six verified T03 SQLite hardening files from Wave 1 (eeea56ea69779c9d68f7120123dd1d0968030530).
+
+## Integration candidate and provenance
+
+- [Draft PR #25](https://github.com/mathew15064/mcp_worker/pull/25), branch review/railway-p15-w2-t05-integration; base PR #19 branch, not main and not PR #15.
+- Import signing + WSS E2E at [c72900b](https://github.com/mathew15064/mcp_worker/commit/c72900bac7c699847fcc11fe16877bec7e607f42).
+- Import Railway SDK/IaC + Docker at [0c3874d](https://github.com/mathew15064/mcp_worker/commit/0c3874dc537763a73d70590db15f2b283e265de9).
+- Change only Railway image workflow's branch filter at [20e8c7b](https://github.com/mathew15064/mcp_worker/commit/20e8c7b878a150309a967cc59cb839501eb172dd) so that the real image validation is required on this integration candidate instead of silently skipped.
+- Import read-only PR stack guard + docs at [65f1fb5](https://github.com/mathew15064/mcp_worker/commit/65f1fb5c9b92836fbe5ad5d143585eeb054fb002).
+- GitHub checks on combined candidate: [CI](https://github.com/mathew15064/mcp_worker/actions/runs/43336416296), [Railway image](https://github.com/mathew15064/mcp_worker/actions/runs/43336416409), [real Go E2E](https://github.com/mathew15064/mcp_worker/actions/runs/43336416380), [signed installer matrix](https://github.com/mathew15064/mcp_worker/actions/runs/43336416799), [release verification](https://github.com/mathew15064/mcp_worker/actions/runs/43336416364), [intentional stack guard](https://github.com/mathew15064/mcp_worker/actions/runs/43336416450). Check their exact final conclusions after this report commit; do not infer an all-green suite from individual source runs.
+
+## Security and correctness review
+
+**Signed installer:** T01 uses signed SHA256SUMS, verified Worker release metadata, version/commit pins, tamper/downgrade rejection and fail-safe binary replacement. Test-only ephemeral signing keys are not production keys. APPROVED_WORKER_RELEASE has no approved public key/version/commit. **Railway installer and binary download remain HTTP 503**. Never enable unsigned downloads or claim a public release.
+
+**Railway template:** The pinned railway@3.12.0 SDK and offline graph validation have passed and the disposable Docker image verifies an actual mounted /app/data volume, the non-root runtime, persistence and backup/restore. **The IaC source commit SHA is intentionally a review-only pre-release placeholder**: it must be repinned to an approved immutable, fully integrated release SHA. An offline SDK validation is *not* a linked Railway CLI plan and is not a deployed template.
+
+**OAuth / Worker:** T03 E2E actually builds sandbox Go Worker and exercises loopback WSS, S256 PKCE, an MCP command, reconnect and non-idempotent replay rejection. This is **not live Railway public HTTPS/WSS acceptance**.
+
+**SQLite:** Wave 1 T03 storage hardening and secure owner session handling are part of the baseline. Backups and recovery have been proven on disposable local volumes, not via an independently restored remote Railway volume.
+
+**PR ancestry (critical merge blocker):** Base TS6 → Vercel PR #14: +22 commits; TS6 → Railway PR #15: +42 commits; Vercel PR #14 → Railway PR #15: +20 commits, 0 behind. PR #15 inherits all 22 Vercel commits. The read-only guard intentionally returns **BLOCKED_STACKED / exit 2** to prevent accidental direct merge. An expected red guard is not a reason to weaken CI. Follow [PR stack migration plan](RAILWAY_PR_STACK_MIGRATION.md): separately approve Vercel dependency or create an audited independent Railway patch series.
+
+## Invariants and stop rules
+
+- PR #14, PR #15, PR #19 and PR #25 must stay Draft and unmerged.
+- Do not deploy to alive.locallhost.shop, create paid Railway project/volume, publish Worker binaries or public template, alter production keys or execute a production migration.
+- Full combined CI green (apart from intentional ancestry blocker) does not authorize merge: cost, owner, independent-instance isolation, off-volume restore, signed release governance, Railway CLI linked plan and real public HTTPS/WSS gates still require approval and live evidence.
+
+**Overall: integrated beta code for review, NOT a public one-click release.**
+
+---
+
+## Historical Wave 1 review (kept for evidence; no longer current)
+
 # T05 — Integration Review of Railway + SQLite self-hosting
 
 **Status:** PARTIAL integration snapshot: exactly six T03 SQLite security files accepted on T05; all other task code excluded. No production merge or deploy.  

@@ -1,3 +1,41 @@
+# Railway + SQLite — Wave 2 Release Acceptance
+
+**Reviewed 2026-11-13, overall NOT READY.** This matrix reflects the Wave 2 code integration candidate; historical Wave 1 results follow after the divider. Offline success and actual deployment are separate evidence levels.
+
+| Gate | Status | Evidence / remaining action |
+|---|---|---|
+| Source branch ancestry and no path overlap | PASS | Four source heads share exact Wave 2 baseline e7de57a; compare shows no overlapping paths |
+| W2-T01 Node/Go/Chromium and signed Worker checks | PASS | [CI](https://github.com/mathew15064/mcp_worker/actions/runs/43267904490) + [Linux/macOS/Windows signature matrix](https://github.com/mathew15064/mcp_worker/actions/runs/43267904508) |
+| W2-T01 release verification (no publishing) | PASS | [Run 43267904512](https://github.com/mathew15064/mcp_worker/actions/runs/43267904512) |
+| Approved public signature key, version, artifact | BLOCKED | No production-approved trust pin or authorized signed release; HTTP 503 must remain |
+| W2-T02 real Railway SDK offline graph (one app/volume/replica) | PASS | [Real SDK validation + Docker image](https://github.com/mathew15064/mcp_worker/actions/runs/43266687078); source configuration only |
+| W2-T02 TypeScript/quality/CI | PASS | [Run 43266686798](https://github.com/mathew15064/mcp_worker/actions/runs/43266686798), cancelled macOS job rerun PASS |
+| W2-T02 release verification (no publishing) | PASS | [Run 43266686747](https://github.com/mathew15064/mcp_worker/actions/runs/43266686747) |
+| Railway linked CLI plan | NOT_TESTED | Requires owner-approved, linked nonproduction Railway environment |
+| Approved immutable template source | BLOCKED | Current IaC SHA intentionally points to pre-release baseline, not approved integrated artifact |
+| Docker mount guard, node UID, restart, local backup | PASS | [Railway disposable volume image CI](https://github.com/mathew15064/mcp_worker/actions/runs/43266687078) |
+| SQLite schema/owner uniqueness/session/CSRF | PASS | Wave 1 T03 [CI](https://github.com/mathew15064/mcp_worker/actions/runs/43260642364) and [release](https://github.com/mathew15064/mcp_worker/actions/runs/43260642367) |
+| Local OAuth S256 and real Go Worker WSS/MCP | PASS | [W2-T03 required Go E2E](https://github.com/mathew15064/mcp_worker/actions/runs/43265791778), [CI](https://github.com/mathew15064/mcp_worker/actions/runs/43265791695) |
+| Worker reconnect, replay, scope/capability denial | PASS | W2-T03 mandatory sandbox suite; public Railway connection still NOT_TESTED |
+| W2-T04 read-only ancestry unit tests | PASS | [Stack guard unit job](https://github.com/mathew15064/mcp_worker/actions/runs/43335716637) |
+| W2-T04 unsafe direct PR #15 merge | BLOCKED | Same guard correctly returns BLOCKED_STACKED / exit 2 because #14 is ancestor |
+| Combined candidate CI | NOT_TESTED | [Run 43336416296](https://github.com/mathew15064/mcp_worker/actions/runs/43336416296) pending exact completed result at document authoring |
+| Combined candidate Railway Docker + SDK | NOT_TESTED | [Run 43336416409](https://github.com/mathew15064/mcp_worker/actions/runs/43336416409) pending final result |
+| Combined candidate signed installers / WSS E2E | PASS | [WSS 43336416380](https://github.com/mathew15064/mcp_worker/actions/runs/43336416380) and [installer 43336416799](https://github.com/mathew15064/mcp_worker/actions/runs/43336416799) required jobs passed |
+| Combined candidate release verification | NOT_TESTED | [Run 43336416364](https://github.com/mathew15064/mcp_worker/actions/runs/43336416364) pending final result |
+| Live Railway domain, volume, owner, WSS, MCP | NOT_TESTED | No real Railway instance provisioned |
+| Off-volume remote backup and independent restore | NOT_TESTED | Only disposable Docker image evidence |
+| Two separate deployed projects / secret/token/Worker isolation | NOT_TESTED | Requires owner-approved isolated test environments |
+| Public one-click template and release | BLOCKED | No publication or live sign-off |
+| Railway compute/volume cost authorization | BLOCKED | No paid resource authorization in this review |
+| Merge topology and final security sign-off | BLOCKED | PR #15 stacked on PR #14; explicit owner decision needed |
+
+**Release decision: NO-GO.** Keep signed installer fail-closed and PRs Draft. Consult [Wave 2 findings](RAILWAY_INTEGRATION_REVIEW.md) and [PR stack migration](RAILWAY_PR_STACK_MIGRATION.md).
+
+---
+
+## Historical Wave 1 acceptance (kept for evidence; superseded)
+
 # Railway + SQLite release acceptance matrix (T05)
 
 **Scope:** Review snapshot based on GitHub. `PASS` means verified at the stated scope; `NOT_TESTED` means no evidence, `BLOCKED` means a mandatory prerequisite not met. Do not equate CI with production deployment.

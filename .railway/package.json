@@ -2,6 +2,6 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "railway": "^3.12.0"
+    "railway": "3.12.0"
   }
 }

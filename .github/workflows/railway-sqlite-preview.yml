@@ -2,6 +2,10 @@ name: Railway SQLite preview (no provisioning)
 
 on:
   pull_request:
+  push:
+    branches:
+      - feat/railway-p15-w2-t02-template
+      - review/railway-p15-w2-t05-integration
   workflow_dispatch:
 
 permissions:
@@ -9,17 +13,44 @@ permissions:
 
 jobs:
   railway-image:
-    if: github.head_ref == 'feature/railway-sqlite-oneclick-20261112' || github.ref_name == 'feature/railway-sqlite-oneclick-20261112'
+    if: >-
+      github.head_ref == 'feature/railway-sqlite-oneclick-20261112' ||
+      github.ref_name == 'feature/railway-sqlite-oneclick-20261112' ||
+      github.head_ref == 'feat/railway-p15-w2-t02-template' ||
+      github.ref_name == 'feat/railway-p15-w2-t02-template' ||
+      github.head_ref == 'review/railway-p15-w2-t05-integration' ||
+      github.ref_name == 'review/railway-p15-w2-t05-integration'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26.13.0'
+          cache: npm
+      - name: Real pinned Railway SDK, strict TS, and checkout-only source tests
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          npm ci --prefix .railway --ignore-scripts
+          ./node_modules/.bin/tsc --noEmit --skipLibCheck --module NodeNext --moduleResolution NodeNext --target ES2022 --allowImportingTsExtensions .railway/railway.ts .railway/validate.ts
+          ./.railway/node_modules/.bin/tsx .railway/validate.ts
+          npm run typecheck
+          ./node_modules/.bin/eslint tests/railway-platform-config.test.ts tests/railway-platform-config-docker.test.ts src/config/railwayOrigin.ts
+          ./node_modules/.bin/prettier --check tests/railway-platform-config.test.ts tests/railway-platform-config-docker.test.ts
+          npm run build
+          node --test dist/tests/railway-platform-config.test.js
       - name: Validate Railway volume initialization script
         run: sh -n docker-entrypoint-railway.sh
       - name: Build isolated Railway image
         run: docker build -f Dockerfile.railway -t mcp-railway-sqlite:ci .
+      - name: Real Docker integration (must run, never skipped)
+        env:
+          RAILWAY_DOCKER_INTEGRATION: '1'
+          RAILWAY_TEST_IMAGE: mcp-railway-sqlite:ci
+        run: node --test dist/tests/railway-platform-config-docker.test.js
       - name: Verify fail-closed volume and persisted SQLite restart
         shell: bash
         run: |
