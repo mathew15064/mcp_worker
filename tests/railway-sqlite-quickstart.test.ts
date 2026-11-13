@@ -64,8 +64,13 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
     const initial = await fetch(base + '/setup', { headers, redirect: 'manual' });
     assert.equal(initial.status, 200);
     const firstCookie = cookie(initial);
-    const token = csrf(await initial.text());
+    const setupPage = await initial.text();
+    const token = csrf(setupPage);
     assert.ok(token && firstCookie, 'CSRF form and signed SQLite session are required');
+    assert.match(setupPage, /Step 1 of 6: Create your Admin/);
+    assert.match(setupPage, /signed Worker release approval is pending/);
+    assert.doesNotMatch(setupPage, new RegExp(process.env.MCP_SETUP_SECRET || 'never-matches'));
+    assert.equal(initial.headers.get('referrer-policy'), 'no-referrer');
 
     const submit = (setupKey: string) =>
       fetch(base + '/setup', {
@@ -145,6 +150,11 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
     );
     const created = claims.find((response) => response.status === 303);
     assert.equal(created?.headers.get('location'), '/login');
+    const winnerCookie = claims[0].status === 303 ? firstCookie : rivalCookie;
+    const afterClaimLogin = await fetch(base + '/login', {
+      headers: { ...headers, cookie: winnerCookie },
+    });
+    assert.match(await afterClaimLogin.text(), /name="returnTo" value="\/admin\/onboarding"/);
     assert.equal((await submit(process.env.MCP_SETUP_SECRET || '')).status, 409);
     assert.equal((await fetch(base + '/setup', { headers, redirect: 'manual' })).status, 302);
     assert.equal((await fetch(base + '/readyz', { headers })).status, 200);
@@ -189,6 +199,86 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
     const authenticatedCookie = cookie(signedIn);
     assert.ok(authenticatedCookie);
     assert.notEqual(authenticatedCookie, loginCookie, 'Login must regenerate the session ID');
+    const guestGuide = await fetch(base + '/admin/onboarding', { headers, redirect: 'manual' });
+    assert.equal(guestGuide.status, 302, 'Onboarding status is private to an Admin session');
+    const guideResponse = await fetch(base + '/admin/onboarding', {
+      headers: { ...headers, cookie: authenticatedCookie },
+    });
+    assert.equal(guideResponse.status, 200);
+    assert.equal(guideResponse.headers.get('cache-control'), 'no-store');
+    const guide = await guideResponse.text();
+    assert.match(guide, /data-onboarding-status="blocked"/);
+    assert.match(guide, /data-onboarding-step="4" data-complete="false" data-state="blocked"/);
+    assert.match(guide, /WORKER_SIGNED_RELEASE_PENDING/);
+    assert.match(guide, /Connect ChatGPT \(manual\)/);
+    assert.match(guide, /Copy endpoint/);
+    assert.doesNotMatch(guide, /All six steps complete/);
+    assert.doesNotMatch(guide, new RegExp(process.env.MCP_SETUP_SECRET || 'never-matches'));
+    const headInstaller = await fetch(base + '/worker/install.sh', {
+      method: 'HEAD',
+      headers,
+    });
+    assert.equal(
+      headInstaller.status,
+      503,
+      'Browser probe must see the actual signed release gate',
+    );
+    const firstClientPage = await fetch(base + '/admin/clients?first_call=1', {
+      headers: { ...headers, cookie: authenticatedCookie },
+    });
+    assert.equal(firstClientPage.status, 200);
+    const firstClientHtml = await firstClientPage.text();
+    assert.match(firstClientHtml, /name="display_name" value="ChatGPT"/);
+    assert.match(firstClientHtml, /https:\/\/chatgpt\.com\/connector_platform_oauth_redirect/);
+    assert.match(firstClientHtml, /name="scopes" value="bot_report.read" checked/);
+    assert.doesNotMatch(firstClientHtml, /name="scopes" value="bot_report.terminal" checked/);
+    assert.doesNotMatch(firstClientHtml, /name="scopes" value="offline_access" checked/);
+
+    // Real Chromium verifies the read-only browser probes when installed. The
+    // HTTP/CSRF/OAuth fixture above still runs on PCs without a browser binary.
+    const { chromium } = await import('@playwright/test');
+    let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
+    try {
+      browser = await chromium.launch({ headless: true });
+    } catch {
+      console.log('T5 browser check skipped: Chromium is not installed on this PC');
+    }
+    if (browser) {
+      try {
+        const context = await browser.newContext({ extraHTTPHeaders: headers });
+        const separator = authenticatedCookie.indexOf('=');
+        await context.addCookies([
+          {
+            name: authenticatedCookie.slice(0, separator),
+            value: authenticatedCookie.slice(separator + 1),
+            url: base,
+          },
+        ]);
+        const page = await context.newPage();
+        const pageErrors: string[] = [];
+        page.on('pageerror', (error) => pageErrors.push(error.message));
+        await page.goto(base + '/admin/onboarding');
+        assert.equal(await page.locator('[data-onboarding-step]').count(), 6);
+        await page.waitForFunction(() =>
+          document
+            .querySelector('[data-worker-installer-message]')
+            ?.textContent?.includes('returned HTTP 503'),
+        );
+        assert.match(await page.locator('[data-worker-installer-message]').innerText(), /HTTP 503/);
+        assert.equal(
+          await page.locator('[data-onboarding-status]').getAttribute('data-onboarding-status'),
+          'blocked',
+        );
+        assert.match(
+          await page.locator('#quickstart-endpoint-check').innerText(),
+          /OAuth discovery responded/,
+        );
+        assert.deepEqual(pageErrors, [], 'Wizard JavaScript must not throw');
+        await context.close();
+      } finally {
+        await browser.close();
+      }
+    }
 
     const oauthService = (await import('../src/services/mcpOAuthService.js')).default;
     const registered = await oauthService.registerClient({
@@ -268,6 +358,66 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
       body: grant.toString(),
     });
     assert.equal(replay.status, 400, 'Authorization code must be single-use');
+    assert.equal(
+      await (
+        await import('../src/repositories/mcpOAuthRepository.js')
+      ).default.hasAdminRuntimeCall(),
+      false,
+    );
+    const unauthorized = await fetch(base + '/mcp', {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 30,
+        method: 'tools/call',
+        params: { name: 'runtime_info', arguments: {} },
+      }),
+    });
+    assert.equal(unauthorized.status, 401);
+    assert.equal(
+      await (
+        await import('../src/repositories/mcpOAuthRepository.js')
+      ).default.hasAdminRuntimeCall(),
+      false,
+    );
+    const authenticatedCall = await fetch(base + '/mcp', {
+      method: 'POST',
+      headers: {
+        ...headers,
+        authorization: `Bearer ${grantBody.access_token}`,
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 31,
+        method: 'tools/call',
+        params: { name: 'runtime_info', arguments: {} },
+      }),
+    });
+    assert.equal(authenticatedCall.status, 200);
+    assert.match(await authenticatedCall.text(), /"result"|"content"/);
+    const oauthRepo = (await import('../src/repositories/mcpOAuthRepository.js')).default;
+    for (let attempt = 0; attempt < 20 && !(await oauthRepo.hasAdminRuntimeCall()); attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.equal(
+      await oauthRepo.hasAdminRuntimeCall(),
+      true,
+      'Authenticated read-only MCP call must be audited',
+    );
+    const afterVerifiedCall = await fetch(base + '/admin/onboarding', {
+      headers: { ...headers, cookie: authenticatedCookie },
+    });
+    const postCallGuide = await afterVerifiedCall.text();
+    assert.match(postCallGuide, /data-onboarding-step="6" data-complete="true"/);
+    assert.match(postCallGuide, /data-onboarding-status="blocked"/);
+    assert.doesNotMatch(postCallGuide, /All six steps complete/);
 
     await new Promise<void>((resolve) => server?.close(() => resolve()));
     server = null;

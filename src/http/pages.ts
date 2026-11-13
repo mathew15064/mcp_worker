@@ -367,11 +367,15 @@ function onboardingPage({
     }
   } catch (_) {}
   const endpointReady = ready && enabled && mode !== 'unsafe';
+  // The pinned Railway Worker installer is deliberately gated with HTTP 503 until
+  // a signed release is approved. Never infer installability from a live Worker.
+  const signedReleasePending = process.env.MCP_PLATFORM === 'railway';
+  const verifiedWorker = workerReady && !signedReleasePending;
   const next = !ready
     ? 2
     : !endpointReady
       ? 3
-      : !workerReady
+      : !verifiedWorker
         ? 4
         : !clientReady
           ? 5
@@ -382,7 +386,7 @@ function onboardingPage({
     [
       'Admin sign-in',
       true,
-      'You are signed in. Keep the generated admin password and encryption keys private. Back up the installer env and volumes together.',
+      'You are signed in. Protect the Admin password you chose and your deployment secrets. Back up the persistent database separately; no credentials are shown in this wizard.',
       '/admin/settings/runtime',
       'Runtime settings',
     ],
@@ -390,7 +394,9 @@ function onboardingPage({
       'Database readiness',
       ready,
       ready
-        ? 'MySQL source is ready.'
+        ? signedReleasePending
+          ? 'Persistent Railway SQLite is ready.'
+          : 'MySQL source is ready.'
         : 'Current state: ' +
           storage.state +
           '. Test and save the connection in Database Settings; initialize explicitly only when intended. Do not reset existing data.',
@@ -412,22 +418,24 @@ function onboardingPage({
     ],
     [
       'Enroll a Worker',
-      ready && workerReady,
-      'Create a short-lived enrollment token in Workers. Install only on a machine you control; run login with an explicit allowed root. Shell permission grants OS-user command authority; allowed roots are not a sandbox. Local HTTP requires --insecure-http and a same-host Worker. Do not install over an existing Worker unintentionally.',
+      ready && verifiedWorker,
+      signedReleasePending
+        ? 'Blocked: Railway Worker installer returns HTTP 503 (WORKER_SIGNED_RELEASE_PENDING). A signed and approved Worker release is not available. Do not use unsigned downloads or bypass verification. No Worker is installed by this wizard; existing live Workers are not proof of installer approval.'
+        : 'Create a short-lived enrollment token in Workers, then install only on a machine you control and log in with an explicit allowed root. Shell authority is powerful; allowed roots are not a sandbox. Enrollment creates a profile automatically, but never installs software or grants shell permission without your action.',
       '/admin/workers',
       'Workers',
     ],
     [
-      'Create an OAuth client',
+      'Set up an OAuth client',
       ready && clientReady,
-      'Register the exact callback URI from your client. For the first call, select bot_report.read only (uncheck Worker execution and Offline access). The bot_report.terminal OAuth scope remains for compatibility and authorizes Worker execution. Store the one-time client secret privately; never paste it into a chat or log.',
+      'Use the exact redirect URI shown by ChatGPT. The first-run form preselects only bot_report.read, not shell execution or offline_access. Save the one-time Client ID and secret in the ChatGPT connector configuration, never in chat messages. Creating a client does not authorize it.',
       mode === 'local' ? '/admin/clients?first_call=local' : '/admin/clients?first_call=1',
       'OAuth clients',
     ],
     [
-      'First read-only MCP call',
+      'Verify an authenticated MCP call',
       ready && firstCall,
-      'Authorize your client using OAuth with PKCE, then call runtime_info with empty arguments. A successful authenticated runtime_info call from an active global client appears in Audit Log. Refresh this page to see progress. Local clients can use the bundled first-call helper described in README.',
+      'After explicitly approving OAuth in ChatGPT (or your own trusted client), invoke runtime_info with empty arguments. A successful tools/call audit entry from an active Admin-owned client is required. This proves an authenticated call, but does NOT independently prove that ChatGPT is connected.',
       '/admin/audit?tool_name=runtime_info&result=SUCCESS',
       'View audit evidence',
     ],
@@ -439,12 +447,14 @@ function onboardingPage({
   const rows = steps
     .map(
       ([title, done, detail, href, label], i) =>
-        `<section class="section" data-onboarding-step="${i + 1}" data-complete="${done}"><div class="section-header"><div><h2 class="section-title">${i + 1}. ${escapeHtml(title)}</h2><p class="section-subtitle">${escapeHtml(detail)}</p></div><span class="badge ${done ? 'badge-ok' : 'badge-off'}">${done ? 'Complete' : next === i + 1 ? 'Next' : 'Pending'}</span></div><div class="section-body">${i >= 3 && !ready ? '<span class="muted">Available after database setup.</span>' : `<a class="btn" href="${escapeHtml(href)}">${escapeHtml(label)}</a>`}${i === 5 ? localHelp : ''}</div></section>`,
+        `<section class="section" data-onboarding-step="${i + 1}" data-complete="${done}" data-state="${done ? 'done' : signedReleasePending && i === 3 ? 'blocked' : 'pending'}"><div class="section-header"><div><h2 class="section-title">${i + 1}. ${escapeHtml(title)}</h2><p class="section-subtitle">${escapeHtml(detail)}</p></div><span data-step-status class="badge ${done ? 'badge-ok' : signedReleasePending && i === 3 ? 'badge-danger' : 'badge-off'}">${done ? 'Complete' : signedReleasePending && i === 3 ? 'Blocked' : next === i + 1 ? 'Next' : 'Pending'}</span></div><div class="section-body">${i >= 3 && !ready ? '<span class="muted">Available after database setup.</span>' : `<a class="btn" href="${escapeHtml(href)}">${escapeHtml(label)}</a>`}${i === 5 ? localHelp : ''}</div></section>`,
     )
     .join('');
-  const body = `${pageHeader('Getting Started', 'Follow the live readiness checklist. Nothing is created or changed automatically.', '<a class="btn" href="/admin/onboarding">Refresh status</a>')}
-  <section class="section"><div class="section-body"><strong>${next ? 'Next step: ' + next : 'All six steps complete'}</strong><p class="muted">MCP endpoint: <code>${mode === 'unsafe' ? 'Invalid or unsafe configuration' : escapeHtml(baseUrl) + '/mcp'}</code></p><p>Progress reflects current configuration and retained audit evidence, not an external connectivity or security certification.</p></div></section>
-  <div class="stack">${rows}</div>`;
+  const body = `${pageHeader('Getting Started', 'Six short steps, backed by stored configuration and audit evidence. No OAuth or shell grants happen automatically.', '<a class="btn" href="/admin/onboarding">Refresh status</a>')}
+  <section class="section" data-onboarding-status="${signedReleasePending ? 'blocked' : next ? 'pending' : 'done'}"><div class="section-body"><strong data-onboarding-summary>${signedReleasePending ? 'Blocked: signed Worker release not approved' : next ? 'Next step: ' + next : 'All six steps complete'}</strong><p class="muted">Canonical MCP endpoint (not an external connectivity check):</p><div class="copy-row"><code id="quickstart-mcp-url" style="flex:1">${mode === 'unsafe' ? 'Invalid or unsafe configuration' : escapeHtml(baseUrl) + '/mcp'}</code><button class="btn btn-sm" type="button" data-copy-target="quickstart-mcp-url" ${mode === 'unsafe' ? 'disabled' : ''}>${icon('copy')} Copy endpoint</button></div><p id="quickstart-endpoint-check" role="status">Endpoint configured; live OAuth discovery is not yet checked. This does not prove external reachability.</p><p>Database, Worker connection and authenticated audit events are separate signals. An HTTP health check alone is not proof that ChatGPT or a Worker is ready.</p></div></section>
+  <div class="stack">${rows}</div>
+  <section class="section" id="chatgpt-connection"><div class="section-header"><div><h2 class="section-title">Connect ChatGPT (manual)</h2><p class="section-subtitle">This action cannot be inferred from registering an OAuth client.</p></div><span class="badge badge-off">Manual verification</span></div><div class="section-body"><ol><li>In ChatGPT, open the setting for adding an MCP connector or app, and use the HTTPS endpoint copied above.</li><li>Copy the exact callback URI shown there into the OAuth client form. Keep the one-time client secret private.</li><li>Choose Connect and explicitly approve the displayed OAuth scopes; do not grant Worker execution or offline access unless needed.</li><li>Ask ChatGPT to call <code>runtime_info</code>, then refresh this wizard to verify the authenticated audit record. Check the connection in ChatGPT itself, as audit logs do not identify the UI that issued a call.</li></ol>${mode === 'local' ? '<p class="hint">A loopback endpoint cannot be reached by remote ChatGPT. Configure a trusted HTTPS public origin first.</p>' : ''}</div></section>
+  ${signedReleasePending ? '<section class="section" data-worker-installer-probe="/worker/install.sh"><div class="section-body"><strong>Signed Worker installer</strong><p data-worker-installer-message role="status">Blocked by the Railway signed-release gate (HTTP 503 expected). Checking the endpoint without executing any installer.</p></div></section>' : ''}`;
   return shell('Getting Started — mcp_worker', body, {
     admin: true,
     active: 'onboarding',
@@ -484,7 +494,7 @@ function oauthClientCreateModal({
   const identity = personal
     ? `<div class="migration-note"><strong>Personal identity</strong><span>This client is automatically bound to your existing user Principal ID and Profile ID.</span></div>`
     : `<div class="migration-note"><strong>Automatic identity</strong><span>Principal ID is generated by mcp_worker from the new Client ID after creation. It is immutable and cannot be entered manually.</span></div>`;
-  return `<div id="${escapeHtml(id)}" class="modal-backdrop" aria-hidden="true"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="${escapeHtml(titleId)}" aria-describedby="${escapeHtml(descriptionId)}"><div class="modal-header"><h2 id="${escapeHtml(titleId)}">New OAuth Client</h2><p id="${escapeHtml(descriptionId)}">${personal ? 'Create a client bound to your personal mcp_worker identity.' : 'Create an application identity allowed to connect to mcp_worker.'}</p></div><form method="post" action="${escapeHtml(action)}" data-disable-on-submit><div class="modal-body"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><div class="form-grid"><div class="field full"><label for="${escapeHtml(nameId)}">Display name</label><input id="${escapeHtml(nameId)}" name="display_name" required maxlength="120" placeholder="ChatGPT"></div><div class="field full"><label for="${escapeHtml(redirectId)}">Redirect URI(s)</label><textarea id="${escapeHtml(redirectId)}" name="redirect_uris" required placeholder="https://chatgpt.com/connector_platform_oauth_redirect">${firstCall === 'local' ? 'http://127.0.0.1:43871/callback' : ''}</textarea><div class="hint">One HTTPS URI per line. localhost is allowed for local development.</div></div><div class="field full"><span class="field-label">MCP URL</span><div class="copy-row"><code id="${escapeHtml(mcpId)}" style="flex:1">${escapeHtml(mcpUrl)}</code><button class="btn btn-icon" type="button" data-copy-target="${escapeHtml(mcpId)}" aria-label="Copy MCP URL">${icon('copy')}</button></div><div class="hint">Use this URL when adding mcp_worker as an MCP connector.</div></div>${access}<div class="field full">${identity}</div></div></div><div class="modal-footer"><button class="btn" type="button" data-modal-close>Cancel</button><button class="btn btn-primary" type="submit">Create Client</button></div></form></div></div>`;
+  return `<div id="${escapeHtml(id)}" class="modal-backdrop" aria-hidden="true"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="${escapeHtml(titleId)}" aria-describedby="${escapeHtml(descriptionId)}"><div class="modal-header"><h2 id="${escapeHtml(titleId)}">New OAuth Client</h2><p id="${escapeHtml(descriptionId)}">${personal ? 'Create a client bound to your personal mcp_worker identity.' : 'Create an application identity allowed to connect to mcp_worker.'}</p></div><form method="post" action="${escapeHtml(action)}" data-disable-on-submit><div class="modal-body"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><div class="form-grid"><div class="field full"><label for="${escapeHtml(nameId)}">Display name</label><input id="${escapeHtml(nameId)}" name="display_name" value="${firstCall === '1' ? 'ChatGPT' : firstCall === 'local' ? 'Local first MCP call' : ''}" required maxlength="120" placeholder="ChatGPT"></div><div class="field full"><label for="${escapeHtml(redirectId)}">Redirect URI(s)</label><textarea id="${escapeHtml(redirectId)}" name="redirect_uris" required placeholder="https://chatgpt.com/connector_platform_oauth_redirect">${firstCall === 'local' ? 'http://127.0.0.1:43871/callback' : firstCall === '1' ? 'https://chatgpt.com/connector_platform_oauth_redirect' : ''}</textarea><div class="hint">Use the exact callback from ChatGPT; replace the suggested URI if ChatGPT shows a different one. One HTTPS URI per line. localhost is allowed only for local development.</div></div><div class="field full"><span class="field-label">MCP URL</span><div class="copy-row"><code id="${escapeHtml(mcpId)}" style="flex:1">${escapeHtml(mcpUrl)}</code><button class="btn btn-icon" type="button" data-copy-target="${escapeHtml(mcpId)}" aria-label="Copy MCP URL">${icon('copy')}</button></div><div class="hint">Use this URL when adding mcp_worker as an MCP connector.</div></div>${access}<div class="field full">${identity}</div></div></div><div class="modal-footer"><button class="btn" type="button" data-modal-close>Cancel</button><button class="btn btn-primary" type="submit">Create Client</button></div></form></div></div>`;
 }
 
 function telegramConfigurationModal({

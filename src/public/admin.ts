@@ -614,6 +614,100 @@ interface ApiError {
     });
   });
 
+  // Read-only checks: no installer body is downloaded or executed, and no
+  // enrollment token, OAuth secret, or shell permission is generated.
+  const endpointCheck = $('#quickstart-endpoint-check');
+  if (endpointCheck) {
+    void (async () => {
+      try {
+        const endpoint = $('#quickstart-mcp-url')?.textContent?.trim() || '';
+        const url = new URL(endpoint);
+        const response = await fetch('/.well-known/oauth-authorization-server', {
+          cache: 'no-store',
+          credentials: 'same-origin',
+        });
+        if (!response.ok) throw new Error('OAuth discovery unavailable');
+        const metadata = (await response.json()) as { issuer?: unknown; token_endpoint?: unknown };
+        if (
+          metadata.issuer !== url.origin ||
+          metadata.token_endpoint !== url.origin + '/oauth/token'
+        )
+          throw new Error('OAuth discovery mismatch');
+        endpointCheck.textContent =
+          'OAuth discovery responded with the expected issuer and token URL. External ChatGPT reachability and authorization are still unverified.';
+      } catch {
+        endpointCheck.textContent =
+          'Blocked or unverified: OAuth discovery did not match the configured MCP endpoint. Check MCP settings before connecting ChatGPT.';
+        const endpointStep = $('[data-onboarding-step="3"]');
+        if (endpointStep) {
+          endpointStep.dataset.state = 'blocked';
+          endpointStep.dataset.complete = 'false';
+          const stepBadge = $('[data-step-status]', endpointStep);
+          if (stepBadge) {
+            stepBadge.textContent = 'Blocked';
+            stepBadge.classList.remove('badge-ok');
+            stepBadge.classList.add('badge-danger');
+          }
+        }
+        const status = $('[data-onboarding-status]');
+        if (status?.dataset.onboardingStatus === 'done') {
+          status.dataset.onboardingStatus = 'blocked';
+          const summary = $('[data-onboarding-summary]');
+          if (summary) summary.textContent = 'Blocked: OAuth discovery is not verified';
+        }
+      }
+    })();
+  }
+
+  const installerProbe = $('[data-worker-installer-probe]');
+  if (installerProbe) {
+    void (async () => {
+      const message = $('[data-worker-installer-message]', installerProbe);
+      const workerStep = $('[data-onboarding-step="4"]');
+      const badge = $('[data-step-status]', workerStep);
+      const summary = $('[data-onboarding-summary]');
+      const status = $('[data-onboarding-status]');
+      try {
+        const path = installerProbe.dataset.workerInstallerProbe;
+        if (path !== '/worker/install.sh') throw new Error('Unexpected installer URL');
+        const response = await fetch(path, {
+          method: 'HEAD',
+          cache: 'no-store',
+          credentials: 'same-origin',
+        });
+        if (response.status === 503) {
+          if (message)
+            message.textContent =
+              'Blocked: installer returned HTTP 503 (WORKER_SIGNED_RELEASE_PENDING). Wait for an owner-approved signed release; never bypass verification.';
+          if (badge) badge.textContent = 'Blocked';
+          if (workerStep) workerStep.dataset.state = 'blocked';
+          if (status) status.dataset.onboardingStatus = 'blocked';
+          if (summary) summary.textContent = 'Blocked: signed Worker release not approved';
+        } else {
+          if (message)
+            message.textContent = response.ok
+              ? 'Installer responded, but this HEAD request cannot verify a signed, approved release or a connected Worker. Approval is still pending verification.'
+              : 'Installer returned HTTP ' +
+                response.status +
+                '. Signed release approval has not been verified.';
+          if (badge) {
+            badge.textContent = 'Pending';
+            badge.classList.remove('badge-danger');
+            badge.classList.add('badge-off');
+          }
+          if (workerStep) workerStep.dataset.state = 'pending';
+          if (status) status.dataset.onboardingStatus = 'pending';
+          if (summary)
+            summary.textContent = 'Pending: verify signed Worker approval and connection';
+        }
+      } catch {
+        if (message)
+          message.textContent =
+            'Installer availability could not be verified. Treat Worker enrollment as blocked until signing approval is confirmed.';
+      }
+    })();
+  }
+
   $$<HTMLFormElement>('form[data-disable-on-submit]').forEach((form) =>
     form.addEventListener('submit', () => {
       $$<HTMLButtonElement>('button[type="submit"]', form).forEach((button) => {
