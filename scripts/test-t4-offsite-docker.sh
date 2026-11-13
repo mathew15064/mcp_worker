@@ -9,10 +9,31 @@ if [[ "${T04_LOCAL_TEST_ONLY:-}" != 1 || -n "${CI:-}" || -n "${GITHUB_ACTIONS:-}
   exit 2
 fi
 image="${1:-t04-railway-sandbox:local}"
-[[ "$image" == 't04-railway-sandbox:local' ]] || { echo 'Unapproved image tag' >&2; exit 2; }
 command -v docker >/dev/null
-docker image inspect "$image" >/dev/null
 docker info >/dev/null
+# The historical disposable T4 image remains accepted on T4's own PC.
+# The final integration accepts ONLY its exact committed, locally built image:
+# pinned worktree path + branch + clean tree + source label + SHA-derived tag.
+if [[ "$image" != 't04-railway-sandbox:local' ]]; then
+  root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+  if [[ "$root" != '/root/mcp_worker_railway_oneclick_final_integration_20261113' ]] ||
+     [[ "$(git -C "$root" branch --show-current)" != 'work/railway-oneclick-final-integration-20261113' ]] ||
+     [[ -n "$(git -C "$root" status --porcelain)" ]]; then
+    echo 'T4_DOCKER_REFUSED: final image requires the clean authorized PC worktree' >&2
+    exit 2
+  fi
+  source_sha="$(git -C "$root" rev-parse HEAD)"
+  [[ "$image" == "mcp-worker-local:${source_sha:0:12}" ]] || {
+    echo 'T4_DOCKER_REFUSED: final image tag does not match current source SHA' >&2
+    exit 2
+  }
+  image_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image")" || exit 2
+  [[ "$image_revision" == "$source_sha" ]] || {
+    echo 'T4_DOCKER_REFUSED: final Docker image was not built from current source SHA' >&2
+    exit 2
+  }
+fi
+docker image inspect "$image" >/dev/null
 prefix="t04-offsite-$$-$RANDOM"
 source_container="$prefix-source"
 restored_container="$prefix-restored"

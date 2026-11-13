@@ -30,3 +30,9 @@
 - Executed `npm ci --no-audit --no-fund`, `npm audit --json`, `npm audit --omit=dev --json` and `npm ls hono @hono/node-server --all --omit=dev` on PC only.
 - `npm audit` exited nonzero due to actual advisories. The shell captured its JSON for summary; this **does not mean the audit gate passed**.
 - No Github Actions, remote builds, deployment, registry upload, CI/CD, production secrets or paid Railway resources used.
+
+## Integration follow-up — production advisory remediation (Local PC, 2026-11-13)
+
+In the separately authorized **local final integration worktree** (not in the isolated T5 worker), the reviewer executed `npm update hono @hono/node-server --package-lock-only --ignore-scripts --no-audit --no-fund`. Only `package-lock.json` changed (12 lines); the root `package.json` and `@modelcontextprotocol/sdk@1.32.2` were unchanged. npm resolved compatible patches `hono@4.13.18` and `@hono/node-server@2.1.8` inside the SDK's declared ranges.
+
+After a clean PC `npm ci --no-audit --no-fund`, **`npm audit --omit=dev` returned exit 0, 0 known production advisories**. The complete `npm audit` still reports **9 moderate development-tooling advisories**, exit 1; no automated major-version downgrade/force-fix was applied. The remaining development issues are a recorded review item, not a production-security-green claim. Full integrated regression tests and the final PC Docker build must be rerun on the committed source with this lockfile; real Railway reverse-proxy and ChatGPT connectivity remain NOT_TESTED. This local dependency fix is not owner approval for public release.
