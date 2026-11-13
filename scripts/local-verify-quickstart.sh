@@ -343,6 +343,7 @@ else
   if run docker_local_build 1200 "Local Docker build ($DOCKER_MODE); never deploy" \
     docker build "${build_args[@]}" \
       --build-arg "BOT_REPORT_GIT_SHA=$HEAD_SHA" \
+      --build-arg "BOT_REPORT_TREE_SHA=$(git -C "$ROOT" rev-parse "$HEAD_SHA^{tree}")" \
       --build-arg "BOT_REPORT_BUILD_TIME=$(git -C "$ROOT" show -s --format=%cI "$HEAD_SHA")" \
       -f Dockerfile.railway -t "$IMAGE" .; then
     docker_ok=1
@@ -351,14 +352,20 @@ else
   fi
 fi
 if (( docker_ok )) && (( npm_ok )) && (( build_ok )); then
+  run railway_oci_provenance 120 'source SHA and Git tree must equal the exact PC-built image labels; registry still NOT_TESTED' \
+    bash scripts/verify-oci-image-local.sh "$IMAGE" || true
   run railway_docker_config 900 'disposable Docker containers and volumes only' \
     env RAILWAY_DOCKER_INTEGRATION=1 RAILWAY_TEST_IMAGE="$IMAGE" \
     node --test dist/tests/railway-platform-config-docker.test.js || true
   run railway_docker_isolation 1200 'disposable volumes; backup/restore; read-only denial' \
     env W3_SANDBOX_ONLY=1 bash scripts/verify-railway-docker-isolation.sh "$IMAGE" || true
+  run railway_offsite_encrypted 900 'five disposable PC volumes and authenticated AES-GCM/HMAC restore; remote backup NOT_TESTED' \
+    env T04_LOCAL_TEST_ONLY=1 bash scripts/test-t4-offsite-docker.sh "$IMAGE" || true
 else
-  omit railway_docker_config SKIP 'requires freshly built offline Docker image and compiled tests'
-  omit railway_docker_isolation SKIP 'requires freshly built offline Docker image and compiled tests'
+  omit railway_oci_provenance SKIP 'requires freshly built local Docker image and committed source'
+  omit railway_docker_config SKIP 'requires freshly built local Docker image and compiled tests'
+  omit railway_docker_isolation SKIP 'requires freshly built local Docker image and compiled tests'
+  omit railway_offsite_encrypted SKIP 'requires freshly built local Docker image and compiled tests'
 fi
 
 # These previous CI actions require external resources, approval, or a platform
