@@ -1,0 +1,71 @@
+name: Railway PR stack review (read-only)
+
+on:
+  push:
+    branches:
+      - feat/railway-p15-w2-t04-stack-readiness
+  pull_request:
+    paths:
+      - 'scripts/check-railway-pr-stack.mjs'
+      - 'tests/railway-pr-stack.test.ts'
+      - 'docs/RAILWAY_PR_STACK_MIGRATION.md'
+      - 'docs/RAILWAY_RELEASE_GATES.md'
+      - '.github/workflows/railway-pr-stack-review.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Stack checker unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26.13.0'
+          cache: npm
+      - run: npm ci
+      - name: Verify script syntax and help (no network or Git mutation)
+        run: |
+          node --check scripts/check-railway-pr-stack.mjs
+          node scripts/check-railway-pr-stack.mjs --help
+      - name: Typecheck and TypeScript lint
+        run: |
+          npm run typecheck
+          npm run lint
+      - name: Incremental ESLint/Prettier quality gate
+        env:
+          QUALITY_BASE_REF: e7de57a28f4894d302a6dfb24a577ea7b38b9a08
+        run: npm run quality:check
+      - name: Run isolated synthetic Git ancestry tests
+        run: |
+          npm run build
+          node --test dist/tests/railway-pr-stack.test.js
+
+  live-ancestry-guard:
+    name: Reject accidental Vercel stack (intentional blocker)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Read-only network refresh of comparison refs
+        run: |
+          git fetch --no-tags origin \
+            '+refs/heads/refactor/typescript-ts6:refs/remotes/origin/refactor/typescript-ts6' \
+            '+refs/heads/feature/vercel-selfhost-20261112:refs/remotes/origin/feature/vercel-selfhost-20261112' \
+            '+refs/heads/feature/railway-sqlite-oneclick-20261112:refs/remotes/origin/feature/railway-sqlite-oneclick-20261112'
+      - name: Block Railway when Vercel head is ancestor
+        run: |
+          node scripts/check-railway-pr-stack.mjs --json --strict
+
+# Expected today: unit should be green, live-ancestry-guard should fail with
+# BLOCKED_STACKED/exit 2. Never suppress this failure to claim release readiness.
+# No deploy, secrets, production resources, PR mutations, or workflow token writes.
