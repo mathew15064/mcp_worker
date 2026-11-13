@@ -114,13 +114,14 @@ interface PageShell {
   extraHead?: string;
   extraScripts?: string;
 }
-interface PageFlash {
-  csrfToken: string;
-  success?: string;
-  error?: string;
-}
 function escapeHtml(value: HtmlValue) {
-  return String(value ?? '')
+  const printable =
+    typeof value === 'string'
+      ? value
+      : typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint'
+        ? String(value)
+        : '';
+  return printable
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
@@ -366,8 +367,12 @@ function onboardingPage({
       else if (url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname))
         mode = 'local';
     }
-  } catch (_) {}
-  const endpointReady = ready && enabled && mode !== 'unsafe';
+  } catch {}
+  // Railway requires a canonical HTTPS origin; loopback HTTP is for local PC tests only.
+  const endpointReady =
+    ready &&
+    enabled &&
+    (mode === 'https' || (mode === 'local' && process.env.MCP_PLATFORM !== 'railway'));
   // Same fail-closed distribution gate as the HTTP installer routes.
   // Neither an online Worker nor a read-only MCP call can approve a release.
   const signedReleasePending = railwayWorkerDistributionBlocked();
@@ -418,7 +423,7 @@ function onboardingPage({
       'MCP settings',
     ],
     [
-      'Enroll a Worker',
+      'Enroll an approved signed Worker',
       ready && verifiedWorker,
       signedReleasePending
         ? 'Blocked: Railway Worker installer returns HTTP 503 (WORKER_SIGNED_RELEASE_PENDING). A signed and approved Worker release is not available. Do not use unsigned downloads or bypass verification. No Worker is installed by this wizard; existing live Workers are not proof of installer approval.'
@@ -427,16 +432,16 @@ function onboardingPage({
       'Workers',
     ],
     [
-      'Set up an OAuth client',
+      'Create a read-only OAuth client',
       ready && clientReady,
-      'Use the exact redirect URI shown by ChatGPT. The first-run form preselects only bot_report.read, not shell execution or offline_access. Save the one-time Client ID and secret in the ChatGPT connector configuration, never in chat messages. Creating a client does not authorize it.',
+      'Open the prefilled ChatGPT client form. Confirm its callback against the exact URI shown by ChatGPT; only bot_report.read is selected. Copy the one-time Client ID and secret into secure connector fields, never a chat prompt. Client creation alone grants no access.',
       mode === 'local' ? '/admin/clients?first_call=local' : '/admin/clients?first_call=1',
       'OAuth clients',
     ],
     [
       'Verify an authenticated MCP call',
       ready && firstCall,
-      'After explicitly approving OAuth in ChatGPT (or your own trusted client), invoke runtime_info with empty arguments. A successful tools/call audit entry from an active Admin-owned client is required. This proves an authenticated call, but does NOT independently prove that ChatGPT is connected.',
+      'After OAuth consent, call runtime_info with {} from ChatGPT. A successful Admin-owned client audit proves authenticated MCP use, NOT which app made the call. Confirm ChatGPT reports the connection separately before launch.',
       '/admin/audit?tool_name=runtime_info&result=SUCCESS',
       'View audit evidence',
     ],
@@ -451,10 +456,21 @@ function onboardingPage({
         `<section class="section" data-onboarding-step="${i + 1}" data-complete="${done}" data-state="${done ? 'done' : signedReleasePending && i === 3 ? 'blocked' : 'pending'}"><div class="section-header"><div><h2 class="section-title">${i + 1}. ${escapeHtml(title)}</h2><p class="section-subtitle">${escapeHtml(detail)}</p></div><span data-step-status class="badge ${done ? 'badge-ok' : signedReleasePending && i === 3 ? 'badge-danger' : 'badge-off'}">${done ? 'Complete' : signedReleasePending && i === 3 ? 'Blocked' : next === i + 1 ? 'Next' : 'Pending'}</span></div><div class="section-body">${i >= 3 && !ready ? '<span class="muted">Available after database setup.</span>' : `<a class="btn" href="${escapeHtml(href)}">${escapeHtml(label)}</a>`}${i === 5 ? localHelp : ''}</div></section>`,
     )
     .join('');
-  const body = `${pageHeader('Getting Started', 'Six short steps, backed by stored configuration and audit evidence. No OAuth or shell grants happen automatically.', '<a class="btn" href="/admin/onboarding">Refresh status</a>')}
-  <section class="section" data-onboarding-status="${signedReleasePending ? 'blocked' : next ? 'pending' : 'done'}"><div class="section-body"><strong data-onboarding-summary>${signedReleasePending ? 'Blocked: signed Worker release not approved' : next ? 'Next step: ' + next : 'All six steps complete'}</strong><p class="muted">Canonical MCP endpoint (not an external connectivity check):</p><div class="copy-row"><code id="quickstart-mcp-url" style="flex:1">${mode === 'unsafe' ? 'Invalid or unsafe configuration' : escapeHtml(baseUrl) + '/mcp'}</code><button class="btn btn-sm" type="button" data-copy-target="quickstart-mcp-url" ${mode === 'unsafe' ? 'disabled' : ''}>${icon('copy')} Copy endpoint</button></div><p id="quickstart-endpoint-check" role="status">Endpoint configured; live OAuth discovery is not yet checked. This does not prove external reachability.</p><p>Database, Worker connection and authenticated audit events are separate signals. An HTTP health check alone is not proof that ChatGPT or a Worker is ready.</p></div></section>
+  // No server-side API proves that a call originated in ChatGPT. Never set an
+  // overall READY/DONE state from a healthcheck, Worker status, or generic OAuth audit.
+  const summary = signedReleasePending
+    ? 'Blocked: signed Worker release not approved'
+    : !ready
+      ? 'Next step: 2'
+      : !endpointReady
+        ? 'Blocked: verify secure MCP endpoint configuration'
+        : next
+          ? 'Next step: ' + next
+          : 'Local checks complete; ChatGPT connection still needs external verification';
+  const body = `${pageHeader('Getting Started', 'Six short steps backed by configuration and audit evidence. No OAuth, shell grant or external connection is automatic.', '<a class="btn" href="/admin/onboarding">Refresh status</a>')}
+  <section class="section" data-onboarding-status="${signedReleasePending || (ready && !endpointReady) ? 'blocked' : 'pending'}" data-chatgpt-verification="unverified"><div class="section-body"><strong data-onboarding-summary>${escapeHtml(summary)}</strong><p class="muted">Canonical MCP endpoint (not an external connectivity check):</p><div class="copy-row"><code id="quickstart-mcp-url" style="flex:1">${mode === 'unsafe' ? 'Invalid or unsafe configuration' : escapeHtml(baseUrl) + '/mcp'}</code><button class="btn btn-sm" type="button" data-copy-target="quickstart-mcp-url" ${!endpointReady ? 'disabled' : ''}>${icon('copy')} Copy endpoint</button></div><p id="quickstart-endpoint-check" role="status">OAuth discovery has not yet been checked. HTTPS configuration alone does not prove external reachability.</p><p>Database, Worker connection and authenticated audit events are separate facts. A health check, online Worker or successful MCP audit cannot prove signed installer approval or ChatGPT connection.</p></div></section>
   <div class="stack">${rows}</div>
-  <section class="section" id="chatgpt-connection"><div class="section-header"><div><h2 class="section-title">Connect ChatGPT (manual)</h2><p class="section-subtitle">This action cannot be inferred from registering an OAuth client.</p></div><span class="badge badge-off">Manual verification</span></div><div class="section-body"><ol><li>In ChatGPT, open the setting for adding an MCP connector or app, and use the HTTPS endpoint copied above.</li><li>Copy the exact callback URI shown there into the OAuth client form. Keep the one-time client secret private.</li><li>Choose Connect and explicitly approve the displayed OAuth scopes; do not grant Worker execution or offline access unless needed.</li><li>Ask ChatGPT to call <code>runtime_info</code>, then refresh this wizard to verify the authenticated audit record. Check the connection in ChatGPT itself, as audit logs do not identify the UI that issued a call.</li></ol>${mode === 'local' ? '<p class="hint">A loopback endpoint cannot be reached by remote ChatGPT. Configure a trusted HTTPS public origin first.</p>' : ''}</div></section>
+  <section class="section" id="chatgpt-connection"><div class="section-header"><div><h2 class="section-title">Connect ChatGPT (manual)</h2><p class="section-subtitle">Not automatically verified; an OAuth client or audit row is not a ChatGPT connection.</p></div><span class="badge badge-off">Manual verification</span></div><div class="section-body"><ol><li>In ChatGPT, open the setting for adding an MCP connector or app, and use the HTTPS endpoint copied above.</li><li>Copy the exact callback URI shown there into the OAuth client form. Keep the one-time client secret private.</li><li>Choose Connect and explicitly approve the displayed OAuth scopes; keep Read only for runtime_info; Worker execution and offline access require separate explicit consent.</li><li>Ask ChatGPT to call <code>runtime_info</code>, then refresh this wizard to verify the authenticated audit record. Check the connection in ChatGPT itself, as audit logs do not identify the UI that issued a call.</li></ol>${mode === 'local' ? '<p class="hint">A loopback endpoint cannot be reached by remote ChatGPT. Configure a trusted HTTPS public origin first.</p>' : ''}</div></section>
   ${signedReleasePending ? '<section class="section" data-worker-installer-probe="/worker/install.sh"><div class="section-body"><strong>Signed Worker installer</strong><p data-worker-installer-message role="status">Blocked by the Railway signed-release gate (HTTP 503 expected). Checking the endpoint without executing any installer.</p></div></section>' : ''}`;
   return shell('Getting Started — mcp_worker', body, {
     admin: true,
@@ -491,7 +507,7 @@ function oauthClientCreateModal({
   const mcpId = `${id}-mcp-url`;
   const access = personal
     ? `<div class="field full"><span class="field-label">Access</span><div class="migration-note"><strong>Personal MCP access</strong><span><code>bot_report.read</code>, <code>bot_report.terminal</code> and <code>offline_access</code>. Execution remains restricted to Worker Profiles owned by your account.</span></div></div>`
-    : `<div class="field full"><span class="field-label">Access scopes</span><div class="scope-options"><label class="scope-option"><input type="checkbox" name="scopes" value="bot_report.read" checked><span><strong>Read</strong><small>Inspect runtime, repository and workspace state.</small></span></label><label class="scope-option"><input type="checkbox" name="scopes" value="bot_report.terminal" ${firstCall ? '' : 'checked'}><span><strong>Worker execution</strong><small>Allow MCP file, Git, process and execution tools on enrolled Workers.</small></span></label><label class="scope-option"><input type="checkbox" name="scopes" value="offline_access" ${firstCall ? '' : 'checked'}><span><strong>Offline access</strong><small>Allow refresh tokens for persistent connectors.</small></span></label></div></div>`;
+    : `<div class="field full"><span class="field-label">Access scopes</span><div class="scope-options"><label class="scope-option"><input type="checkbox" name="scopes" value="bot_report.read" checked><span><strong>Read</strong><small>Inspect runtime, repository and workspace state.</small></span></label><label class="scope-option"><input type="checkbox" name="scopes" value="bot_report.terminal"><span><strong>Worker execution</strong><small>Allow MCP file, Git, process and execution tools on enrolled Workers.</small></span></label><label class="scope-option"><input type="checkbox" name="scopes" value="offline_access"><span><strong>Offline access</strong><small>Allow refresh tokens for persistent connectors.</small></span></label></div></div>`;
   const identity = personal
     ? `<div class="migration-note"><strong>Personal identity</strong><span>This client is automatically bound to your existing user Principal ID and Profile ID.</span></div>`
     : `<div class="migration-note"><strong>Automatic identity</strong><span>Principal ID is generated by mcp_worker from the new Client ID after creation. It is immutable and cannot be entered manually.</span></div>`;

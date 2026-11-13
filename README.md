@@ -15,23 +15,41 @@ credentials. Browser SSH/terminal consoles and user/admin SSH Profiles are remov
 The Admin UI focuses on OAuth Clients, Workers (including Execution Targets), Audit
 and system settings. The terminal_list tool still lists Worker aliases for compatibility.
 
-## Railway + SQLite Quickstart (developer beta — no Neon/Upstash)
+## Railway + SQLite Quickstart (developer beta — not published)
 
-[Railway + SQLite deployment guide](docs/RAILWAY_QUICKSTART.md) and
-[reviewable one-service/one-volume IaC](.railway/railway.ts).
+**No public Deploy Template URL exists or is approved.** See the
+[Railway deployment guide](docs/RAILWAY_QUICKSTART.md),
+[guided first-run steps](docs/QUICKSTART_ONBOARDING.md) and the
+[owner GO/NO-GO checklist](docs/RELEASE_READINESS.md).
+The local IaC review target is [.railway/railway.ts](.railway/railway.ts).
+Do not treat a source branch or local plan as an authorized live deployment.
 
-This new deployment mode uses **one Railway Node service, one persistent
-SQLite volume and one private setup key**, instead of Neon/Postgres and
-Upstash/Redis. From a fresh project: review the Railway plan and costs,
-provide an instance-only setup secret, create the initial Admin at /setup,
-then configure OAuth and connect a Worker over outbound WSS.
+After separately approved billing, immutable source and a real HTTPS domain,
+a first-time owner follows this path:
 
-**Not a released One-Click Template.** The new Railway image, SQLite owner
-setup and durable sessions have automated regression coverage. Signed
-Worker installers are intentionally unavailable (HTTP 503) pending
-public-key pinning and release approval. Full live Railway E2E and backup
-recovery remain required. Do not point Railway at an existing Docker/VPS
-or another deployment database or reuse any credentials.
+1. **Deploy:** confirm one Railway Node service, one persistent SQLite volume,
+   one replica and provider costs; retrieve the instance-only private setup key
+   through the approved protected configuration surface.
+2. **Admin:** visit `/setup`, enter the key only into the form, create a distinct
+   strong password and sign in. Getting Started then guides the next steps.
+3. **Endpoint + OAuth:** copy the canonical HTTPS `/mcp` URL, create an OAuth
+   client using ChatGPT's exact callback and **Read** (`bot_report.read`) only;
+   privately save the one-time Client ID/secret in ChatGPT's secure OAuth form.
+4. **Signed Worker:** install and enroll a Go Worker on a computer you control
+   **only after separate owner approval of a signed distribution**. Until then,
+   `/worker/install*` and `/worker/dist/*` return 503. Do not run unsigned
+   installers or grant shell access as part of the read-only walkthrough.
+5. **ChatGPT:** explicitly approve the OAuth scopes in ChatGPT, call read-only
+   `runtime_info`, inspect the Admin audit entry, and confirm the connector
+   really appears connected in ChatGPT. An internal healthcheck, online Worker
+   or a generic MCP audit cannot prove the external ChatGPT connection.
+
+No user needs to run Docker, SSH, SQL, edit a `.env` file or use a terminal for
+the *web-owner* setup path; local Worker installation still requires explicit
+machine-owner action. **Current decision: NO-GO** pending signed Worker approval,
+disabled remote GitHub Actions, approved Railway billing/domain, encrypted
+off-platform recovery and real external E2E. Never reuse credentials, data
+volumes or backups from another deployment.
 
 ## Version and release policy
 

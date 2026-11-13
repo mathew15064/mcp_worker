@@ -341,11 +341,14 @@ interface ApiError {
       event.preventDefault();
       pendingForm = form;
       if (!confirmModal) return form.submit();
-      $('#confirm-title')!.textContent = form.dataset.confirmTitle || 'Confirm action';
-      $('#confirm-message')!.textContent = form.dataset.confirmMessage || 'Are you sure?';
-      $('#confirm-action')!.textContent = form.dataset.confirmAction || 'Continue';
-      $('#confirm-action')!.className =
-        `btn ${form.dataset.confirmDanger === 'true' ? 'btn-danger' : 'btn-primary'}`;
+      const title = $('#confirm-title');
+      const message = $('#confirm-message');
+      const action = $('#confirm-action');
+      if (!title || !message || !action) return form.submit();
+      title.textContent = form.dataset.confirmTitle || 'Confirm action';
+      message.textContent = form.dataset.confirmMessage || 'Are you sure?';
+      action.textContent = form.dataset.confirmAction || 'Continue';
+      action.className = `btn ${form.dataset.confirmDanger === 'true' ? 'btn-danger' : 'btn-primary'}`;
       const opener = event.submitter || document.activeElement;
       openModal('confirm-modal', opener);
     }),
@@ -585,7 +588,10 @@ interface ApiError {
           method: 'POST',
           headers: { Accept: 'application/json' },
           body: new URLSearchParams(
-            [...new FormData(form).entries()].map(([key, value]) => [key, String(value)]),
+            [...new FormData(form).entries()].map(([key, value]) => [
+              key,
+              typeof value === 'string' ? value : value.name,
+            ]),
           ),
         });
         const payload = (await response.json().catch(() => ({}))) as ApiError;
@@ -649,12 +655,13 @@ interface ApiError {
             stepBadge.classList.add('badge-danger');
           }
         }
+        // A discovery mismatch is a blocker even when another step is pending.
+        // Preserve the higher-priority signed-release blocker if present.
         const status = $('[data-onboarding-status]');
-        if (status?.dataset.onboardingStatus === 'done') {
-          status.dataset.onboardingStatus = 'blocked';
-          const summary = $('[data-onboarding-summary]');
-          if (summary) summary.textContent = 'Blocked: OAuth discovery is not verified';
-        }
+        if (status) status.dataset.onboardingStatus = 'blocked';
+        const summary = $('[data-onboarding-summary]');
+        if (summary && !summary.textContent?.includes('signed Worker release'))
+          summary.textContent = 'Blocked: OAuth discovery is not verified';
       }
     })();
   }
@@ -684,27 +691,31 @@ interface ApiError {
           if (status) status.dataset.onboardingStatus = 'blocked';
           if (summary) summary.textContent = 'Blocked: signed Worker release not approved';
         } else {
+          // A successful/failed HEAD is never an owner-signed release attestation.
+          // Do not downgrade the server's fail-closed release gate to pending.
           if (message)
             message.textContent = response.ok
-              ? 'Installer responded, but this HEAD request cannot verify a signed, approved release or a connected Worker. Approval is still pending verification.'
-              : 'Installer returned HTTP ' +
+              ? 'Blocked: installer HTTP response cannot prove an approved signature, pinned source or trusted release. Owner approval is still required.'
+              : 'Blocked: installer returned HTTP ' +
                 response.status +
                 '. Signed release approval has not been verified.';
-          if (badge) {
-            badge.textContent = 'Pending';
-            badge.classList.remove('badge-danger');
-            badge.classList.add('badge-off');
-          }
-          if (workerStep) workerStep.dataset.state = 'pending';
-          if (status) status.dataset.onboardingStatus = 'pending';
-          if (summary)
-            summary.textContent = 'Pending: verify signed Worker approval and connection';
         }
       } catch {
         if (message)
           message.textContent =
-            'Installer availability could not be verified. Treat Worker enrollment as blocked until signing approval is confirmed.';
+            'Blocked: installer availability could not be verified. Do not enroll until signing approval is confirmed.';
       }
+      if (badge) {
+        badge.textContent = 'Blocked';
+        badge.classList.remove('badge-ok', 'badge-off');
+        badge.classList.add('badge-danger');
+      }
+      if (workerStep) {
+        workerStep.dataset.state = 'blocked';
+        workerStep.dataset.complete = 'false';
+      }
+      if (status) status.dataset.onboardingStatus = 'blocked';
+      if (summary) summary.textContent = 'Blocked: signed Worker release not approved';
     })();
   }
 

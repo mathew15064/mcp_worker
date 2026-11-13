@@ -208,6 +208,8 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
     assert.equal(guideResponse.headers.get('cache-control'), 'no-store');
     const guide = await guideResponse.text();
     assert.match(guide, /data-onboarding-status="blocked"/);
+    assert.match(guide, /data-chatgpt-verification="unverified"/);
+    assert.doesNotMatch(guide, /data-onboarding-status="done"/);
     assert.match(guide, /data-onboarding-step="4" data-complete="false" data-state="blocked"/);
     assert.match(guide, /WORKER_SIGNED_RELEASE_PENDING/);
     assert.match(guide, /Connect ChatGPT \(manual\)/);
@@ -233,6 +235,13 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
     assert.match(firstClientHtml, /name="scopes" value="bot_report.read" checked/);
     assert.doesNotMatch(firstClientHtml, /name="scopes" value="bot_report.terminal" checked/);
     assert.doesNotMatch(firstClientHtml, /name="scopes" value="offline_access" checked/);
+    const ordinaryClients = await fetch(base + '/admin/clients', {
+      headers: { ...headers, cookie: authenticatedCookie },
+    });
+    const ordinaryHtml = await ordinaryClients.text();
+    assert.match(ordinaryHtml, /name="scopes" value="bot_report.read" checked/);
+    assert.doesNotMatch(ordinaryHtml, /name="scopes" value="bot_report.terminal" checked/);
+    assert.doesNotMatch(ordinaryHtml, /name="scopes" value="offline_access" checked/);
 
     // Real Chromium verifies the read-only browser probes when installed. The
     // HTTP/CSRF/OAuth fixture above still runs on PCs without a browser binary.
@@ -273,6 +282,69 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
           await page.locator('#quickstart-endpoint-check').innerText(),
           /OAuth discovery responded/,
         );
+        // Desktop and narrow mobile views must keep the setup status readable.
+        for (const width of [1440, 390]) {
+          await page.setViewportSize({ width, height: 844 });
+          const dimensions = await page.evaluate(() => ({
+            scrollWidth: document.documentElement.scrollWidth,
+            clientWidth: document.documentElement.clientWidth,
+          }));
+          assert.ok(
+            dimensions.scrollWidth <= dimensions.clientWidth,
+            'No horizontal onboarding overflow at ' + width + 'px',
+          );
+          assert.equal(
+            await page
+              .locator('[data-chatgpt-verification]')
+              .getAttribute('data-chatgpt-verification'),
+            'unverified',
+          );
+        }
+        // A forged 200 HEAD must not defeat the server-side release gate.
+        await page.route('**/worker/install.sh', async (route) =>
+          route.fulfill({ status: 200, body: '' }),
+        );
+        await page.reload();
+        await page.waitForFunction(() =>
+          document
+            .querySelector('[data-worker-installer-message]')
+            ?.textContent?.includes('HTTP response'),
+        );
+        assert.equal(
+          await page.locator('[data-onboarding-status]').getAttribute('data-onboarding-status'),
+          'blocked',
+        );
+        assert.equal(
+          await page.locator('[data-onboarding-step="4"]').getAttribute('data-state'),
+          'blocked',
+        );
+        await page.unroute('**/worker/install.sh');
+        // Malformed discovery metadata must also block the endpoint, not imply READY.
+        await page.route('**/.well-known/oauth-authorization-server', async (route) =>
+          route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              issuer: 'https://attacker.invalid',
+              token_endpoint: 'https://attacker.invalid/oauth/token',
+            }),
+          }),
+        );
+        await page.reload();
+        await page.waitForFunction(() =>
+          document
+            .querySelector('#quickstart-endpoint-check')
+            ?.textContent?.includes('Blocked or unverified'),
+        );
+        assert.equal(
+          await page.locator('[data-onboarding-step="3"]').getAttribute('data-state'),
+          'blocked',
+        );
+        assert.equal(
+          await page.locator('[data-onboarding-status]').getAttribute('data-onboarding-status'),
+          'blocked',
+        );
+        await page.unroute('**/.well-known/oauth-authorization-server');
         assert.deepEqual(pageErrors, [], 'Wizard JavaScript must not throw');
         await context.close();
       } finally {
@@ -417,6 +489,7 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
     const postCallGuide = await afterVerifiedCall.text();
     assert.match(postCallGuide, /data-onboarding-step="6" data-complete="true"/);
     assert.match(postCallGuide, /data-onboarding-status="blocked"/);
+    assert.match(postCallGuide, /data-chatgpt-verification="unverified"/);
     assert.doesNotMatch(postCallGuide, /All six steps complete/);
 
     await new Promise<void>((resolve) => server?.close(() => resolve()));
@@ -536,4 +609,54 @@ void test('Railway refuses ephemeral storage and forged canonical hosts', async 
     () => config({ MCP_PUBLIC_BASE_URL: 'https://user:pass@owner.example' }),
     /Invalid/,
   );
+});
+
+void test('Even fully evidenced local prerequisites never attest external ChatGPT READY', async () => {
+  const before = process.env.MCP_PLATFORM;
+  try {
+    process.env.MCP_PLATFORM = 'local';
+    const { onboardingPage } = await import('../src/http/pages.js');
+    const common = {
+      storage: { state: 'READY', operational: true },
+      ready: true,
+      workerReady: true,
+      clientReady: true,
+      firstCall: true,
+      enabled: true,
+      csrfToken: 'test-csrf-only',
+    };
+    const completeLocalFacts = onboardingPage({
+      ...common,
+      baseUrl: 'https://owner.example',
+    });
+    assert.match(completeLocalFacts, /data-onboarding-step="6" data-complete="true"/);
+    assert.match(completeLocalFacts, /data-onboarding-status="pending"/);
+    assert.match(completeLocalFacts, /data-chatgpt-verification="unverified"/);
+    assert.match(completeLocalFacts, /ChatGPT connection still needs external verification/);
+    assert.doesNotMatch(completeLocalFacts, /data-onboarding-status="done"/);
+    const unsafeOrigin = onboardingPage({
+      ...common,
+      baseUrl: 'https://user:pass@owner.example',
+    });
+    assert.match(unsafeOrigin, /data-onboarding-status="blocked"/);
+    assert.match(unsafeOrigin, /Invalid or unsafe configuration/);
+    assert.match(unsafeOrigin, /disabled/);
+    process.env.MCP_PLATFORM = 'railway';
+    const blockedRailway = onboardingPage({
+      ...common,
+      baseUrl: 'https://owner.example',
+    });
+    assert.match(blockedRailway, /data-onboarding-status="blocked"/);
+    assert.match(blockedRailway, /WORKER_SIGNED_RELEASE_PENDING/);
+    assert.match(blockedRailway, /data-onboarding-step="4" data-complete="false"/);
+    const insecureRailway = onboardingPage({
+      ...common,
+      baseUrl: 'http://127.0.0.1:3399',
+    });
+    assert.match(insecureRailway, /data-onboarding-step="3" data-complete="false"/);
+    assert.match(insecureRailway, /data-onboarding-status="blocked"/);
+  } finally {
+    if (before === undefined) delete process.env.MCP_PLATFORM;
+    else process.env.MCP_PLATFORM = before;
+  }
 });

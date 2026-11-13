@@ -28,11 +28,11 @@ function html(content: string) {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Secure Setup — mcp_worker</title><meta name="robots" content="noindex,nofollow"><style>
 body{background:#f5f7fa;color:#172037;font:16px system-ui;margin:0;padding:3rem 1rem}
-main{max-width:630px;margin:auto;background:white;border:1px solid #dce3ec;border-radius:16px;padding:2rem} .hint{color:#4b5563;font-size:.92rem;line-height:1.5}.steps{padding-left:1.4rem;line-height:1.75}.steps li::marker{color:#2754a8;font-weight:700}.alert{background:#fff7e6;border:1px solid #f1cc84;padding:12px;border-radius:8px}
+main{max-width:630px;margin:auto;background:white;border:1px solid #dce3ec;border-radius:16px;padding:clamp(1rem,4vw,2rem)} .hint{color:#4b5563;font-size:.92rem;line-height:1.5}.steps{padding-left:1.4rem;line-height:1.75}.steps li::marker{color:#2754a8;font-weight:700}.alert{background:#fff7e6;border:1px solid #f1cc84;padding:12px;border-radius:8px}
 label{display:block;font-weight:600;margin-top:1rem}input{box-sizing:border-box;display:block;width:100%;padding:12px;margin-top:.4rem}
-button{background:#172037;color:white;border:0;border-radius:8px;padding:12px 18px;margin-top:1.4rem}
+button{background:#172037;color:white;border:0;border-radius:8px;padding:12px 18px;margin-top:1.4rem;min-height:44px;cursor:pointer}input:focus-visible,button:focus-visible{outline:3px solid #295ac0;outline-offset:2px}input{min-height:44px}code{overflow-wrap:anywhere} @media(max-width:480px){body{padding:1rem .5rem}.steps{padding-left:1.1rem}}
 </style></head><body><main><h1>mcp_worker</h1><h2>Set up your private instance</h2>
-${content}<p class="hint">No default Admin password. The setup key is only entered here, never in a URL. Store your new Admin password privately; do not paste it into ChatGPT.</p></main></body></html>`;
+${content}<p class="hint">No default Admin password. The setup key belongs only in this form, never in a URL. Store your new Admin password privately; do not paste it into ChatGPT.</p></main></body></html>`;
 }
 router.get('/setup', async (req, res, next) => {
   try {
@@ -58,7 +58,7 @@ router.get('/setup', async (req, res, next) => {
 <label>Admin password<input type="password" name="password" minlength="14" maxlength="256" autocomplete="new-password" required></label>
 <label>Confirm password<input type="password" name="confirm_password" minlength="14" maxlength="256" autocomplete="new-password" required></label>
 <button type="submit">Create Admin and continue</button></form>
-<h3>What happens next?</h3><ol class="steps"><li>Sign in with your Admin password.</li><li>Check the persistent database and copy the HTTPS MCP endpoint.</li><li>Create an OAuth client with your actual ChatGPT callback and minimum scopes.</li><li>Enroll and connect a Worker <strong>only if a signed release is approved</strong>.</li><li>Connect the MCP endpoint in ChatGPT and explicitly approve OAuth.</li><li>Make a read-only authenticated <code>runtime_info</code> call and check the audit evidence.</li></ol>
+<h3>What happens next?</h3><ol class="steps"><li>Sign in with your Admin password.</li><li>Confirm persistent SQLite and copy the HTTPS MCP endpoint (no command line).</li><li>Create a read-only OAuth client using the exact ChatGPT callback shown in ChatGPT.</li><li>Install and enroll a Worker <strong>only after separately approved signed distribution</strong>.</li><li>Connect ChatGPT through its dedicated OAuth form and explicitly consent to Read access.</li><li>Call read-only <code>runtime_info</code>; verify both its audit row and the actual ChatGPT connection.</li></ol>
 <p class="alert">Worker installers may return HTTP 503: signed Worker release approval is pending. The wizard will show this blocker rather than claiming the instance is ready. No shell access or OAuth consent is granted automatically.</p>`),
     );
   } catch (error) {

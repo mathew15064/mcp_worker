@@ -1,6 +1,27 @@
 import { test, expect } from '@playwright/test';
-import helpers = require('./fixtures/helpers');
-const { login, captureConsoleErrors } = helpers;
+import type { Page } from '@playwright/test';
+
+// The existing fixture exports CommonJS-only helpers. Keep this owned test
+// self-contained and typed rather than introducing a banned require import.
+async function login(page: Page) {
+  await page.goto('/login');
+  await page.getByLabel('Username').fill('admin');
+  await page.getByLabel('Password').fill('PlaywrightAdmin2026!');
+  await Promise.all([
+    page.waitForURL(/\/admin$/),
+    page.getByRole('button', { name: 'Sign in' }).click(),
+  ]);
+  await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
+}
+
+function captureConsoleErrors(page: Page): string[] {
+  const errors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  page.on('pageerror', (error) => errors.push(error.message));
+  return errors;
+}
 
 test.describe.configure({ mode: 'serial' });
 
@@ -25,6 +46,81 @@ test('Getting Started exposes database readiness and six guided steps', async ({
   await expect(page.locator('[data-onboarding-step]')).toHaveCount(6);
   await expect(page.getByText('Next step: 2')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Database settings', exact: true })).toBeVisible();
+});
+
+test('Getting Started stays externally unverified on desktop and mobile', async ({ page }) => {
+  const errors = captureConsoleErrors(page);
+  await login(page);
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto('/admin/onboarding');
+    await expect(page.getByRole('heading', { name: 'Getting Started' })).toBeVisible();
+    await expect(page.locator('[data-onboarding-step]')).toHaveCount(6);
+    await expect(page.locator('[data-chatgpt-verification]')).toHaveAttribute(
+      'data-chatgpt-verification',
+      'unverified',
+    );
+    await expect(page.getByRole('heading', { name: 'Connect ChatGPT (manual)' })).toBeVisible();
+    const dimensions = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
+  }
+  expect(errors).toEqual([]);
+});
+
+test('OAuth discovery mismatch blocks endpoint readiness without granting scopes', async ({
+  page,
+}) => {
+  await login(page);
+  await page.route('**/.well-known/oauth-authorization-server', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        issuer: 'https://untrusted.invalid',
+        token_endpoint: 'https://untrusted.invalid/oauth/token',
+      }),
+    });
+  });
+  await page.goto('/admin/onboarding');
+  await expect(page.locator('#quickstart-endpoint-check')).toContainText('Blocked or unverified');
+  await expect(page.locator('[data-onboarding-step="3"]')).toHaveAttribute('data-state', 'blocked');
+  await expect(page.locator('[data-onboarding-status]')).toHaveAttribute(
+    'data-onboarding-status',
+    'blocked',
+  );
+  await expect(page.locator('[data-chatgpt-verification]')).toHaveAttribute(
+    'data-chatgpt-verification',
+    'unverified',
+  );
+  await page.unroute('**/.well-known/oauth-authorization-server');
+});
+
+test('new Admin OAuth clients default to Read only and keep secrets one-time', async ({ page }) => {
+  await login(page);
+  await page.goto('/admin/clients?first_call=1');
+  await page.getByRole('button', { name: 'New Client' }).first().click();
+  const modal = page.getByRole('dialog', { name: 'New OAuth Client' });
+  await expect(modal.getByLabel('Display name')).toHaveValue('ChatGPT');
+  await expect(modal.getByLabel('Redirect URI(s)')).toHaveValue(
+    'https://chatgpt.com/connector_platform_oauth_redirect',
+  );
+  await expect(modal.locator('input[name="scopes"][value="bot_report.read"]')).toBeChecked();
+  await expect(
+    modal.locator('input[name="scopes"][value="bot_report.terminal"]'),
+  ).not.toBeChecked();
+  await expect(modal.locator('input[name="scopes"][value="offline_access"]')).not.toBeChecked();
+  await modal.getByRole('button', { name: 'Cancel' }).click();
+  await page.goto('/admin/clients');
+  await page.getByRole('button', { name: 'New Client' }).first().click();
+  const ordinary = page.getByRole('dialog', { name: 'New OAuth Client' });
+  await expect(ordinary.locator('input[name="scopes"][value="bot_report.read"]')).toBeChecked();
+  await expect(
+    ordinary.locator('input[name="scopes"][value="bot_report.terminal"]'),
+  ).not.toBeChecked();
+  await expect(ordinary.locator('input[name="scopes"][value="offline_access"]')).not.toBeChecked();
 });
 
 test('Audit Log traces client tool activity and supports client/tool/result filtering', async ({
@@ -108,7 +204,7 @@ test('Audit Log pagination stays compact and page-size changes update the result
     element.scrollTop = 320;
   });
   const after = await header.boundingBox();
-  expect(Math.abs(after!.y - before!.y)).toBeLessThan(3);
+  expect(Math.abs((after?.y ?? Number.NaN) - (before?.y ?? Number.NaN))).toBeLessThan(3);
 });
 
 test('desktop sidebar can collapse, persists the preference, and toasts stack from the top', async ({
@@ -118,11 +214,11 @@ test('desktop sidebar can collapse, persists the preference, and toasts stack fr
 
   const sidebar = page.locator('#admin-sidebar');
   const collapse = page.getByRole('button', { name: 'Collapse sidebar' });
-  const expandedWidth = (await sidebar.boundingBox())!.width;
+  const expandedWidth = (await sidebar.boundingBox())?.width ?? 0;
   await collapse.click();
   await expect(page.locator('body')).toHaveClass(/sidebar-collapsed/);
   await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeVisible();
-  const collapsedWidth = (await sidebar.boundingBox())!.width;
+  const collapsedWidth = (await sidebar.boundingBox())?.width ?? 0;
   expect(collapsedWidth).toBeLessThan(expandedWidth);
 
   await page.reload();
@@ -141,7 +237,7 @@ test('desktop sidebar can collapse, persists the preference, and toasts stack fr
     .filter({ hasText: 'Telegram settings saved to database.' });
   await expect(toast).toBeVisible();
   const box = await toast.boundingBox();
-  expect(box!.y).toBeLessThan(120);
+  expect(box?.y).toBeLessThan(120);
 });
 
 test('OAuth modal traps focus, restores focus, creates a one-time secret, and search has an empty result state', async ({
@@ -160,8 +256,8 @@ test('OAuth modal traps focus, restores focus, creates a one-time secret, and se
   await expect(scopeChecks).toHaveCount(3);
   for (let index = 0; index < 3; index += 1) {
     const box = await scopeChecks.nth(index).boundingBox();
-    expect(box!.width).toBeLessThanOrEqual(20);
-    expect(box!.height).toBeLessThanOrEqual(20);
+    expect(box?.width).toBeLessThanOrEqual(20);
+    expect(box?.height).toBeLessThanOrEqual(20);
   }
   await expect(page.getByLabel('Display name')).toBeFocused();
 
@@ -184,7 +280,7 @@ test('OAuth modal traps focus, restores focus, creates a one-time secret, and se
 
   const secretDialog = page.getByRole('dialog', { name: 'Client secret created' });
   await expect(secretDialog).toBeVisible();
-  const secret = (await page.locator('#new-client-secret').textContent())!.trim();
+  const secret = (await page.locator('#new-client-secret').textContent())?.trim() || '';
   expect(secret).toMatch(/^br_sec_/);
   await page.getByRole('button', { name: "I've saved the secret" }).click();
   await expect(secretDialog).toBeHidden();
@@ -208,7 +304,7 @@ test('OAuth modal traps focus, restores focus, creates a one-time secret, and se
   await expect(rotateConfirm).toBeVisible();
   await rotateConfirm.getByRole('button', { name: 'Rotate Secret' }).click();
   await expect(secretDialog).toBeVisible();
-  const rotatedSecret = (await page.locator('#new-client-secret').textContent())!.trim();
+  const rotatedSecret = (await page.locator('#new-client-secret').textContent())?.trim() || '';
   expect(rotatedSecret).toMatch(/^br_sec_/);
   expect(rotatedSecret).not.toBe(secret);
   await page.getByRole('button', { name: "I've saved the secret" }).click();
@@ -295,9 +391,8 @@ test('Workers use one-time enrollment tokens and worker profiles without SSH cre
     'irm http://127.0.0.1:3399/worker/install.ps1 | iex',
   );
   await expect(enrollmentDialog.getByText('systemtd login', { exact: true })).toBeVisible();
-  const enrollment = (await enrollmentDialog
-    .locator('#worker-enrollment-token')
-    .textContent())!.trim();
+  const enrollment =
+    (await enrollmentDialog.locator('#worker-enrollment-token').textContent())?.trim() || '';
   expect(enrollment).toMatch(/^br_enroll_/);
   await enrollmentDialog.getByRole('button', { name: "I've saved the token" }).click();
   await expect(enrollmentDialog).toBeHidden();
