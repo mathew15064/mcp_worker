@@ -5,6 +5,7 @@ on:
     branches:
       - feat/railway-p15-w2-t04-stack-readiness
       - feat/railway-p15-w3-t01-independent-history
+      - review/railway-p15-w3-t05-integration
   pull_request:
     paths:
       - 'scripts/check-railway-pr-stack.mjs'
@@ -56,7 +57,9 @@ jobs:
     name: Verify independent W3 head and original stacked PR15
     if: >-
       github.head_ref == 'feat/railway-p15-w3-t01-independent-history' ||
-      github.ref_name == 'feat/railway-p15-w3-t01-independent-history'
+      github.ref_name == 'feat/railway-p15-w3-t01-independent-history' ||
+      github.head_ref == 'review/railway-p15-w3-t05-integration' ||
+      github.ref_name == 'review/railway-p15-w3-t05-integration'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
