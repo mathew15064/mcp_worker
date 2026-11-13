@@ -7,6 +7,7 @@ declare module 'express-session' {
     role?: string;
     sessionVersion?: number;
     authSource?: string;
+    adminCredentialFingerprint?: string;
     returnTo?: string;
     flashError?: string;
     flashSuccess?: string;
@@ -16,15 +17,20 @@ declare module 'express-session' {
 }
 import config from '../config/env';
 import BoundedMemorySessionStore from '../db/memorySessionStore';
+import SqliteSessionStore from '../db/sessionStore';
 
 const secureCookie =
-  config.NODE_ENV === 'production'
+  process.env.MCP_PLATFORM === 'railway' ||
+  (config.NODE_ENV === 'production'
     ? process.env.COOKIE_SECURE !== 'false'
-    : process.env.COOKIE_SECURE === 'true';
+    : process.env.COOKIE_SECURE === 'true');
 
-const store = new BoundedMemorySessionStore({
-  maxSessions: Number.parseInt(process.env.ADMIN_SESSION_MAX || '500', 10),
-});
+const store =
+  process.env.MCP_PLATFORM === 'railway'
+    ? new SqliteSessionStore()
+    : new BoundedMemorySessionStore({
+        maxSessions: Number.parseInt(process.env.ADMIN_SESSION_MAX || '500', 10),
+      });
 
 const sessionMiddleware = session({
   store,

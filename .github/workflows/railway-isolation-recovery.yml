@@ -1,0 +1,118 @@
+name: Railway W3 SQLite isolation and recovery (sandbox only)
+
+on:
+  pull_request:
+  push:
+    branches:
+      - feat/railway-p15-w3-t04-recovery-isolation
+      - review/railway-p15-w3-t05-integration
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  node-isolation-recovery:
+    name: Two Node instances and off-volume disaster recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26.13.0'
+          cache: npm
+      - run: npm ci
+      - name: Scope lint, formatting and strict types
+        run: |
+          npm run lint
+          ./node_modules/.bin/eslint scripts/verify-railway-harness.ts tests/railway-instance-isolation.test.ts tests/railway-instance-isolation-go.test.ts tests/railway-disaster-recovery.test.ts
+          ./node_modules/.bin/prettier --check scripts/verify-railway-harness.ts tests/railway-instance-isolation.test.ts tests/railway-instance-isolation-go.test.ts tests/railway-disaster-recovery.test.ts
+          npm run typecheck
+          node --check scripts/verify-railway-sandbox-child.cjs
+          node --check scripts/verify-railway-offvolume-restore.cjs
+          bash -n scripts/verify-railway-docker-isolation.sh
+      - run: npm run build
+      - name: Required independent Node process, SQLite and read-only tests
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 --test-reporter=tap             dist/tests/railway-instance-isolation.test.js             dist/tests/railway-disaster-recovery.test.js | tee w3-node-recovery.tap
+          grep -qx '# tests 4' w3-node-recovery.tap
+          grep -qx '# pass 4' w3-node-recovery.tap
+          grep -qx '# fail 0' w3-node-recovery.tap
+          grep -qx '# skipped 0' w3-node-recovery.tap
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: w3-node-isolation-recovery-tap
+          path: w3-node-recovery.tap
+          if-no-files-found: ignore
+
+  real-go-wss-mcp:
+    name: Two real Go Workers over isolated WSS and MCP (non-skippable)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CI: 'true'
+      BOT_REPORT_W3_T04_GO_E2E: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26.13.0'
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.10'
+          cache-dependency-path: worker-go/go.sum
+      - run: npm ci
+      - run: npm run build
+      - name: Check Go/TLS dependencies and real Go sandbox E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          go version
+          openssl version
+          node --test --test-reporter=tap dist/tests/railway-instance-isolation-go.test.js | tee w3-go-isolation.tap
+          grep -qx '# tests 1' w3-go-isolation.tap
+          grep -qx '# pass 1' w3-go-isolation.tap
+          grep -qx '# fail 0' w3-go-isolation.tap
+          grep -qx '# skipped 0' w3-go-isolation.tap
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: w3-real-go-isolation-tap
+          path: w3-go-isolation.tap
+          if-no-files-found: ignore
+
+  docker-volume-recovery:
+    name: Docker three isolated volumes, off-volume snapshot and read-only denial
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      W3_SANDBOX_ONLY: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26.13.0'
+          cache: npm
+      - run: npm ci
+      - name: Build real disposable Railway image (no deploy)
+        run: docker build -f Dockerfile.railway -t w3t04-railway-sandbox:ci .
+      - name: Isolated Docker volumes and off-volume backup/restore
+        run: bash scripts/verify-railway-docker-isolation.sh w3t04-railway-sandbox:ci | tee w3-docker-isolation.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: w3-docker-isolation-summary
+          path: w3-docker-isolation.txt
+          if-no-files-found: ignore

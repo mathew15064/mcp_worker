@@ -1,0 +1,91 @@
+name: Worker cross-platform artifacts (manual, no release)
+
+on:
+  workflow_dispatch:
+  # Task-scoped verification without modifying PR topology or publishing artifacts.
+  push:
+    branches: [feat/railway-p15-w3-t02-release-security, review/railway-p15-w3-t05-integration]
+  pull_request:
+    paths:
+      - 'src/routes/workerRoutes.ts'
+      - 'scripts/sign-worker-manifest.sh'
+      - 'scripts/test-linux-installer-lifecycle.cjs'
+      - 'tests/worker-signed-release*.test.ts'
+      - 'worker/README.md'
+      - 'docs/WORKER_SIGNED_RELEASE_POLICY.md'
+      - '.github/workflows/worker-artifact-build.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: worker-go/go.mod
+          cache-dependency-path: worker-go/go.sum
+
+      - name: Test Worker
+        run: |
+          cd worker-go
+          go test ./...
+
+      - name: Build all Worker platforms
+        run: ./scripts/build-worker-go.sh
+
+      - name: Verify hashes and Linux binary
+        run: |
+          cd worker/bin
+          sha256sum -c SHA256SUMS
+          ./bot-report-worker-linux-amd64 version
+
+      - name: Enforce non-publishing candidate boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e worker/bin/SHA256SUMS.sig
+          test "$(find worker/bin -maxdepth 1 -type f -name '*.pem' | wc -l)" -eq 0
+          test "$(find worker/bin -maxdepth 1 -type f -name '*.key' | wc -l)" -eq 0
+          echo 'Local unsigned build verified; binaries and signing material are not uploaded.'
+
+      # Never upload worker/bin. A public-repository Actions artifact is not
+      # a private RC channel; signing happens only outside CI after approval.
+
+  installer-verification:
+    # An ephemeral signer is created only inside a disposable runner. No
+    # artifacts containing this key or its signatures are uploaded.
+    name: Offline signed installer (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26.13.0'
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: worker-go/go.mod
+          cache-dependency-path: worker-go/go.sum
+      - name: Dependencies
+        run: npm ci
+      - name: Strict typecheck and compile test harness
+        run: npm run typecheck && npm run build
+      - name: Offline signature/checksum/version/rotation/rollback tests
+        run: node --test dist/tests/worker-signed-release*.test.js

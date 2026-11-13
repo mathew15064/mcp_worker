@@ -1,19 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
 import terminalMcp from '../src/services/terminalMcpService';
 const { TerminalMcpService, normalizeCapturedText } = terminalMcp;
-import sshModule from '../src/services/terminalSshService';
-const { TerminalSshService } = sshModule;
 
 function profile() {
   return {
     id: 'p1',
     name: 'Dev3',
+    transport: 'worker',
+    worker_id: 'worker-regression',
     host: '127.0.0.1',
     port: 22,
     username: 'dev3',
-    credential_envelope: 'enc',
     tmux_session: 'dev3',
     enabled: true,
   };
@@ -24,29 +22,10 @@ function audit() {
 function service(ssh: Record<string, unknown>) {
   const p = profile();
   return new TerminalMcpService({
-    profiles: { findAll: () => [p], findWithCredentialById: () => p },
+    profiles: { findAll: () => [p] },
     audit: audit(),
-    credentials: { decrypt: () => 'fixture' },
-    ssh,
+    worker: ssh,
   } as unknown as ConstructorParameters<typeof TerminalMcpService>[0]);
-}
-
-class MockChannel extends EventEmitter {
-  stderr: EventEmitter & { resume(): void };
-  input: Buffer;
-  constructor() {
-    super();
-    this.stderr = Object.assign(new EventEmitter(), { resume() {} });
-    this.input = Buffer.alloc(0);
-  }
-  resume() {}
-  close() {
-    this.emit('close', 0);
-  }
-  end(input: Buffer | string) {
-    this.input = Buffer.isBuffer(input) ? input : Buffer.from(input || '');
-    setImmediate(() => this.emit('exit', 0));
-  }
 }
 
 void test('repo_snapshot parses compact git state', async () => {
@@ -253,77 +232,4 @@ void test('terminal read removes trailing blank viewport rows before slicing', a
   const result = await service(ssh).read('Dev3', 3);
   assert.equal(result.text, 'pwd\n/work\n$ ');
   assert.equal(result.lines, 3);
-});
-
-void test('SSH input operation completes on exit status without waiting for channel close', async () => {
-  class ExitOnlyChannel extends EventEmitter {
-    stderr: EventEmitter & { resume(): void };
-    constructor() {
-      super();
-      this.stderr = Object.assign(new EventEmitter(), { resume() {} });
-    }
-    resume() {}
-    close() {}
-    end() {
-      setImmediate(() => this.emit('exit', 0));
-    }
-  }
-  class Client extends EventEmitter {
-    connect() {
-      setImmediate(() => this.emit('ready'));
-    }
-    exec(
-      _command: string,
-      _options: unknown,
-      callback: (err: Error | null, channel: ExitOnlyChannel) => void,
-    ) {
-      callback(null, new ExitOnlyChannel());
-    }
-    end() {}
-  }
-  const ssh = new TerminalSshService({
-    ClientClass: Client as unknown as typeof import('ssh2').Client,
-    commandTimeoutMs: 50,
-  });
-  const result = await ssh.writeTextFile(profile(), 'fixture', '/tmp/demo.txt', 'hello');
-  assert.equal(result.written, true);
-});
-
-void test('managed process byte cursor returns only unread bytes', async () => {
-  const log = Buffer.from('first\nsecond\n');
-  class Client extends EventEmitter {
-    connect() {
-      setImmediate(() => this.emit('ready'));
-    }
-    exec(
-      command: string,
-      _options: unknown,
-      callback: (err: Error | null, channel: MockChannel) => void,
-    ) {
-      const channel = new MockChannel();
-      callback(null, channel);
-      setImmediate(() => {
-        if (command.startsWith('test -f ')) channel.emit('exit', 0);
-        else if (command.startsWith('stat -c %s')) {
-          channel.emit('data', Buffer.from(String(log.length) + '\n'));
-          channel.emit('exit', 0);
-        } else if (command.startsWith('dd if=')) {
-          channel.emit('data', log.subarray(6));
-          channel.emit('exit', 0);
-        }
-        channel.emit('close', 0);
-      });
-    }
-    end() {}
-  }
-  const ssh = new TerminalSshService({
-    ClientClass: Client as unknown as typeof import('ssh2').Client,
-  });
-  const result = await ssh.readManagedProcessLogs(profile(), 'fixture', 'brproc-0123456789abcdef', {
-    cursor: 6,
-    maxBytes: 1024,
-  });
-  assert.equal(result.text, 'second\n');
-  assert.equal(result.next_cursor, log.length);
-  assert.equal(result.eof, true);
 });

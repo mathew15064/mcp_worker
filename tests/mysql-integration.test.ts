@@ -45,9 +45,6 @@ void test(
     const { MigrationRunner } = await import('../src/db/migrationRunner.js');
     const { SettingsRepository } = (await import('../src/repositories/settingsRepository.js'))
       .default;
-    const { TerminalProfileRepository } = (
-      await import('../src/repositories/terminalProfileRepository.js')
-    ).default;
     const { WorkerRepository } = (await import('../src/repositories/workerRepository.js')).default;
     const { WorkerAuthService } = (await import('../src/services/workerAuthService.js')).default;
     const { McpOAuthRepository } = (await import('../src/repositories/mcpOAuthRepository.js'))
@@ -149,40 +146,12 @@ void test(
     await settings.set('mcp.enabled', 'true');
     assert.equal(await settings.get('mcp.enabled'), 'true');
 
-    const terminals = new TerminalProfileRepository(adapter);
-    const terminal = await terminals.create(
-      {
-        name: 'Mysql Dev',
-        description: 'integration',
-        host: '127.0.0.1',
-        port: 22,
-        username: 'root',
-        tmux_session: 'mysql-dev',
-        enabled: true,
-      },
-      'enc:test-envelope',
+    // Historical SSH tables remain readable for nondestructive rollback/import.
+    // Worker-only runtime never creates a new SSH profile.
+    const historical = await adapter.queryOne<{ count: number }>(
+      'SELECT COUNT(*) AS count FROM terminal_profiles',
     );
-    assert.ok(terminal);
-    const storedTerminal = await terminals.findById(terminal.id);
-    assert.ok(storedTerminal);
-    assert.equal(storedTerminal.name, 'Mysql Dev');
-    await assert.rejects(
-      () =>
-        terminals.create(
-          {
-            name: 'mysql dev',
-            description: '',
-            host: '127.0.0.1',
-            port: 22,
-            username: 'root',
-            tmux_session: 'other',
-            enabled: true,
-          },
-          'enc:test-envelope',
-        ),
-      (error: unknown) =>
-        error instanceof Error && 'code' in error && error.code === 'PROFILE_NAME_CONFLICT',
-    );
+    assert.ok(historical);
 
     const oauthRepo = new McpOAuthRepository(adapter);
     const oauthConfig = {

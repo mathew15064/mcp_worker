@@ -5,6 +5,22 @@ import { rateLimit } from 'express-rate-limit';
 import databaseManager from '../db/databaseManager';
 import workerAuthService from '../services/workerAuthService';
 import workerRepository from '../repositories/workerRepository';
+import { canonicalRailwayOrigin } from '../config/railwayOrigin';
+
+// No approved signing key/release exists. Populate only by reviewed code change.
+type ApprovedWorkerRelease = Readonly<{
+  version: string;
+  commit: string;
+  publicKeyBase64: string;
+  // Only for an owner-reviewed, one-way rotation from an installed trust root.
+  previousPublicKeySha256?: string;
+}>;
+const APPROVED_WORKER_RELEASE: ApprovedWorkerRelease = Object.freeze({
+  version: '',
+  commit: '',
+  publicKeyBase64: '',
+  previousPublicKeySha256: '',
+});
 
 const router = express.Router();
 const WORKER_DIR = path.resolve(__dirname, '../../worker');
@@ -36,6 +52,12 @@ const enrollmentLimiter = rateLimit({
 });
 
 function publicBaseUrl(req: Request) {
+  // Railway Worker installer URLs must ignore caller-controlled Host headers.
+  if (process.env.MCP_PLATFORM === 'railway') {
+    const origin = canonicalRailwayOrigin();
+    if (!origin) throw new Error('Missing canonical Railway origin for Worker installer.');
+    return origin;
+  }
   const value = `${req.protocol}://${req.get('host')}`;
   const parsed = new URL(value);
   if (!['http:', 'https:'].includes(parsed.protocol))
@@ -47,14 +69,26 @@ function shellSingleQuote(value: string) {
   return `'${String(value).replace(/'/g, `'"'"'`)}'`;
 }
 
-function unixInstallerScript(baseUrl: string, expectedOS: string) {
+function unixInstallerScript(
+  baseUrl: string,
+  expectedOS: string,
+  approved: ApprovedWorkerRelease = APPROVED_WORKER_RELEASE,
+) {
   const base = shellSingleQuote(baseUrl);
   const osName = shellSingleQuote(expectedOS);
+  const pinnedVersion = shellSingleQuote(approved.version);
+  const pinnedCommit = shellSingleQuote(approved.commit);
+  const pinnedKey = shellSingleQuote(approved.publicKeyBase64);
+  const previousKey = shellSingleQuote(approved.previousPublicKeySha256 || '');
   return `#!/bin/sh
 set -eu
 
 BASE_URL=${base}
 EXPECTED_OS=${osName}
+PINNED_VERSION=${pinnedVersion}
+PINNED_COMMIT=${pinnedCommit}
+PINNED_PUBLIC_KEY_B64=${pinnedKey}
+PINNED_PREVIOUS_KEY_SHA256=${previousKey}
 INSTALL_ROOT="${'${BOT_REPORT_WORKER_INSTALL_ROOT:-$HOME/.local/share/bot-report-worker}'}"
 BIN_DIR="${'${BOT_REPORT_WORKER_BIN_DIR:-$HOME/.local/bin}'}"
 WORKER_HOME="${'${BOT_REPORT_WORKER_HOME:-$HOME/.bot-report-worker}'}"
@@ -81,6 +115,23 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "[systemtd] missing required 
 need curl
 need uname
 need id
+need openssl
+[ -n "$PINNED_VERSION" ] && [ -n "$PINNED_COMMIT" ] && [ -n "$PINNED_PUBLIC_KEY_B64" ] || {
+  echo "[systemtd] signed release not approved" >&2; exit 1;
+}
+case "$PINNED_VERSION" in *[!0-9.]*|'') echo "[systemtd] invalid release version" >&2; exit 1;; esac
+case "$PINNED_COMMIT" in *[!0-9a-f]*|'') echo "[systemtd] invalid release commit" >&2; exit 1;; esac
+if [ -n "$PINNED_PREVIOUS_KEY_SHA256" ]; then
+  printf '%s' "$PINNED_PREVIOUS_KEY_SHA256" | grep -Eq '^[0-9a-f]{64}$' || { echo "[systemtd] invalid prior trust root" >&2; exit 1; }
+fi
+printf '%s\n' "$PINNED_VERSION" | grep -Eq '^[0-9]+[.][0-9]+[.][0-9]+$' ||
+  { echo "[systemtd] invalid semantic version" >&2; exit 1; }
+COMMIT_LEN="$(printf '%s' "$PINNED_COMMIT" | wc -c | tr -d ' ')"
+[ "$COMMIT_LEN" -ge 12 ] && [ "$COMMIT_LEN" -le 40 ] || { echo "[systemtd] invalid release commit length" >&2; exit 1; }
+if [ "$ACTION" = rollback ]; then
+  echo "[systemtd] manual rollback prohibited; explicitly approve a signed release" >&2
+  exit 1
+fi
 
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH_RAW="$(uname -m)"
@@ -110,20 +161,70 @@ fi
 mkdir "$INSTALL_ROOT/.install-lock" || { echo "[systemtd] installer already running or stale lock; inspect before removal" >&2; exit 1; }
 LOCK="$INSTALL_ROOT/.install-lock"
 PREVIOUS="$INSTALL_ROOT/previous"
-if [ "$ACTION" = rollback ]; then
-  [ -f "$PREVIOUS/systemtd" ] && [ -f "$PREVIOUS/SHA256SUMS" ] && [ ! -L "$PREVIOUS" ] && [ ! -L "$PREVIOUS/systemtd" ] || { echo "[systemtd] no verified previous runtime" >&2; exit 1; }
-  cp "$PREVIOUS/systemtd" "$TMP/systemtd"
-  cp "$PREVIOUS/SHA256SUMS" "$TMP/SHA256SUMS"
-else
-  curl -fsSL "$BASE_URL/worker/dist/$FILE" -o "$TMP/systemtd"
-  curl -fsSL "$BASE_URL/worker/dist/SHA256SUMS" -o "$TMP/SHA256SUMS"
-  if [ -n "${'${BOT_REPORT_WORKER_TRUSTED_KEY:-}'}" ]; then
-    need openssl
-    curl -fsSL "$BASE_URL/worker/dist/SHA256SUMS.sig" -o "$TMP/SHA256SUMS.sig"
-    openssl dgst -sha256 -verify "$BOT_REPORT_WORKER_TRUSTED_KEY" -signature "$TMP/SHA256SUMS.sig" "$TMP/SHA256SUMS" >/dev/null
+printf '%s' "$PINNED_PUBLIC_KEY_B64" | openssl base64 -d -A > "$TMP/release-key.pem"
+openssl rsa -pubin -in "$TMP/release-key.pem" -noout >/dev/null 2>&1 || {
+  echo "[systemtd] invalid pinned RSA public key" >&2; exit 1;
+}
+openssl pkey -pubin -in "$TMP/release-key.pem" -outform DER -out "$TMP/release-key.der" 2>/dev/null || exit 1
+PINNED_KEY_SHA256="$(openssl dgst -sha256 "$TMP/release-key.der" | awk '{print $NF}')"
+curl -fsSL "$BASE_URL/worker/dist/SHA256SUMS" -o "$TMP/SHA256SUMS"
+curl -fsSL "$BASE_URL/worker/dist/SHA256SUMS.sig" -o "$TMP/SHA256SUMS.sig"
+openssl dgst -sha256 -verify "$TMP/release-key.pem" -signature "$TMP/SHA256SUMS.sig" "$TMP/SHA256SUMS" >/dev/null || {
+  echo "[systemtd] signature verification failed" >&2; exit 1;
+}
+manifest_hash() {
+  awk -v file="$1" '
+    $2 == file { count++; value=$1 }
+    END {
+      if (count != 1 || length(value) != 64 || value ~ /[^0-9a-fA-F]/) exit 1
+      print tolower(value)
+    }' "$TMP/SHA256SUMS"
+}
+RELEASE_HASH="$(manifest_hash WORKER_RELEASE)" || { echo "[systemtd] missing or duplicate release checksum" >&2; exit 1; }
+curl -fsSL "$BASE_URL/worker/dist/WORKER_RELEASE" -o "$TMP/WORKER_RELEASE"
+ACTUAL_RELEASE="$(openssl dgst -sha256 "$TMP/WORKER_RELEASE" | awk '{print $NF}')"
+[ "$ACTUAL_RELEASE" = "$RELEASE_HASH" ] || { echo "[systemtd] release metadata checksum failed" >&2; exit 1; }
+[ "$(wc -l < "$TMP/WORKER_RELEASE" | tr -d ' ')" = 2 ] &&
+  [ "$(sed -n '1p' "$TMP/WORKER_RELEASE")" = "version=$PINNED_VERSION" ] &&
+  [ "$(sed -n '2p' "$TMP/WORKER_RELEASE")" = "commit=$PINNED_COMMIT" ] || {
+  echo "[systemtd] signed release version/commit mismatch" >&2; exit 1;
+}
+RECORDED_VERSION="$WORKER_HOME/release-version"
+RECORDED_COMMIT="$WORKER_HOME/release-commit"
+RECORDED_KEY="$WORKER_HOME/release-key-sha256"
+OLD_VERSION=''
+OLD_COMMIT=''
+if [ -f "$SYSTEMTD" ] && [ ! -f "$RECORDED_VERSION" ]; then
+  echo "[systemtd] existing runtime lacks verified release record" >&2; exit 1
+fi
+if [ -e "$RECORDED_VERSION" ] || [ -e "$RECORDED_COMMIT" ] || [ -e "$RECORDED_KEY" ]; then
+  [ -f "$RECORDED_VERSION" ] && [ -f "$RECORDED_COMMIT" ] && [ -f "$RECORDED_KEY" ] &&
+    [ ! -L "$RECORDED_VERSION" ] && [ ! -L "$RECORDED_COMMIT" ] && [ ! -L "$RECORDED_KEY" ] || {
+    echo "[systemtd] incomplete or unsafe release record" >&2; exit 1;
+  }
+  OLD_VERSION="$(cat "$RECORDED_VERSION")"
+  OLD_COMMIT="$(cat "$RECORDED_COMMIT")"
+  OLD_KEY_SHA256="$(cat "$RECORDED_KEY")"
+  printf '%s' "$OLD_KEY_SHA256" | grep -Eq '^[0-9a-f]{64}$' || { echo "[systemtd] invalid recorded trust root" >&2; exit 1; }
+  if [ "$OLD_KEY_SHA256" != "$PINNED_KEY_SHA256" ]; then
+    [ "$PINNED_PREVIOUS_KEY_SHA256" = "$OLD_KEY_SHA256" ] && [ "$OLD_VERSION" != "$PINNED_VERSION" ] || {
+      echo "[systemtd] unapproved signing trust-root replacement" >&2; exit 1;
+    }
+  fi
+  awk -v old="$OLD_VERSION" -v new="$PINNED_VERSION" 'BEGIN {
+    if (old !~ /^[0-9]+\\.[0-9]+\\.[0-9]+$/ || new !~ /^[0-9]+\\.[0-9]+\\.[0-9]+$/) exit 1
+    split(old,a,"."); split(new,b,".")
+    for (i=1;i<=3;i++) {
+      if (b[i]+0<a[i]+0) exit 1
+      if (b[i]+0>a[i]+0) exit 0
+    }
+  }' || { echo "[systemtd] signed release rollback rejected" >&2; exit 1; }
+  if [ "$OLD_VERSION" = "$PINNED_VERSION" ] && [ "$OLD_COMMIT" != "$PINNED_COMMIT" ]; then
+    echo "[systemtd] release version reused for another commit" >&2; exit 1
   fi
 fi
-EXPECTED="$(awk -v file="$FILE" '$2 == file { print $1; exit }' "$TMP/SHA256SUMS")"
+curl -fsSL "$BASE_URL/worker/dist/$FILE" -o "$TMP/systemtd"
+EXPECTED="$(manifest_hash "$FILE")" || { echo "[systemtd] missing or duplicate binary checksum" >&2; exit 1; }
 if [ -z "$EXPECTED" ]; then
   echo "[systemtd] checksum manifest does not contain $FILE." >&2
   exit 1
@@ -164,6 +265,9 @@ for ALIAS in "$BIN_DIR/systemtd" "$BIN_DIR/bot-report-worker"; do
   fi
 done
 if [ "$SERVICE" = 0 ] && [ "$ACTION" = install ] && [ -f "$SYSTEMTD" ] && cmp -s "$SYSTEMTD" "$TMP/systemtd"; then
+  [ "$OLD_VERSION" = "$PINNED_VERSION" ] && [ "$OLD_COMMIT" = "$PINNED_COMMIT" ] || {
+    echo "[systemtd] identical binary with different release identity" >&2; exit 1;
+  }
   echo "[systemtd] runtime already current; identity and rollback retained"
   exit 0
 fi
@@ -196,6 +300,7 @@ printf '%s\n' "$INSTALL_ROOT" > "$WORKER_HOME/install-root"
 printf '%s\n' "$BIN_DIR/systemtd" > "$WORKER_HOME/bin-path"
 chmod 0700 "$WORKER_HOME"
 chmod 0600 "$WORKER_HOME/default-server" "$WORKER_HOME/install-root" "$WORKER_HOME/bin-path"
+
 
 echo "[systemtd] installed standalone runtime: $BIN_DIR/systemtd ($OS/$ARCH)"
 
@@ -295,6 +400,11 @@ if [ -f "$TMP/old" ]; then
   printf '%s  %s\n' "$OLD_HASH" "$FILE" > "$PREVIOUS/SHA256SUMS"
 fi
 
+printf '%s\\n' "$PINNED_VERSION" > "$WORKER_HOME/release-version"
+printf '%s\\n' "$PINNED_COMMIT" > "$WORKER_HOME/release-commit"
+printf '%s\\n' "$PINNED_KEY_SHA256" > "$WORKER_HOME/release-key-sha256"
+chmod 0600 "$WORKER_HOME/release-version" "$WORKER_HOME/release-commit" "$WORKER_HOME/release-key-sha256"
+
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
   *) echo "[systemtd] add $BIN_DIR to PATH if needed." ;;
@@ -311,41 +421,45 @@ fi
 `;
 }
 
-function installerScript(baseUrl: string) {
-  return unixInstallerScript(baseUrl, 'linux');
+function installerScript(baseUrl: string, approved?: ApprovedWorkerRelease) {
+  return unixInstallerScript(baseUrl, 'linux', approved);
 }
-function macInstallerScript(baseUrl: string) {
-  return unixInstallerScript(baseUrl, 'darwin');
+function macInstallerScript(baseUrl: string, approved?: ApprovedWorkerRelease) {
+  return unixInstallerScript(baseUrl, 'darwin', approved);
 }
 function powershellSingleQuote(value: string) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
-function windowsInstallerScript(baseUrl: string) {
-  const payloadUrl = powershellSingleQuote(`${baseUrl}/worker/install-windows.ps1`);
-  return `$ErrorActionPreference = 'Stop'
-$InstallerUrl = ${payloadUrl}
-$Tmp = Join-Path ([IO.Path]::GetTempPath()) ('bot-report-worker-install-' + [guid]::NewGuid().ToString('N') + '.ps1')
-try {
-  Invoke-WebRequest -UseBasicParsing -Uri $InstallerUrl -OutFile $Tmp
-  $PowerShellExe = (Get-Process -Id $PID).Path
-  if (-not $PowerShellExe) { $PowerShellExe = 'powershell.exe' }
-  & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $Tmp
-  if ($LASTEXITCODE -ne 0) { throw "Worker installer failed with exit code $LASTEXITCODE" }
-} finally {
-  Remove-Item -Force -ErrorAction SilentlyContinue $Tmp
-}
-`;
+// No unsigned second-stage PowerShell downloader.
+function windowsInstallerScript(baseUrl: string, approved?: ApprovedWorkerRelease) {
+  return windowsInstallerPayloadScript(baseUrl, approved);
 }
 
-function windowsInstallerPayloadScript(baseUrl: string) {
+function windowsInstallerPayloadScript(
+  baseUrl: string,
+  approved: ApprovedWorkerRelease = APPROVED_WORKER_RELEASE,
+) {
   const base = powershellSingleQuote(baseUrl);
+  const pinnedVersion = powershellSingleQuote(approved.version);
+  const pinnedCommit = powershellSingleQuote(approved.commit);
+  const pinnedKey = powershellSingleQuote(approved.publicKeyBase64);
+  const previousKey = powershellSingleQuote(approved.previousPublicKeySha256 || '');
   return `$ErrorActionPreference = 'Stop'
 $BaseUrl = ${base}
+$PinnedVersion = ${pinnedVersion}
+$PinnedCommit = ${pinnedCommit}
+$PinnedPublicKeyB64 = ${pinnedKey}
+$PinnedPreviousKeySha256 = ${previousKey}
+if (-not $PinnedVersion -or -not $PinnedCommit -or -not $PinnedPublicKeyB64) { throw 'Signed release not approved' }
+if ($PinnedVersion -cnotmatch '^[0-9]+\\.[0-9]+\\.[0-9]+$' -or $PinnedCommit -cnotmatch '^[0-9a-f]{12,40}$') { throw 'Invalid release pin' }
+if ($PinnedPreviousKeySha256 -and $PinnedPreviousKeySha256 -cnotmatch '^[0-9a-f]{64}$') { throw 'Invalid prior trust root' }
+Get-Command openssl -ErrorAction Stop | Out-Null
 $InstallRoot = if ($env:BOT_REPORT_WORKER_INSTALL_ROOT) { $env:BOT_REPORT_WORKER_INSTALL_ROOT } else { Join-Path $env:LOCALAPPDATA 'BotReportWorker' }
 $Target = Join-Path $InstallRoot 'current'
 $Previous = Join-Path $InstallRoot 'previous'
 $Action = if ($env:BOT_REPORT_WORKER_ACTION) { $env:BOT_REPORT_WORKER_ACTION } else { 'install' }
 if ($Action -notin @('install','rollback')) { throw 'Invalid installer action' }
+if ($Action -eq 'rollback') { throw 'Manual rollback prohibited; explicitly approve signed release' }
 $WorkerHome = if ($env:BOT_REPORT_WORKER_HOME) { $env:BOT_REPORT_WORKER_HOME } else { Join-Path $HOME '.bot-report-worker' }
 $Tmp = Join-Path ([IO.Path]::GetTempPath()) ('bot-report-worker-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
@@ -371,21 +485,60 @@ try {
   $File = "bot-report-worker-windows-$Arch.exe"
   $Downloaded = Join-Path $Tmp 'bot-report-worker.exe'
   $Sums = Join-Path $Tmp 'SHA256SUMS'
-  if ($Action -eq 'rollback') {
-    Copy-Item (Join-Path $Previous 'bot-report-worker.exe') $Downloaded
-    Copy-Item (Join-Path $Previous 'SHA256SUMS') $Sums
-  } else {
-    Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/worker/dist/$File" -OutFile $Downloaded
+  $Signature = Join-Path $Tmp 'SHA256SUMS.sig'
+  $KeyPath = Join-Path $Tmp 'release-key.pem'
+  $Metadata = Join-Path $Tmp 'WORKER_RELEASE'
+  [IO.File]::WriteAllBytes($KeyPath, [Convert]::FromBase64String($PinnedPublicKeyB64))
+  & openssl rsa -pubin -in $KeyPath -noout 2>$null
+  if ($LASTEXITCODE -ne 0) { throw 'Invalid pinned RSA public key' }
+  $PublicDer = Join-Path $Tmp 'release-key.der'
+  & openssl pkey -pubin -in $KeyPath -outform DER -out $PublicDer 2>$null
+  if ($LASTEXITCODE -ne 0) { throw 'Cannot fingerprint pinned public key' }
+  $PinnedKeySha256 = (Get-FileHash -Algorithm SHA256 $PublicDer).Hash.ToLowerInvariant()
   Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/worker/dist/SHA256SUMS" -OutFile $Sums
-    if ($env:BOT_REPORT_WORKER_TRUSTED_KEY) {
-      $Signature = Join-Path $Tmp 'SHA256SUMS.sig'
-      Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/worker/dist/SHA256SUMS.sig" -OutFile $Signature
-      & openssl dgst -sha256 -verify $env:BOT_REPORT_WORKER_TRUSTED_KEY -signature $Signature $Sums
-      if ($LASTEXITCODE -ne 0) { throw 'Manifest signature verification failed' }
-    }
+  Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/worker/dist/SHA256SUMS.sig" -OutFile $Signature
+  & openssl dgst -sha256 -verify $KeyPath -signature $Signature $Sums | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw 'Manifest signature verification failed' }
+  $Entries = @(Get-Content $Sums | ForEach-Object {
+    if ($_ -cnotmatch '^([0-9a-fA-F]{64})  (.+)$') { throw 'Malformed checksum manifest' }
+    [pscustomobject]@{ Hash = $Matches[1].ToLowerInvariant(); Name = $Matches[2] }
+  })
+  function ExpectedHash([string]$Name) {
+    $Found = @($Entries | Where-Object { $_.Name -ceq $Name })
+    if ($Found.Count -ne 1) { throw "Missing or duplicate checksum: $Name" }
+    return $Found[0].Hash
   }
-  $Expected = Get-Content $Sums | ForEach-Object { $parts = $_ -split '\\s+'; if ($parts.Count -ge 2 -and $parts[-1] -eq $File) { $parts[0] } } | Select-Object -First 1
-  if (-not $Expected) { throw "Checksum manifest does not contain $File" }
+  Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/worker/dist/WORKER_RELEASE" -OutFile $Metadata
+  if ((Get-FileHash -Algorithm SHA256 $Metadata).Hash.ToLowerInvariant() -cne (ExpectedHash 'WORKER_RELEASE')) {
+    throw 'Release metadata checksum failed'
+  }
+  $ReleaseLines = @(Get-Content $Metadata)
+  if ($ReleaseLines.Count -ne 2 -or $ReleaseLines[0] -cne "version=$PinnedVersion" -or $ReleaseLines[1] -cne "commit=$PinnedCommit") {
+    throw 'Signed release version/commit mismatch'
+  }
+  $VersionPath = Join-Path $WorkerHome 'release-version'
+  $CommitPath = Join-Path $WorkerHome 'release-commit'
+  $KeyRecordPath = Join-Path $WorkerHome 'release-key-sha256'
+  $Existing = Join-Path $Target 'bot-report-worker.exe'
+  if ((Test-Path $Existing) -and -not (Test-Path $VersionPath)) { throw 'Existing runtime lacks verified release record' }
+  if ((Test-Path $VersionPath) -or (Test-Path $CommitPath) -or (Test-Path $KeyRecordPath)) {
+    if (-not (Test-Path $VersionPath) -or -not (Test-Path $CommitPath) -or -not (Test-Path $KeyRecordPath)) { throw 'Incomplete release record' }
+    foreach ($Record in @($VersionPath,$CommitPath,$KeyRecordPath)) {
+      if ((Get-Item -LiteralPath $Record).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Unsafe release record' }
+    }
+    $OldVersion = (Get-Content $VersionPath -Raw).Trim()
+    $OldCommit = (Get-Content $CommitPath -Raw).Trim()
+    $OldKeySha256 = (Get-Content $KeyRecordPath -Raw).Trim()
+    if ($OldKeySha256 -cnotmatch '^[0-9a-f]{64}$') { throw 'Malformed recorded trust root' }
+    if ($OldKeySha256 -cne $PinnedKeySha256 -and ($PinnedPreviousKeySha256 -cne $OldKeySha256 -or $PinnedVersion -ceq $OldVersion)) {
+      throw 'Unapproved signing trust-root replacement'
+    }
+    if ($OldVersion -notmatch '^[0-9]+\\.[0-9]+\\.[0-9]+$') { throw 'Malformed release record' }
+    if ([version]$PinnedVersion -lt [version]$OldVersion) { throw 'Signed release rollback rejected' }
+    if ($OldVersion -ceq $PinnedVersion -and $OldCommit -cne $PinnedCommit) { throw 'Release version reused for another commit' }
+  }
+  Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/worker/dist/$File" -OutFile $Downloaded
+  $Expected = ExpectedHash $File
   $Actual = (Get-FileHash -Algorithm SHA256 $Downloaded).Hash.ToLowerInvariant()
   if ($Actual -ne $Expected.ToLowerInvariant()) { throw "Checksum verification failed for $File" }
 
@@ -395,6 +548,7 @@ try {
   $Old = Join-Path $Tmp 'old.exe'
   $Next = Join-Path $Target ('.next-' + [guid]::NewGuid().ToString('N') + '.exe')
   if ((Test-Path $Existing) -and ($Action -eq 'install') -and ((Get-FileHash -Algorithm SHA256 $Existing).Hash.ToLowerInvariant() -eq $Actual)) {
+    if ($OldVersion -cne $PinnedVersion -or $OldCommit -cne $PinnedCommit) { throw 'Identical binary with different release identity' }
     Write-Host '[bot-report-worker] runtime already current; rollback retained'
     return
   }
@@ -407,14 +561,14 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Unable to stop existing runtime' }
   }
   Copy-Item $Downloaded $Next
-  if (Test-Path $Existing) { [IO.File]::Replace($Next, $Existing, $null) }
+  if (Test-Path $Existing) { [IO.File]::Replace($Next, $Existing, (Join-Path $Tmp 'replace-backup.exe')) }
   else { Move-Item $Next $Existing }
   if ($WasRunning) {
     & $Existing start
     if ($LASTEXITCODE -ne 0) {
       & $Existing stop | Out-Null
       Copy-Item $Old $Next
-      [IO.File]::Replace($Next, $Existing, $null)
+      [IO.File]::Replace($Next, $Existing, (Join-Path $Tmp 'restore-backup.exe'))
       & $Existing start
       throw 'Replacement failed; previous binary restored'
     }
@@ -431,6 +585,7 @@ try {
   Set-Content -Encoding ascii -Path (Join-Path $WorkerHome 'install-root') -Value $InstallRoot
   Set-Content -Encoding ascii -Path (Join-Path $WorkerHome 'bin-path') -Value (Join-Path $Target 'bot-report-worker.exe')
 
+
   if ($env:BOT_REPORT_WORKER_SKIP_PATH -ne '1') {
     $UserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     $PathItems = @($UserPath -split ';' | Where-Object { $_ })
@@ -439,6 +594,9 @@ try {
       [Environment]::SetEnvironmentVariable('Path', $NewPath, 'User')
     }
   }
+  Set-Content -Encoding ascii -Path $VersionPath -Value $PinnedVersion
+  Set-Content -Encoding ascii -Path $CommitPath -Value $PinnedCommit
+  Set-Content -Encoding ascii -Path $KeyRecordPath -Value $PinnedKeySha256
   $env:Path = "$Target;$env:Path"
   Write-Host "[bot-report-worker] installed standalone runtime: $(Join-Path $Target 'bot-report-worker.exe') (windows/$Arch)"
   if (Test-Path (Join-Path $WorkerHome 'state.json')) {
@@ -492,6 +650,22 @@ async function createEnrollmentProfile(
     status: 409,
   });
 }
+
+// CI builds are unsigned private artifacts. A fresh Railway clone must not
+// advertise curl-to-shell execution until a pinned signing-key distribution
+// and mandatory cross-platform verification have passed release review.
+router.use((req, res, next) => {
+  if (
+    process.env.MCP_PLATFORM === 'railway' &&
+    (req.path.startsWith('/worker/install') || req.path.startsWith('/worker/dist/'))
+  ) {
+    return res.status(503).set('Cache-Control', 'no-store').json({
+      code: 'WORKER_SIGNED_RELEASE_PENDING',
+      error: 'Verified Worker installer requires a signed and approved release.',
+    });
+  }
+  return next();
+});
 
 router.get('/worker/install.sh', (req, res, next) => {
   try {
@@ -591,7 +765,7 @@ router.get('/worker/dist/:file', (req, res) => {
 
 router.post('/worker/v1/enroll', enrollmentLimiter, async (req, res, next) => {
   try {
-    if (!databaseManager.isMysqlReady()) {
+    if (!databaseManager.isSqlReady()) {
       return res.status(503).json({
         error: 'temporarily_unavailable',
         code: databaseManager.status().state,
@@ -642,5 +816,6 @@ export = Object.assign(router, {
   macInstallerScript,
   windowsInstallerScript,
   windowsInstallerPayloadScript,
+  publicBaseUrl,
   createEnrollmentProfile,
 });

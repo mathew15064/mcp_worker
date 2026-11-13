@@ -209,21 +209,29 @@ void test(
     };
     assert.doesNotMatch(await getPage('/admin/workers'), /id="worker-enrollment-token"/);
 
-    const installResult = await runCommand(
-      'sh',
-      ['-c', `curl -fsSL ${baseUrl}/worker/install.sh | sh`],
-      {
-        cwd: workRoot,
-        env: cliEnv,
-      },
+    // E2E starts a trusted, locally compiled Go test fixture in disposable Docker.
+    // Public unsigned download is forbidden; the dedicated signed-release suite
+    // verifies the cryptographic installer on each native runner.
+    const installRoot = cliEnv.BOT_REPORT_WORKER_INSTALL_ROOT;
+    const currentDir = path.join(installRoot, 'current');
+    const currentBinary = path.join(currentDir, 'systemtd');
+    fs.mkdirSync(currentDir, { recursive: true });
+    fs.mkdirSync(path.dirname(cliPath), { recursive: true });
+    fs.mkdirSync(workerHome, { recursive: true });
+    fs.copyFileSync(
+      path.resolve(__dirname, '../worker/bin/bot-report-worker-linux-amd64'),
+      currentBinary,
     );
-    assert.equal(installResult.status, 0, `${installResult.stdout}${installResult.stderr}`);
-    assert.equal(
-      fs.existsSync(cliPath),
-      true,
-      'curl installer must create the bot-report-worker CLI',
+    fs.chmodSync(currentBinary, 0o755);
+    fs.symlinkSync(currentBinary, cliPath);
+    fs.symlinkSync(currentBinary, path.join(path.dirname(cliPath), 'systemtd'));
+    fs.writeFileSync(path.join(workerHome, 'default-server'), baseUrl + '\n');
+    fs.writeFileSync(path.join(workerHome, 'install-root'), installRoot + '\n');
+    fs.writeFileSync(
+      path.join(workerHome, 'bin-path'),
+      path.join(path.dirname(cliPath), 'systemtd') + '\n',
     );
-    assert.match(installResult.stdout, /next: systemtd login/);
+    assert.equal(fs.existsSync(cliPath), true, 'isolated test runtime must be executable');
 
     const loginResult = await runCommand(
       cliPath,
@@ -401,7 +409,7 @@ void test(
       return body.result as RpcResult;
     }
     const catalog = (await rpc('tools/list', {})).tools || [];
-    assert.equal(catalog.length, 19);
+    assert.equal(catalog.length, 15);
     const profile = 'Live Worker Profile';
     async function call(
       name: string,
@@ -416,18 +424,12 @@ void test(
       );
     }
     const runtime = await call('runtime_info');
-    assert.equal(runtime.tool_count, 19);
+    assert.equal(runtime.tool_count, 15);
     assert.equal(
       runtime.tool_schema_hash,
-      '77fec371229586b76437ab2dd0b8bff3101c89d13baa5a223795a8a68d11fdb6',
+      'a79786ed09ba2e8eef30ec778453b17c81963bf943542c1f2ea0f87952e4a032',
     );
     await call('terminal_list');
-    assert.equal((await call('terminal_status', { profile })).status, 'READY');
-    await call('terminal_send', { profile, text: 'echo mcp-live-terminal' });
-    await waitFor(async () =>
-      String((await call('terminal_read', { profile })).text).includes('mcp-live-terminal'),
-    );
-    await call('terminal_interrupt', { profile });
     assert.equal(
       (
         await call('workspace_exec', {
@@ -486,94 +488,39 @@ void test(
       /status: RUNNING/,
     );
 
-    // The fixture can supply a distinct, previously built binary in Docker.
-    if (process.env.BOT_REPORT_WORKER_UPGRADE_FIXTURE) {
-      const dist = path.resolve(__dirname, '../worker/bin');
-      const file = 'bot-report-worker-linux-amd64';
-      const original = fs.readFileSync(path.join(dist, file));
-      const originalSums = fs.readFileSync(path.join(dist, 'SHA256SUMS'));
-      const alternate = fs.readFileSync(process.env.BOT_REPORT_WORKER_UPGRADE_FIXTURE);
-      const digest = (bytes: Buffer) => crypto.createHash('sha256').update(bytes).digest('hex');
-      assert.notEqual(digest(original), digest(alternate));
-      const installed = path.join(cliEnv.BOT_REPORT_WORKER_INSTALL_ROOT, 'current', 'systemtd');
-      const identityBefore = fs.readFileSync(statePath);
-      const configBefore = fs.readFileSync(path.join(workerHome, 'config.json'));
-      async function install(action = 'install', extra: Record<string, string> = {}) {
-        return runCommand('sh', ['-c', `curl -fsSL ${baseUrl}/worker/install.sh | sh`], {
+    // Even with a running, enrolled Worker, the unapproved public installer
+    // must refuse installation and leave binary, identity and config intact.
+    const identityBefore = fs.readFileSync(statePath);
+    const configBefore = fs.readFileSync(path.join(workerHome, 'config.json'));
+    const binaryBefore = fs.readFileSync(currentBinary);
+    await waitFor(() => workerBroker.isOnline(worker.id));
+    const scriptPath = path.join(dir, 'unapproved-public-install.sh');
+    const download = await runCommand(
+      'curl',
+      ['-fsSL', baseUrl + '/worker/install.sh', '-o', scriptPath],
+      { cwd: workRoot, env: cliEnv },
+    );
+    assert.equal(download.status, 0, download.stderr);
+    await waitFor(() => workerBroker.isOnline(worker.id));
+    const blocked = await runCommand('sh', [scriptPath], { cwd: workRoot, env: cliEnv });
+    assert.notEqual(blocked.status, 0, 'unapproved installer changed running Worker');
+    assert.match(blocked.stderr, /signed release not approved/i);
+    await waitFor(() => workerBroker.isOnline(worker.id));
+    assert.deepEqual(fs.readFileSync(currentBinary), binaryBefore);
+    assert.deepEqual(fs.readFileSync(statePath), identityBefore);
+    assert.deepEqual(fs.readFileSync(path.join(workerHome, 'config.json')), configBefore);
+    assert.ok(workerBroker.isOnline(worker.id));
+    assert.equal(
+      (
+        await terminalMcpService.workspaceExec('Live Worker Profile', 'printf pending-verified', {
           cwd: workRoot,
-          env: {
-            ...cliEnv,
-            BOT_REPORT_WORKER_ACTION: action,
-            BOT_REPORT_WORKER_SKIP_SERVICE: '0',
-            ...extra,
-          },
-        });
-      }
-      try {
-        fs.writeFileSync(path.join(dist, file), alternate);
-        const rejected = await install();
-        assert.notEqual(rejected.status, 0);
-        assert.match(rejected.stderr, /checksum verification failed/);
-        assert.equal(digest(fs.readFileSync(installed)), digest(original));
-        assert.ok(workerBroker.isOnline(worker.id));
-        fs.writeFileSync(path.join(dist, 'SHA256SUMS'), digest(alternate) + '  ' + file + '\n');
-        const keys = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
-        const trusted = path.join(dir, 'fixture-public.pem');
-        fs.writeFileSync(trusted, keys.publicKey.export({ type: 'spki', format: 'pem' }));
-        const signaturePath = path.join(dist, 'SHA256SUMS.sig');
-        const missing = await install('install', { BOT_REPORT_WORKER_TRUSTED_KEY: trusted });
-        assert.notEqual(missing.status, 0);
-        fs.writeFileSync(signaturePath, Buffer.from('bad signature'));
-        const wrong = await install('install', { BOT_REPORT_WORKER_TRUSTED_KEY: trusted });
-        assert.notEqual(wrong.status, 0);
-        assert.equal(digest(fs.readFileSync(installed)), digest(original));
-        fs.writeFileSync(
-          signaturePath,
-          crypto.sign('sha256', fs.readFileSync(path.join(dist, 'SHA256SUMS')), keys.privateKey),
-        );
-        const upgraded = await install('install', { BOT_REPORT_WORKER_TRUSTED_KEY: trusted });
-        fs.rmSync(signaturePath);
-        assert.equal(upgraded.status, 0, upgraded.stdout + upgraded.stderr);
-        assert.equal(digest(fs.readFileSync(installed)), digest(alternate));
-        await waitFor(() => workerBroker.isOnline(worker.id));
-        assert.deepEqual(fs.readFileSync(statePath), identityBefore);
-        assert.deepEqual(fs.readFileSync(path.join(workerHome, 'config.json')), configBefore);
-        const repeated = await install();
-        assert.equal(repeated.status, 0, repeated.stdout + repeated.stderr);
-        assert.match(repeated.stdout, /rollback retained/);
-        const bad = Buffer.from(
-          '#!/bin/sh\ncase "$1" in version|stop) exit 0;; *) exit 1;; esac\n',
-        );
-        fs.writeFileSync(path.join(dist, file), bad);
-        fs.writeFileSync(path.join(dist, 'SHA256SUMS'), digest(bad) + '  ' + file + '\n');
-        const failed = await install();
-        assert.notEqual(failed.status, 0);
-        assert.match(failed.stderr, /previous binary restored/);
-        assert.equal(digest(fs.readFileSync(installed)), digest(alternate));
-        await waitFor(() => workerBroker.isOnline(worker.id));
-        const rollback = await install('rollback');
-        assert.equal(rollback.status, 0, rollback.stdout + rollback.stderr);
-        assert.equal(digest(fs.readFileSync(installed)), digest(original));
-        await waitFor(() => workerBroker.isOnline(worker.id));
-        assert.deepEqual(fs.readFileSync(statePath), identityBefore);
-        assert.deepEqual(fs.readFileSync(path.join(workerHome, 'config.json')), configBefore);
-        assert.equal(
-          (
-            await terminalMcpService.workspaceExec('Live Worker Profile', 'printf rollback-ok', {
-              cwd: workRoot,
-            })
-          ).stdout,
-          'rollback-ok',
-        );
-        console.log(
-          'LIFECYCLE PASS: bad checksum and missing/invalid signature refused, signed upgrade/reconnect, repeat preserved rollback, failed start restored binary, rollback/reconnect, identity and config unchanged',
-        );
-      } finally {
-        fs.writeFileSync(path.join(dist, file), original);
-        fs.writeFileSync(path.join(dist, 'SHA256SUMS'), originalSums);
-        fs.rmSync(path.join(dist, 'SHA256SUMS.sig'), { force: true });
-      }
-    }
+        })
+      ).stdout,
+      'pending-verified',
+    );
+    console.log(
+      'LIFECYCLE PASS: pending public installer cannot mutate live identity, config or binary',
+    );
 
     const uninstallResult = await runCommand(cliPath, ['uninstall'], {
       cwd: workRoot,

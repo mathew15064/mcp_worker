@@ -52,8 +52,10 @@ pass=$(openssl rand -hex 24)
 docker run -d --name "$ID-db" --network "$ID-net" -e MYSQL_ROOT_PASSWORD="$pass" -e MYSQL_ROOT_HOST=% -e MYSQL_DATABASE=bot_report_test "$MYSQL" >/dev/null
 docker run -d --name "$ID-run" --network "$ID-net" --user root --entrypoint sh "$IMAGE" -c 'sleep 3600' >/dev/null
 # Compile the typed tests in the same builder used for the production image.
-# Do not ship test files or TypeScript dev dependencies in the runtime image.
+# Keep test files out of the production image; supply them only to
+# this isolated verification container.
 docker cp "$TEST_TMP/tests" "$ID-run":/app/dist/
+docker cp README.md "$ID-run":/app/README.md
 rm -rf "$TEST_TMP/tests"
 docker exec "$ID-run" apk add --no-cache curl git bash ripgrep openssl >"$OUT/test-prerequisites.log" 2>&1
 # Build a distinct fixture from the same source, never from a production worker.
@@ -67,7 +69,10 @@ i=0
 until docker exec -e MYSQL_PWD="$pass" "$ID-db" mysql -uroot -Nse 'SELECT 1' >/dev/null 2>&1; do
   i=$((i+1)); [ "$i" -lt 60 ] || exit 1; sleep 2
 done
-docker exec -e NODE_ENV=test -e BOT_REPORT_ISOLATED_WORKER_TEST=1 -e MYSQL_TEST_HOST="$ID-db" -e MYSQL_TEST_PASSWORD="$pass" -e BOT_REPORT_WORKER_UPGRADE_FIXTURE=/tmp/alternate "$ID-run" sh -c 'cd /app/dist && node --test --test-concurrency=1 tests/*.test.js' >"$OUT/regression.log" 2>&1
+docker exec -e NODE_ENV=test -e BOT_REPORT_ISOLATED_WORKER_TEST=1 -e MYSQL_TEST_HOST="$ID-db" -e MYSQL_TEST_PASSWORD="$pass" -e BOT_REPORT_WORKER_UPGRADE_FIXTURE=/tmp/alternate "$ID-run" sh -c 'cd /app && node --test --test-concurrency=1 dist/tests/*.test.js' >"$OUT/regression.log" 2>&1 || {
+  tail -100 "$OUT/regression.log" >&2
+  exit 1
+}
 tail -12 "$OUT/regression.log"
 # Native Linux manual installer install/upgrade/rollback/uninstall in an
 # isolated temporary unprivileged HOME. No systemd, enrollment or host changes.

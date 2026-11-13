@@ -5,15 +5,11 @@ type RunAs = { runAs?: string | null };
 type Data = Record<string, unknown>;
 export interface TerminalToolService {
   list(options?: Actor): Promise<unknown[]>;
-  status(profile: string, options?: Actor): Promise<Data>;
-  read(profile: string, lines: number, options?: Actor): Promise<Data>;
-  send(profile: string, text: string, options?: Actor & { submit?: boolean }): Promise<Data>;
   workspaceExec(
     profile: string,
     command: string,
     options?: Actor & { cwd?: string | null; timeoutMs?: number },
   ): Promise<Data>;
-  interrupt(profile: string, options?: Actor): Promise<Data>;
   artifactCollect(
     profile: string,
     path: string,

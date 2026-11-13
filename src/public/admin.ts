@@ -13,13 +13,6 @@ interface WorkerStatusResponse {
   workers: WorkerStatus[];
   probe?: WorkerProbe | null;
 }
-interface ProfileEdit {
-  id?: string;
-  name?: string;
-  description?: string;
-  worker_id?: string;
-  enabled?: boolean;
-}
 interface ApiError {
   message?: string;
   duration_ms?: number;
@@ -518,85 +511,6 @@ interface ApiError {
       }
     }),
   );
-
-  const accountSshForm = $<HTMLFormElement>('#account-ssh-form');
-  function configureAccountSshForm(profile: ProfileEdit | null = null) {
-    if (!accountSshForm) return;
-    const editing = Boolean(profile?.id);
-    const routeBase = accountSshForm.dataset.routeBase || '/account/ssh-profiles';
-    accountSshForm.action = editing
-      ? `${routeBase}/${encodeURIComponent(profile?.id || '')}/update`
-      : routeBase;
-    const set = (name: string, value: string | null | undefined) => {
-      const field = accountSshForm.elements.namedItem(name);
-      if (
-        field instanceof HTMLInputElement ||
-        field instanceof HTMLTextAreaElement ||
-        field instanceof HTMLSelectElement
-      )
-        field.value = value ?? '';
-    };
-    set('name', profile?.name || '');
-    set('description', profile?.description || '');
-    set('worker_id', profile?.worker_id || '');
-    const enabled = accountSshForm.elements.namedItem('enabled');
-    if (enabled instanceof HTMLInputElement)
-      enabled.checked = profile ? Boolean(profile.enabled) : true;
-    const title = $('#account-ssh-title');
-    if (title) title.textContent = 'Edit SSH Profile';
-  }
-  $$('[data-account-ssh-edit]').forEach((button) =>
-    button.addEventListener('click', () => {
-      try {
-        configureAccountSshForm(JSON.parse(button.dataset.accountSshEdit || '{}') as ProfileEdit);
-      } catch {
-        toast('error', 'Unable to edit SSH Profile', 'Profile data could not be loaded.');
-      }
-    }),
-  );
-
-  $$<HTMLFormElement>('form[data-terminal-test]').forEach((form) => {
-    const testConnection = async () => {
-      const button = form.querySelector<HTMLButtonElement>('button[type="submit"]');
-      const original = button?.innerHTML || '';
-      if (button) {
-        button.disabled = true;
-        button.textContent = 'Testing…';
-      }
-      const dropdown = form.closest<HTMLDetailsElement>('.dropdown');
-      if (dropdown) closeDropdown(dropdown);
-      try {
-        const response = await fetch(form.action, {
-          method: 'POST',
-          headers: { Accept: 'application/json' },
-          body: new URLSearchParams(
-            [...new FormData(form).entries()].map(([key, value]) => [key, String(value)]),
-          ),
-        });
-        const payload = (await response.json().catch(() => ({}))) as ApiError;
-        if (!response.ok) throw new Error(payload.message || 'Connection test failed.');
-        const detail = `${payload.message || 'Connection verified.'}${Number.isFinite(payload.duration_ms) ? ` ${payload.duration_ms} ms.` : ''}`;
-        toast('success', `${form.dataset.profileName || 'Terminal'} is reachable`, detail);
-      } catch (error) {
-        toast(
-          'error',
-          `${form.dataset.profileName || 'Terminal'} connection failed`,
-          error instanceof Error ? error.message : 'Connection test failed.',
-        );
-      } finally {
-        if (button) {
-          button.disabled = false;
-          button.innerHTML = original || '';
-        }
-      }
-    };
-    form.addEventListener('submit', (event) => {
-      event.preventDefault();
-      void testConnection().catch(() =>
-        toast('error', 'Connection test failed', 'Unable to verify the terminal connection.'),
-      );
-    });
-  });
 
   const sidebar = $('#admin-sidebar');
   const mobileMenu = $('[data-mobile-menu]');

@@ -24,11 +24,7 @@ const retired = [
 const expected = [
   'runtime_info',
   'terminal_list',
-  'terminal_status',
-  'terminal_read',
-  'terminal_send',
   'workspace_exec',
-  'terminal_interrupt',
   'artifact_collect',
   'file_read',
   'file_write',
@@ -70,7 +66,7 @@ async function rpc(method: string, params: Record<string, unknown>) {
   return parseMcpResponse(res);
 }
 
-void test('exact 19 technical tools remain advertised and runtime_info agrees', async () => {
+void test('exact 15 Worker-only tools remain advertised and runtime_info agrees', async () => {
   assert.deepEqual(
     TOOLS.map((t) => t.name),
     expected,
@@ -81,10 +77,10 @@ void test('exact 19 technical tools remain advertised and runtime_info agrees', 
     expected,
   );
   const info = await rpc('tools/call', { name: 'runtime_info', arguments: {} });
-  assert.equal(info.result?.structuredContent?.tool_count, 19);
+  assert.equal(info.result?.structuredContent?.tool_count, 15);
   assert.equal(
     info.result?.structuredContent?.tool_schema_hash,
-    '77fec371229586b76437ab2dd0b8bff3101c89d13baa5a223795a8a68d11fdb6',
+    'a79786ed09ba2e8eef30ec778453b17c81963bf943542c1f2ea0f87952e4a032',
   );
 });
 

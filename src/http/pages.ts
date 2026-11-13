@@ -208,8 +208,8 @@ function shell(
   if (!admin)
     return `${head}${body}<div id="toast-stack" class="toast-stack"></div><script src="/assets/admin.js" defer></script>${extraScripts}</body></html>`;
   const nav = accountUser
-    ? `<aside id="admin-sidebar" class="sidebar" role="navigation" aria-label="Primary navigation"><div class="brand"><div class="brand-mark">MW</div><div class="brand-copy"><div>mcp_worker</div><div class="brand-sub">User Workspace</div></div><button class="btn btn-icon btn-ghost sidebar-collapse" type="button" data-sidebar-collapse aria-label="Collapse sidebar" title="Collapse sidebar">${icon('panel')}</button></div><div class="nav-group"><div class="nav-label">Workspace</div><nav class="nav">${navLink(active, 'account-clients', '/account/clients', 'My Clients', 'key')}${navLink(active, 'account-workers', '/account/workers', 'Workers', 'server')}${navLink(active, 'account-ssh', '/account/ssh-profiles', 'SSH Profiles', 'terminal')}${navLink(active, 'account-telegram', '/account/telegram', 'Telegram', 'send')}</nav></div><div class="sidebar-bottom"><button class="runtime-mini account-profile-trigger" type="button" data-modal-open="account-profile-modal" aria-label="Open profile for ${escapeHtml(accountUser.display_name || accountUser.username)}"><div class="runtime-mini-row"><span>${icon('user')} ${escapeHtml(accountUser.display_name || accountUser.username)}</span></div><div class="runtime-mini-row"><span class="muted">Role</span><span>User</span></div></button><form method="post" action="/logout"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><button class="btn btn-ghost" style="width:100%;justify-content:flex-start" type="submit" title="Sign out">${icon('logout')} <span class="signout-label">Sign out</span></button></form></div></aside><button class="sidebar-scrim" type="button" data-sidebar-scrim aria-label="Close navigation" tabindex="-1"></button>`
-    : `<aside id="admin-sidebar" class="sidebar" role="navigation" aria-label="Primary navigation"><div class="brand"><div class="brand-mark">MW</div><div class="brand-copy"><div>mcp_worker</div><div class="brand-sub">Execution Harness</div></div><button class="btn btn-icon btn-ghost sidebar-collapse" type="button" data-sidebar-collapse aria-label="Collapse sidebar" title="Collapse sidebar">${icon('panel')}</button></div><div class="nav-group"><div class="nav-label">General</div><nav class="nav">${navLink(active, 'overview', '/admin', 'Overview', 'dashboard')}${navLink(active, 'onboarding', '/admin/onboarding', 'Getting Started', 'check')}${navLink(active, 'audit', '/admin/audit', 'Audit Log', 'history')}</nav></div><div class="nav-group"><div class="nav-label">Configuration</div><nav class="nav">${navLink(active, 'users', '/admin/users', 'Users', 'user')}${navLink(active, 'clients', '/admin/clients', 'OAuth Clients', 'key')}${navLink(active, 'workers', '/admin/workers', 'Workers', 'server')}${navLink(active, 'terminals', '/admin/terminals', 'SSH Profiles', 'terminal')}</nav></div><div class="nav-group"><div class="nav-label">System</div><nav class="nav">${navLink(active, 'settings', '/admin/settings/database', 'Settings', 'settings')}${active === 'settings' ? settingsSubnav(settingsSection) : ''}</nav></div><div class="sidebar-bottom"><div class="runtime-mini"><div class="runtime-mini-row"><span><span class="dot"></span>MCP healthy</span><strong>19 tools</strong></div><div class="runtime-mini-row"><span class="muted">Mode</span><span>MCP + Admin</span></div></div><form method="post" action="/logout"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><button class="btn btn-ghost" style="width:100%;justify-content:flex-start" type="submit" title="Sign out">${icon('logout')} <span class="signout-label">Sign out</span></button></form></div></aside><button class="sidebar-scrim" type="button" data-sidebar-scrim aria-label="Close navigation" tabindex="-1"></button>`;
+    ? `<aside id="admin-sidebar" class="sidebar" role="navigation" aria-label="Primary navigation"><div class="brand"><div class="brand-mark">MW</div><div class="brand-copy"><div>mcp_worker</div><div class="brand-sub">User Workspace</div></div><button class="btn btn-icon btn-ghost sidebar-collapse" type="button" data-sidebar-collapse aria-label="Collapse sidebar" title="Collapse sidebar">${icon('panel')}</button></div><div class="nav-group"><div class="nav-label">Workspace</div><nav class="nav">${navLink(active, 'account-clients', '/account/clients', 'My Clients', 'key')}${navLink(active, 'account-workers', '/account/workers', 'Workers', 'server')}${navLink(active, 'account-telegram', '/account/telegram', 'Telegram', 'send')}</nav></div><div class="sidebar-bottom"><button class="runtime-mini account-profile-trigger" type="button" data-modal-open="account-profile-modal" aria-label="Open profile for ${escapeHtml(accountUser.display_name || accountUser.username)}"><div class="runtime-mini-row"><span>${icon('user')} ${escapeHtml(accountUser.display_name || accountUser.username)}</span></div><div class="runtime-mini-row"><span class="muted">Role</span><span>User</span></div></button><form method="post" action="/logout"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><button class="btn btn-ghost" style="width:100%;justify-content:flex-start" type="submit" title="Sign out">${icon('logout')} <span class="signout-label">Sign out</span></button></form></div></aside><button class="sidebar-scrim" type="button" data-sidebar-scrim aria-label="Close navigation" tabindex="-1"></button>`
+    : `<aside id="admin-sidebar" class="sidebar" role="navigation" aria-label="Primary navigation"><div class="brand"><div class="brand-mark">MW</div><div class="brand-copy"><div>mcp_worker</div><div class="brand-sub">Execution Harness</div></div><button class="btn btn-icon btn-ghost sidebar-collapse" type="button" data-sidebar-collapse aria-label="Collapse sidebar" title="Collapse sidebar">${icon('panel')}</button></div><div class="nav-group"><div class="nav-label">General</div><nav class="nav">${navLink(active, 'overview', '/admin', 'Overview', 'dashboard')}${navLink(active, 'onboarding', '/admin/onboarding', 'Getting Started', 'check')}${navLink(active, 'audit', '/admin/audit', 'Audit Log', 'history')}</nav></div><div class="nav-group"><div class="nav-label">Configuration</div><nav class="nav">${navLink(active, 'clients', '/admin/clients', 'OAuth Clients', 'key')}${navLink(active, 'workers', '/admin/workers', 'Workers', 'server')}</nav></div><div class="nav-group"><div class="nav-label">System</div><nav class="nav">${navLink(active, 'settings', '/admin/settings/database', 'Settings', 'settings')}${active === 'settings' ? settingsSubnav(settingsSection) : ''}</nav></div><div class="sidebar-bottom"><div class="runtime-mini"><div class="runtime-mini-row"><span><span class="dot"></span>MCP healthy</span><strong>Worker-only</strong></div><div class="runtime-mini-row"><span class="muted">Mode</span><span>MCP + Admin</span></div></div><form method="post" action="/logout"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><button class="btn btn-ghost" style="width:100%;justify-content:flex-start" type="submit" title="Sign out">${icon('logout')} <span class="signout-label">Sign out</span></button></form></div></aside><button class="sidebar-scrim" type="button" data-sidebar-scrim aria-label="Close navigation" tabindex="-1"></button>`;
   const top = `<header class="topbar-global"><div class="breadcrumb"><button class="btn btn-icon btn-ghost mobile-menu" type="button" data-mobile-menu aria-label="Open navigation" aria-expanded="false" aria-controls="admin-sidebar">${icon('menu')}</button><span>mcp_worker</span><span>/</span><strong>${escapeHtml(breadcrumb || title)}</strong></div><div class="top-actions"><span class="badge badge-ok"><span class="dot"></span>Healthy</span><button class="btn btn-icon btn-ghost" type="button" data-theme-toggle aria-label="Switch theme">${icon('moon')}</button></div></header>`;
   return `${head}<div class="app-shell">${nav}<div class="main">${top}<main class="content">${body}</main></div></div>${accountUser ? accountProfileModal(accountUser, csrfToken) : ''}${confirmModal()}<div id="toast-stack" class="toast-stack" aria-live="polite" aria-atomic="true"></div><script src="/assets/admin.js" defer></script>${extraScripts}</body></html>`;
 }
@@ -277,7 +277,7 @@ function statCard(label: string, value: HtmlValue, foot: string, iconName: strin
 function adminOverviewPage({
   runtime,
   clients,
-  terminals,
+  workers,
   telegram,
   endpoint,
   storage,
@@ -287,7 +287,7 @@ function adminOverviewPage({
 }: {
   runtime: PageRuntime;
   clients: PageClient[];
-  terminals: PageProfile[];
+  workers: PageWorker[];
   telegram: PageTelegram;
   endpoint: string;
   storage: PageStorage;
@@ -296,7 +296,7 @@ function adminOverviewPage({
   error?: string;
 }) {
   const activeClients = clients.filter((c) => c.status === 'active').length;
-  const enabledTerminals = terminals.filter((t) => t.enabled).length;
+  const onlineWorkers = workers.filter((w) => w.enabled && w.status === 'online').length;
   const startedAt = runtime.startedAt || 'unknown';
   const storageState = storage.state || 'UNCONFIGURED';
   const storageLabel =
@@ -326,9 +326,9 @@ function adminOverviewPage({
           ? `<div class="setup-banner warning"><div>${icon('database')}<div><strong>MySQL setup required</strong><p>Legacy SQLite data was detected and is preserved for import only. Save a MySQL connection, then explicitly initialize the mcp_worker source.</p></div></div><a class="btn btn-primary" href="/admin/settings/database">Configure Database</a></div>`
           : '';
   const body = `${flashData(success, error)}${pageHeader('Overview', 'Monitor the mcp_worker runtime and its configuration.', '<a class="btn" href="/admin/onboarding">Getting Started</a>')}${setupNotice}
-  <div class="stats-grid">${statCard('Data Store', storageLabel, storageFoot, 'database')}${statCard('MCP Tools', runtime.toolCount, 'available primitives', 'shield')}${statCard('OAuth Clients', clients.length, `${activeClients} active`, 'key')}${statCard('SSH Profiles', terminals.length, `${enabledTerminals} enabled`, 'terminal')}</div>
+  <div class="stats-grid">${statCard('Data Store', storageLabel, storageFoot, 'database')}${statCard('MCP Tools', runtime.toolCount, 'available primitives', 'shield')}${statCard('OAuth Clients', clients.length, `${activeClients} active`, 'key')}${statCard('Workers', workers.length, `${onlineWorkers} online`, 'server')}</div>
   <div class="grid-2"><section class="section"><div class="section-header"><div><h2 class="section-title">Runtime Information</h2><p class="section-subtitle">Identity of the currently deployed MCP service.</p></div></div><div class="section-body"><div class="definition-grid"><div class="definition"><div class="definition-label">Application</div><div class="definition-value">mcp_worker</div></div><div class="definition"><div class="definition-label">Version</div><div class="definition-value">v${escapeHtml(runtime.version)}</div></div><div class="definition"><div class="definition-label">Git SHA</div><div class="copy-row"><code id="runtime-sha">${escapeHtml(runtime.gitSha || 'unknown')}</code><button class="btn btn-sm btn-ghost" type="button" data-copy-target="runtime-sha">${icon('copy')} Copy</button></div></div><div class="definition"><div class="definition-label">Build Time</div><div class="definition-value">${escapeHtml(runtime.buildTime || 'unknown')}</div></div><div class="definition"><div class="definition-label">Started At</div><div class="definition-value">${escapeHtml(startedAt)}</div></div><div class="definition"><div class="definition-label">Environment</div><div class="definition-value">${escapeHtml(runtime.nodeEnv || 'production')}</div></div></div></div></section>
-  <section class="section"><div class="section-header"><div><h2 class="section-title">System Configuration</h2><p class="section-subtitle">Operational readiness of MCP dependencies.</p></div></div><div class="section-body status-list"><a class="status-row" href="/admin/settings/database"><div><div class="status-row-title">Database</div><div class="status-row-sub">Primary application data store</div></div><span class="badge ${storageState === 'READY' ? 'badge-ok' : 'badge-off'}">${escapeHtml(storageLabel)}</span></a><a class="status-row" href="/admin/clients"><div><div class="status-row-title">OAuth Clients</div><div class="status-row-sub">Remote MCP authorization</div></div><span class="badge ${clients.length ? 'badge-ok' : 'badge-off'}">${clients.length ? 'Configured' : 'Not set'}</span></a><a class="status-row" href="/admin/terminals"><div><div class="status-row-title">SSH Profiles</div><div class="status-row-sub">Worker-backed execution targets</div></div><span class="badge ${terminals.length ? 'badge-ok' : 'badge-off'}">${terminals.length ? 'Configured' : 'Not set'}</span></a><a class="status-row" href="/admin/settings/telegram"><div><div class="status-row-title">Telegram</div><div class="status-row-sub">Optional support notification</div></div><span class="badge ${telegram.enabled && telegram.hasToken && telegram.chatId ? 'badge-ok' : 'badge-off'}">${telegram.enabled && telegram.hasToken && telegram.chatId ? 'Configured' : 'Optional'}</span></a></div></section></div>
+  <section class="section"><div class="section-header"><div><h2 class="section-title">System Configuration</h2><p class="section-subtitle">Operational readiness of MCP dependencies.</p></div></div><div class="section-body status-list"><a class="status-row" href="/admin/settings/database"><div><div class="status-row-title">Database</div><div class="status-row-sub">Primary application data store</div></div><span class="badge ${storageState === 'READY' ? 'badge-ok' : 'badge-off'}">${escapeHtml(storageLabel)}</span></a><a class="status-row" href="/admin/clients"><div><div class="status-row-title">OAuth Clients</div><div class="status-row-sub">Remote MCP authorization</div></div><span class="badge ${clients.length ? 'badge-ok' : 'badge-off'}">${clients.length ? 'Configured' : 'Not set'}</span></a><a class="status-row" href="/admin/workers"><div><div class="status-row-title">Workers</div><div class="status-row-sub">Outbound WSS execution targets</div></div><span class="badge ${workers.length ? 'badge-ok' : 'badge-off'}">${workers.length ? 'Configured' : 'Not set'}</span></a><a class="status-row" href="/admin/settings/telegram"><div><div class="status-row-title">Telegram</div><div class="status-row-sub">Optional support notification</div></div><span class="badge ${telegram.enabled && telegram.hasToken && telegram.chatId ? 'badge-ok' : 'badge-off'}">${telegram.enabled && telegram.hasToken && telegram.chatId ? 'Configured' : 'Optional'}</span></a></div></section></div>
   <section id="endpoint" class="section" style="margin-top:16px"><div class="section-header"><div><h2 class="section-title">MCP Endpoint</h2><p class="section-subtitle">Canonical resource URL. MCP configuration is managed from Settings.</p></div><a class="btn btn-sm" href="/admin/settings/mcp">Settings</a></div><div class="section-body"><div class="copy-row"><code id="mcp-endpoint" style="flex:1">${escapeHtml(endpoint)}</code><button class="btn" type="button" data-copy-target="mcp-endpoint">${icon('copy')} Copy URL</button></div></div></section>`;
   return shell('Overview — mcp_worker', body, {
     admin: true,
@@ -420,7 +420,7 @@ function onboardingPage({
     [
       'Create an OAuth client',
       ready && clientReady,
-      'Register the exact callback URI from your client. For the first call, select bot_report.read only (uncheck Terminal and Offline access). Add bot_report.terminal only when you intend to grant execution. Store the one-time client secret privately; never paste it into a chat or log.',
+      'Register the exact callback URI from your client. For the first call, select bot_report.read only (uncheck Worker execution and Offline access). The bot_report.terminal OAuth scope remains for compatibility and authorizes Worker execution. Store the one-time client secret privately; never paste it into a chat or log.',
       mode === 'local' ? '/admin/clients?first_call=local' : '/admin/clients?first_call=1',
       'OAuth clients',
     ],
@@ -480,7 +480,7 @@ function oauthClientCreateModal({
   const mcpId = `${id}-mcp-url`;
   const access = personal
     ? `<div class="field full"><span class="field-label">Access</span><div class="migration-note"><strong>Personal MCP access</strong><span><code>bot_report.read</code>, <code>bot_report.terminal</code> and <code>offline_access</code>. Execution remains restricted to Worker Profiles owned by your account.</span></div></div>`
-    : `<div class="field full"><span class="field-label">Access scopes</span><div class="scope-options"><label class="scope-option"><input type="checkbox" name="scopes" value="bot_report.read" checked><span><strong>Read</strong><small>Inspect runtime, repository and workspace state.</small></span></label><label class="scope-option"><input type="checkbox" name="scopes" value="bot_report.terminal" ${firstCall ? '' : 'checked'}><span><strong>Terminal</strong><small>Use Worker-backed execution tools.</small></span></label><label class="scope-option"><input type="checkbox" name="scopes" value="offline_access" ${firstCall ? '' : 'checked'}><span><strong>Offline access</strong><small>Allow refresh tokens for persistent connectors.</small></span></label></div></div>`;
+    : `<div class="field full"><span class="field-label">Access scopes</span><div class="scope-options"><label class="scope-option"><input type="checkbox" name="scopes" value="bot_report.read" checked><span><strong>Read</strong><small>Inspect runtime, repository and workspace state.</small></span></label><label class="scope-option"><input type="checkbox" name="scopes" value="bot_report.terminal" ${firstCall ? '' : 'checked'}><span><strong>Worker execution</strong><small>Allow MCP file, Git, process and execution tools on enrolled Workers.</small></span></label><label class="scope-option"><input type="checkbox" name="scopes" value="offline_access" ${firstCall ? '' : 'checked'}><span><strong>Offline access</strong><small>Allow refresh tokens for persistent connectors.</small></span></label></div></div>`;
   const identity = personal
     ? `<div class="migration-note"><strong>Personal identity</strong><span>This client is automatically bound to your existing user Principal ID and Profile ID.</span></div>`
     : `<div class="migration-note"><strong>Automatic identity</strong><span>Principal ID is generated by mcp_worker from the new Client ID after creation. It is immutable and cannot be entered manually.</span></div>`;
@@ -682,92 +682,6 @@ function auditPage({
   });
 }
 
-function terminalsPage({
-  profiles = [],
-  workers = [],
-  accountUser = null,
-  routeBase = accountUser ? '/account/ssh-profiles' : '/admin/terminals',
-  csrfToken,
-  success = '',
-  error = '',
-}: {
-  profiles?: PageProfile[];
-  workers?: PageWorker[];
-  accountUser?: PageUser | null;
-  routeBase?: string;
-  csrfToken: string;
-  success?: string;
-  error?: string;
-}) {
-  const onlineWorkers = workers.filter((worker) => worker.enabled && worker.status === 'online');
-  const workerOptions = onlineWorkers
-    .map(
-      (worker) =>
-        `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.name)} · online</option>`,
-    )
-    .join('');
-  const rows = profiles
-    .map((profile) => {
-      const workerOnline = profile.worker_enabled && profile.worker_status === 'online';
-      const effectiveEnabled = Boolean(profile.enabled) && workerOnline;
-      const payload = escapeHtml(
-        JSON.stringify({
-          id: profile.id,
-          name: profile.name,
-          description: profile.description || '',
-          worker_id: profile.worker_id,
-          enabled: Boolean(profile.enabled),
-        }),
-      );
-      const search = [
-        profile.name,
-        profile.description || '',
-        profile.worker_name || profile.worker_id,
-        effectiveEnabled ? 'ready' : 'unavailable',
-      ].join(' ');
-      const liveActions = effectiveEnabled
-        ? `<a role="menuitem" href="${escapeHtml(routeBase)}/${escapeHtml(profile.id)}/shell" target="_blank" rel="noopener">${icon('terminal')} Attach Shell</a><form method="post" action="${escapeHtml(routeBase)}/${escapeHtml(profile.id)}/test" data-terminal-test data-profile-name="${escapeHtml(profile.name)}"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><button type="submit" role="menuitem">${icon('check')} Test Shell</button></form><div class="menu-separator"></div>`
-        : '';
-      return `<tr data-search="${escapeHtml(search)}"><td data-label="Profile"><div class="cell-title">${escapeHtml(profile.name)}</div><div class="cell-sub">${escapeHtml(profile.description || 'No description')}</div></td><td data-label="Worker"><div class="cell-title">${escapeHtml(profile.worker_name || profile.worker_id)}</div><div class="cell-sub">Direct Worker shell transport</div></td><td data-label="Status"><span class="badge ${effectiveEnabled ? 'badge-ok' : 'badge-off'}">${effectiveEnabled ? 'Ready' : profile.enabled ? 'Worker offline' : 'Disabled'}</span></td><td data-label="Actions" style="text-align:right"><details class="dropdown"><summary class="btn btn-icon btn-ghost" role="button" aria-haspopup="menu" aria-label="Actions for ${escapeHtml(profile.name)}">${icon('more')}</summary><div class="menu" role="menu" aria-label="Actions for ${escapeHtml(profile.name)}">${liveActions}<button type="button" role="menuitem" data-account-ssh-edit="${payload}" data-modal-open="account-ssh-modal">${icon('pencil')} Edit Profile</button><form method="post" action="${escapeHtml(routeBase)}/${escapeHtml(profile.id)}/update" data-confirm-title="${profile.enabled ? 'Disable' : 'Enable'} SSH Profile?" data-confirm-message="${profile.enabled ? 'MCP and browser shell access will stop until this profile is enabled again.' : 'Shell access will be allowed again when its Worker is online.'}" data-confirm-action="${profile.enabled ? 'Disable Profile' : 'Enable Profile'}"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><input type="hidden" name="name" value="${escapeHtml(profile.name)}"><input type="hidden" name="description" value="${escapeHtml(profile.description || '')}"><input type="hidden" name="worker_id" value="${escapeHtml(profile.worker_id)}"><input type="hidden" name="enabled" value="${profile.enabled ? 'false' : 'true'}"><button type="submit" role="menuitem">${icon('power')} ${profile.enabled ? 'Disable Profile' : 'Enable Profile'}</button></form><form method="post" action="${escapeHtml(routeBase)}/${escapeHtml(profile.id)}/delete" data-confirm-title="Delete SSH Profile?" data-confirm-message="This removes only the execution alias. The Worker remains enrolled and running." data-confirm-action="Delete Profile" data-confirm-danger="true"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><button class="danger" type="submit" role="menuitem">${icon('trash')} Delete Profile</button></form></div></details></td></tr>`;
-    })
-    .join('');
-  const modal = `<div id="account-ssh-modal" class="modal-backdrop" aria-hidden="true"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="account-ssh-title" aria-describedby="account-ssh-description"><div class="modal-header"><h2 id="account-ssh-title">Edit SSH Profile</h2><p id="account-ssh-description">Update the alias bound to this enrolled Worker. Profiles are created automatically during Worker enrollment.</p></div><form id="account-ssh-form" data-route-base="${escapeHtml(routeBase)}" method="post" action="" data-disable-on-submit><div class="modal-body"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><div class="form-grid"><div class="field"><label for="account-ssh-name">Name</label><input id="account-ssh-name" name="name" required maxlength="100"></div><div class="field"><label for="account-ssh-worker">Active Worker</label><select id="account-ssh-worker" class="input" name="worker_id" required><option value="">Select online Worker</option>${workerOptions}</select><div class="hint">Only enabled Workers that are connected right now can be selected.</div></div><div class="field full"><label for="account-ssh-description-input">Description</label><input id="account-ssh-description-input" name="description" maxlength="500" placeholder="Direct interactive shell through Worker"></div><div class="field full"><span class="field-label">Status</span><label class="switch-row" for="account-ssh-enabled"><span><strong>Enabled</strong><span class="hint">Expose this shell profile to browser and MCP terminal tools.</span></span><input id="account-ssh-enabled" name="enabled" type="checkbox" value="true"><span class="switch-control" aria-hidden="true"></span></label></div></div><div class="migration-note"><strong>Automatic profile</strong><span>Each enrolled Worker owns its execution profile. Attach Shell opens a PTY directly through that Worker; no separate profile creation is needed.</span></div></div><div class="modal-footer"><button class="btn" type="button" data-modal-close>Cancel</button><button class="btn btn-primary" type="submit">Save Profile</button></div></form></div></div>`;
-  const actions = `<a class="btn" href="${escapeHtml(routeBase)}">${icon('refresh')} Refresh</a>`;
-  const body = `${flashData(success, error)}${pageHeader('SSH Profiles', 'Direct interactive shells through enrolled Workers. Profiles are created automatically with each Worker.', actions)}<section class="section"><div class="section-header"><div><h2 class="section-title">${accountUser ? 'My SSH Profiles' : 'Admin SSH Profiles'}</h2><p class="section-subtitle">${onlineWorkers.length} active Worker${onlineWorkers.length === 1 ? '' : 's'} available.</p></div><span class="badge ${onlineWorkers.length ? 'badge-ok' : 'badge-off'}">${onlineWorkers.length ? 'Worker available' : 'No active Worker'}</span></div>${profiles.length ? `<div class="table-wrap"><table id="worker-ssh-table" class="table"><thead><tr><th>Profile</th><th>Worker</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty"><div class="empty-icon">${icon('terminal')}</div><strong>No SSH Profiles yet</strong><div>Enroll a Worker first. Its shell profile will be created automatically.</div></div>`}</section>${modal}`;
-  return shell('SSH Profiles — mcp_worker', body, {
-    admin: true,
-    accountUser,
-    active: accountUser ? 'account-ssh' : 'terminals',
-    csrfToken,
-    breadcrumb: 'SSH Profiles',
-  });
-}
-
-function terminalConsolePage({
-  profile,
-  accountUser = null,
-  routeBase = accountUser ? '/account/ssh-profiles' : '/admin/terminals',
-  csrfToken,
-}: {
-  profile: PageProfile;
-  accountUser?: PageUser | null;
-  routeBase?: string;
-  csrfToken: string;
-}) {
-  const back = routeBase;
-  const body = `${pageHeader(`Shell · ${profile.name}`, 'Interactive PTY attached directly to the Worker OS shell.', `<a class="btn" href="${escapeHtml(back)}">Back to Profiles</a>`)}<section class="section terminal-console-card"><div class="terminal-console-head"><div class="terminal-target"><strong>${escapeHtml(profile.worker_name || profile.worker_id)}</strong><span class="code-chip">direct shell</span></div><div class="terminal-console-actions"><span id="terminal-connection-status" class="badge badge-off">Connecting…</span><button class="btn btn-sm" type="button" data-terminal-reconnect>Reconnect</button><button class="btn btn-sm" type="button" data-terminal-disconnect>Disconnect</button></div></div><div id="terminal-console-root" data-profile-id="${escapeHtml(profile.id)}" data-session-url="${escapeHtml(routeBase)}/${escapeHtml(profile.id)}/session" data-csrf="${escapeHtml(csrfToken)}"><div id="terminal-console-error" class="terminal-console-error" role="alert" hidden></div><div id="terminal-screen" class="terminal-screen" aria-label="Interactive Worker shell"></div></div><div class="terminal-console-foot"><span>Runs as the local OS user that started mcp_worker Worker.</span><span>No tmux, SSH password, or inbound SSH port is used.</span></div></section>`;
-  return shell(`Shell ${profile.name} — mcp_worker`, body, {
-    admin: true,
-    accountUser,
-    active: accountUser ? 'account-ssh' : 'terminals',
-    csrfToken,
-    breadcrumb: `Shell / ${profile.name}`,
-    extraHead: '<link rel="stylesheet" href="/vendor/xterm/css/xterm.css">',
-    extraScripts:
-      '<script src="/vendor/xterm/lib/xterm.js"></script><script src="/vendor/xterm-addon-fit/lib/addon-fit.js"></script><script src="/assets/terminal-console.js" defer></script>',
-  });
-}
-
 function telegramPage({
   config,
   csrfToken,
@@ -871,7 +785,7 @@ function workersPage({
         `<option value="${escapeHtml(worker.id)}">${escapeHtml(worker.name)} · ${escapeHtml(worker.enabled ? worker.status || 'offline' : 'disabled')}</option>`,
     )
     .join('');
-  const profileModal = `<div id="worker-profile-modal" class="modal-backdrop" aria-hidden="true"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="worker-profile-title" aria-describedby="worker-profile-description"><div class="modal-header"><h2 id="worker-profile-title">New Worker Profile</h2><p id="worker-profile-description">Bind a stable MCP profile alias to an enrolled Worker shell.</p></div><form method="post" action="${escapeHtml(routeBase)}/profiles" data-disable-on-submit><div class="modal-body"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><div class="form-grid"><div class="field"><label for="worker-profile-name">Name</label><input id="worker-profile-name" name="name" required maxlength="100" placeholder="Dev Laptop"></div><div class="field"><label for="worker-profile-worker">Worker</label><select id="worker-profile-worker" class="input" name="worker_id" required><option value="">Select worker</option>${workerOptions}</select></div><div class="field full"><label for="worker-profile-description-input">Description</label><input id="worker-profile-description-input" name="description" maxlength="500" placeholder="Local development worker"></div><div class="field full"><span class="field-label">Status</span><label class="switch-row" for="worker-profile-enabled"><span><strong>Enabled</strong><span class="hint">Allow MCP tools and browser terminal to use this Worker shell.</span></span><input id="worker-profile-enabled" name="enabled" type="checkbox" value="true" checked><span class="switch-control" aria-hidden="true"></span></label></div></div></div><div class="modal-footer"><button class="btn" type="button" data-modal-close>Cancel</button><button class="btn btn-primary" type="submit">Create Profile</button></div></form></div></div>`;
+  const profileModal = `<div id="worker-profile-modal" class="modal-backdrop" aria-hidden="true"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="worker-profile-title" aria-describedby="worker-profile-description"><div class="modal-header"><h2 id="worker-profile-title">New Worker Profile</h2><p id="worker-profile-description">Bind a stable MCP profile alias to an enrolled Worker shell.</p></div><form method="post" action="${escapeHtml(routeBase)}/profiles" data-disable-on-submit><div class="modal-body"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><div class="form-grid"><div class="field"><label for="worker-profile-name">Name</label><input id="worker-profile-name" name="name" required maxlength="100" placeholder="Dev Laptop"></div><div class="field"><label for="worker-profile-worker">Worker</label><select id="worker-profile-worker" class="input" name="worker_id" required><option value="">Select worker</option>${workerOptions}</select></div><div class="field full"><label for="worker-profile-description-input">Description</label><input id="worker-profile-description-input" name="description" maxlength="500" placeholder="Local development worker"></div><div class="field full"><span class="field-label">Status</span><label class="switch-row" for="worker-profile-enabled"><span><strong>Enabled</strong><span class="hint">Allow MCP tools and MCP calls to run through this Worker.</span></span><input id="worker-profile-enabled" name="enabled" type="checkbox" value="true" checked><span class="switch-control" aria-hidden="true"></span></label></div></div></div><div class="modal-footer"><button class="btn" type="button" data-modal-close>Cancel</button><button class="btn btn-primary" type="submit">Create Profile</button></div></form></div></div>`;
   const workerEditModal = `<div id="worker-edit-modal" class="modal-backdrop" aria-hidden="true"><div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="worker-edit-title" aria-describedby="worker-edit-description"><div class="modal-header"><h2 id="worker-edit-title">Edit Worker name</h2><p id="worker-edit-description">Change the display name used in mcp_worker. Worker identity and profiles are not recreated.</p></div><form id="worker-edit-form" method="post" action="" data-disable-on-submit><div class="modal-body"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><div class="field"><label for="worker-edit-name">Worker name</label><input id="worker-edit-name" name="name" required maxlength="100" autocomplete="off"></div></div><div class="modal-footer"><button class="btn" type="button" data-modal-close>Cancel</button><button class="btn btn-primary" type="submit">Save name</button></div></form></div></div>`;
   const workerBaseUrl = workerInstallUrl.replace(/\/worker\/install\.sh$/, '');
   const linuxInstallCommand = `curl -fsSL ${workerBaseUrl}/worker/install-linux.sh | sh`;
@@ -880,59 +794,20 @@ function workersPage({
   const enrollmentModal = enrollment
     ? `<div id="worker-enrollment-modal" class="modal-backdrop" data-auto-open="true" data-static="true" aria-hidden="true"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="worker-enrollment-title" aria-describedby="worker-enrollment-description"><div class="modal-header"><h2 id="worker-enrollment-title">One-time Enrollment Token</h2><p id="worker-enrollment-description">Expires at ${escapeHtml(enrollment.expires_at)}. Copy the token before closing; it will not be shown again.</p></div><div class="modal-body"><div class="secret-warning">${icon('shield')}<div>The Worker generates its Ed25519 private key locally. mcp_worker receives only the public key; this token is used once to bind that key to a Worker identity.</div></div><div class="field" style="margin-top:14px"><span class="field-label">1. Install Worker on the target machine</span><div class="stack" style="margin-top:8px"><div><div class="hint" style="margin-bottom:6px">Linux</div><div class="copy-row"><code id="worker-install-linux-command" style="flex:1">${escapeHtml(linuxInstallCommand)}</code><button class="btn btn-icon" type="button" data-copy-target="worker-install-linux-command" aria-label="Copy Linux worker install command">${icon('copy')}</button></div></div><div><div class="hint" style="margin-bottom:6px">macOS · Intel or Apple Silicon</div><div class="copy-row"><code id="worker-install-macos-command" style="flex:1">${escapeHtml(macInstallCommand)}</code><button class="btn btn-icon" type="button" data-copy-target="worker-install-macos-command" aria-label="Copy macOS worker install command">${icon('copy')}</button></div></div><div><div class="hint" style="margin-bottom:6px">Windows · PowerShell</div><div class="copy-row"><code id="worker-install-windows-command" style="flex:1">${escapeHtml(windowsInstallCommand)}</code><button class="btn btn-icon" type="button" data-copy-target="worker-install-windows-command" aria-label="Copy Windows worker install command">${icon('copy')}</button></div></div></div></div><div class="field" style="margin-top:14px"><span class="field-label">2. One-time enrollment token</span><div class="copy-row"><div id="worker-enrollment-token" class="secret-box" style="flex:1">${escapeHtml(enrollment.token)}</div><button class="btn btn-icon" type="button" data-copy-target="worker-enrollment-token" aria-label="Copy enrollment token">${icon('copy')}</button></div></div><div class="migration-note"><strong>3. Login and connect</strong><span>Run <code>systemtd login</code> in Terminal/PowerShell. The CLI prompts for this token and allowed workspace roots, creates the local Ed25519 identity and Worker Profile, then starts the outbound worker in the background.</span></div></div><div class="modal-footer"><button class="btn btn-primary" type="button" data-modal-close>I've saved the token</button></div></div></div>`
     : '';
-  const profileAction = `<a class="btn btn-primary" href="${accountUser ? '/account/ssh-profiles' : '/admin/terminals'}">${icon('terminal')} SSH Profiles</a>`;
+  const profileAction = `<button type="button" class="btn btn-primary" data-modal-open="worker-profile-modal">${icon('plus')} New Execution Target</button>`;
   const actions = `<div style="display:flex;gap:8px;flex-wrap:wrap"><a class="btn" href="${escapeHtml(routeBase)}" aria-label="Refresh workers">${icon('refresh')} Refresh</a><form method="post" action="${escapeHtml(routeBase)}/enrollment"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><input type="hidden" name="ttl_seconds" value="600"><button class="btn" type="submit">${icon('key')} Generate Enrollment Token</button></form>${profileAction}</div>`;
   const workerToolbar = `<div class="toolbar"><div class="search">${icon('search')}<input class="input" type="search" aria-label="Search workers" data-table-search="workers-table" placeholder="Search workers, status, capabilities..."></div><div style="display:flex;gap:6px;flex-wrap:wrap"><span class="badge badge-off">${workers.length} total</span><span class="badge badge-ok" data-worker-count="online">${onlineCount} online</span><span class="badge badge-off" data-worker-count="offline">${offlineCount} offline</span><span class="badge badge-off" data-worker-count="disabled">${disabledCount} disabled</span></div></div>`;
   const profileToolbar = `<div class="toolbar"><div class="search">${icon('search')}<input class="input" type="search" aria-label="Search worker profiles" data-table-search="worker-profiles-table" placeholder="Search profiles and workers..."></div><span class="badge badge-off">${profiles.length} profiles</span></div>`;
   const workerSection = `<section class="section"><div class="section-header"><div><h2 class="section-title">Enrolled Workers</h2><p class="section-subtitle">Search and manage machine identities as the fleet grows.</p></div>${icon('server')}</div><div class="section-body" style="padding-bottom:0">${workerToolbar}</div>${workers.length ? `<div class="table-wrap"><table id="workers-table" class="table" data-worker-status-url="${escapeHtml(routeBase)}/connection-status" data-worker-check="${escapeHtml(workers.some((worker) => worker.id === checkingWorkerId && worker.enabled) ? checkingWorkerId : '')}"><thead><tr><th>Worker</th>${accountUser ? '' : '<th>Owner</th>'}<th>Connection</th><th>Profiles</th><th>Last Seen</th><th>Capabilities</th><th></th></tr></thead><tbody>${workerRows}</tbody></table></div><div class="search-empty" data-search-empty="workers-table" hidden>No matching workers.</div>` : `<div class="empty"><div class="empty-icon">${icon('server')}</div><strong>No workers enrolled</strong><div>Generate a one-time token and start the worker on a target machine.</div></div>`}</section>`;
-  const profileSection = `<section class="section" style="margin-top:16px"><div class="section-header"><div><h2 class="section-title">Worker Profiles</h2><p class="section-subtitle">Stable aliases used by MCP terminal/workspace/file/git/process tools.</p></div></div><div class="section-body" style="padding-bottom:0">${profileToolbar}</div>${profiles.length ? `<div class="table-wrap"><table id="worker-profiles-table" class="table"><thead><tr><th>Profile</th><th>Worker</th><th>Status</th><th></th></tr></thead><tbody>${profileRows}</tbody></table></div><div class="search-empty" data-search-empty="worker-profiles-table" hidden>No matching worker profiles.</div>` : `<div class="empty"><div class="empty-icon">${icon('terminal')}</div><strong>No worker profiles yet</strong><div>Enroll a Worker, then bind it to a profile alias for direct shell access.</div></div>`}</section>`;
-  const securitySection = `<section class="section" style="margin-top:16px"><div class="section-header"><div><h2 class="section-title">Worker Security</h2><p class="section-subtitle">The target machine initiates the connection; mcp_worker never needs an inbound worker port.</p></div>${icon('shield')}</div><div class="section-body"><div class="definition-grid"><div class="definition"><div class="definition-label">Network direction</div><div class="definition-value">Outbound WSS only</div></div><div class="definition"><div class="definition-label">Machine secret</div><div class="definition-value">Ed25519 private key stays local</div></div><div class="definition"><div class="definition-label">SSH password</div><div class="definition-value">Not required</div></div><div class="definition"><div class="definition-label">Authority boundary</div><div class="definition-value">Worker OS user + allowed roots</div></div></div></div></section>`;
-  const body = `${flashData(success, error)}${pageHeader('Workers', 'Outbound execution agents. No inbound SSH port or stored SSH password is required.', actions)}${workerSection}${securitySection}${workerEditModal}${enrollmentModal}`;
+  const profileSection = `<section class="section" style="margin-top:16px"><div class="section-header"><div><h2 class="section-title">Execution Targets</h2><p class="section-subtitle">Stable aliases used by MCP workspace/file/git/process tools.</p></div></div><div class="section-body" style="padding-bottom:0">${profileToolbar}</div>${profiles.length ? `<div class="table-wrap"><table id="worker-profiles-table" class="table"><thead><tr><th>Profile</th><th>Worker</th><th>Status</th><th></th></tr></thead><tbody>${profileRows}</tbody></table></div><div class="search-empty" data-search-empty="worker-profiles-table" hidden>No matching worker profiles.</div>` : `<div class="empty"><div class="empty-icon">${icon('terminal')}</div><strong>No worker profiles yet</strong><div>Enroll a Worker, then bind it to a profile alias for direct MCP execution.</div></div>`}</section>`;
+  const securitySection = `<section class="section" style="margin-top:16px"><div class="section-header"><div><h2 class="section-title">Worker Security</h2><p class="section-subtitle">The target machine initiates the connection; mcp_worker never needs an inbound worker port.</p></div>${icon('shield')}</div><div class="section-body"><div class="definition-grid"><div class="definition"><div class="definition-label">Network direction</div><div class="definition-value">Outbound WSS only</div></div><div class="definition"><div class="definition-label">Machine secret</div><div class="definition-value">Ed25519 private key stays local</div></div><div class="definition"><div class="definition-label">Inbound execution port</div><div class="definition-value">Not required</div></div><div class="definition"><div class="definition-label">Authority boundary</div><div class="definition-value">Worker OS user + allowed roots</div></div></div></div></section>`;
+  const body = `${flashData(success, error)}${pageHeader('Workers', 'Outbound execution agents. Workers connect outward over secure WebSocket.', actions)}${workerSection}${profileSection}${securitySection}${profileModal}${workerEditModal}${enrollmentModal}`;
   return shell('Workers — mcp_worker', body, {
     admin: true,
     accountUser,
     active: accountUser ? 'account-workers' : 'workers',
     csrfToken,
     breadcrumb: 'Workers',
-  });
-}
-
-function usersPage({
-  users = [],
-  clientCounts = {},
-  csrfToken,
-  success = '',
-  error = '',
-}: {
-  users?: PageUser[];
-  clientCounts?: Record<string, number>;
-  csrfToken: string;
-  success?: string;
-  error?: string;
-}) {
-  const rows = users
-    .map((user) => {
-      const active = user.status === 'active';
-      const count = Number(clientCounts[user.id || ''] || 0);
-      const lastLogin = user.last_login_at
-        ? new Date(user.last_login_at).toLocaleString('en-GB')
-        : 'Never';
-      return `<tr><td data-label="User"><div class="cell-title">${escapeHtml(user.display_name || user.username)}</div><div class="cell-sub">${escapeHtml(user.username)}${user.email ? ` · ${escapeHtml(user.email)}` : ''}</div></td><td data-label="Status"><span class="badge ${active ? 'badge-ok' : 'badge-off'}">${escapeHtml(user.status)}</span></td><td data-label="Clients">${count}</td><td data-label="Client Profile"><div class="cell-sub mono">${escapeHtml(user.principal_id)}</div><div class="cell-sub mono">${escapeHtml(user.profile_id)}</div></td><td data-label="Last Login">${escapeHtml(lastLogin)}</td><td data-label="Actions" style="text-align:right"><details class="dropdown"><summary class="btn btn-icon btn-ghost" role="button" aria-haspopup="menu" aria-label="Actions for ${escapeHtml(user.username)}">${icon('more')}</summary><div class="menu" role="menu"><form method="post" action="/admin/users/${escapeHtml(user.id)}/${active ? 'disable' : 'enable'}" ${active ? 'data-confirm-title="Disable user?" data-confirm-message="Existing sessions will be invalidated and this user will not be able to sign in." data-confirm-action="Disable User"' : ''}><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><button type="submit" role="menuitem">${icon('power')} ${active ? 'Disable' : 'Enable'}</button></form><button type="button" role="menuitem" data-modal-open="reset-${escapeHtml(user.id)}">${icon('refresh')} Reset Password</button></div></details></td></tr>`;
-    })
-    .join('');
-  const resetModals = users
-    .map(
-      (user) =>
-        `<div id="reset-${escapeHtml(user.id)}" class="modal-backdrop" aria-hidden="true"><div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="reset-title-${escapeHtml(user.id)}"><div class="modal-header"><h2 id="reset-title-${escapeHtml(user.id)}">Reset password</h2><p>Set a new password for ${escapeHtml(user.username)}. Existing sessions will be revoked.</p></div><form method="post" action="/admin/users/${escapeHtml(user.id)}/reset-password" data-disable-on-submit><div class="modal-body"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><div class="field"><label for="reset-password-${escapeHtml(user.id)}">New password</label><input id="reset-password-${escapeHtml(user.id)}" name="password" type="password" minlength="10" maxlength="256" autocomplete="new-password" required></div></div><div class="modal-footer"><button class="btn" type="button" data-modal-close>Cancel</button><button class="btn btn-primary" type="submit">Reset Password</button></div></form></div></div>`,
-    )
-    .join('');
-  const createModal = `<div id="user-create-modal" class="modal-backdrop" aria-hidden="true"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="user-create-title"><div class="modal-header"><h2 id="user-create-title">New User</h2><p>Create a database-backed mcp_worker user with an isolated MCP client profile.</p></div><form method="post" action="/admin/users" data-disable-on-submit><div class="modal-body"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><div class="form-grid"><div class="field"><label for="user-username">Username</label><input id="user-username" name="username" required minlength="3" maxlength="64" autocomplete="off"></div><div class="field"><label for="user-display-name">Display name</label><input id="user-display-name" name="display_name" required maxlength="120"></div><div class="field"><label for="user-email">Email</label><input id="user-email" name="email" type="email" maxlength="254"></div><div class="field"><label for="user-password">Initial password</label><input id="user-password" name="password" type="password" minlength="10" maxlength="256" autocomplete="new-password" required></div></div></div><div class="modal-footer"><button class="btn" type="button" data-modal-close>Cancel</button><button class="btn btn-primary" type="submit">Create User</button></div></form></div></div>`;
-  const body = `${flashData(success, error)}${pageHeader('Users', 'Manage database-backed users and their isolated MCP client profiles.', `<button class="btn btn-primary" type="button" data-modal-open="user-create-modal">${icon('plus')} New User</button>`)}<section class="section">${users.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>User</th><th>Status</th><th>Clients</th><th>Client Profile</th><th>Last Login</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty"><div class="empty-icon">${icon('user')}</div><strong>No users yet</strong><div>Create a user to give them their own MCP client profile.</div></div>`}</section>${createModal}${resetModals}`;
-  return shell('Users — mcp_worker', body, {
-    admin: true,
-    active: 'users',
-    csrfToken,
-    breadcrumb: 'Users',
   });
 }
 
@@ -978,32 +853,6 @@ function accountClientsPage({
     active: 'account-clients',
     csrfToken,
     breadcrumb: 'My Clients',
-  });
-}
-
-function accountSshProfilesPage({
-  user,
-  profiles = [],
-  workers = [],
-  csrfToken,
-  success = '',
-  error = '',
-}: {
-  user: PageUser;
-  profiles?: PageProfile[];
-  workers?: PageWorker[];
-  csrfToken: string;
-  success?: string;
-  error?: string;
-}) {
-  return terminalsPage({
-    profiles,
-    workers,
-    accountUser: user,
-    routeBase: '/account/ssh-profiles',
-    csrfToken,
-    success,
-    error,
   });
 }
 
@@ -1193,13 +1042,9 @@ export = {
   adminOverviewPage,
   clientsPage,
   auditPage,
-  terminalsPage,
-  terminalConsolePage,
   telegramPage,
   workersPage,
-  usersPage,
   accountClientsPage,
-  accountSshProfilesPage,
   accountTelegramPage,
   settingsPage,
   setupRequiredPage,

@@ -7,7 +7,7 @@ const path = require('node:path');
 const ts = require('typescript');
 const root = path.resolve(__dirname, '..');
 const roots = ['src', 'worker', 'scripts', 'tests'];
-const strictModules = new Set(['src/http/pages.ts','src/services/terminalSshService.ts','tests/ts5-render-ssh.test.ts']);
+const strictModules = new Set(['src/http/pages.ts','tests/ts5-render-ui.test.ts']);
 let checked = 0;
 let violations = 0;
 function visit(dir) {

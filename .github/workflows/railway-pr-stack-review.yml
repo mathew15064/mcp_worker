@@ -1,0 +1,112 @@
+name: Railway PR stack review (read-only)
+
+on:
+  push:
+    branches:
+      - feat/railway-p15-w2-t04-stack-readiness
+      - feat/railway-p15-w3-t01-independent-history
+      - review/railway-p15-w3-t05-integration
+  pull_request:
+    paths:
+      - 'scripts/check-railway-pr-stack.mjs'
+      - 'tests/railway-pr-stack.test.ts'
+      - 'docs/RAILWAY_PR_STACK_MIGRATION.md'
+      - 'docs/RAILWAY_RELEASE_GATES.md'
+      - 'docs/RAILWAY_SOURCE_PROVENANCE.md'
+      - 'src/**'
+      - 'package*.json'
+      - 'Dockerfile.railway'
+      - '.github/workflows/railway-pr-stack-review.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Stack checker unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26.13.0'
+          cache: npm
+      - run: npm ci
+      - name: Verify script syntax and help (no network or Git mutation)
+        run: |
+          node --check scripts/check-railway-pr-stack.mjs
+          node scripts/check-railway-pr-stack.mjs --help
+      - name: Typecheck and TypeScript lint
+        run: |
+          npm run typecheck
+          npm run lint
+      - name: Incremental ESLint/Prettier quality gate
+        env:
+          QUALITY_BASE_REF: 2011a0745a36c625aa7f69de7a1b0a6c929313ee
+        run: npm run quality:check
+      - name: Run isolated synthetic Git ancestry tests
+        run: |
+          npm run build
+          node --test dist/tests/railway-pr-stack.test.js
+
+  live-ancestry-guard:
+    name: Verify independent W3 head and original stacked PR15
+    if: >-
+      github.head_ref == 'feat/railway-p15-w3-t01-independent-history' ||
+      github.ref_name == 'feat/railway-p15-w3-t01-independent-history' ||
+      github.head_ref == 'review/railway-p15-w3-t05-integration' ||
+      github.ref_name == 'review/railway-p15-w3-t05-integration'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Read-only network refresh of comparison refs
+        run: |
+          git fetch --no-tags origin \
+            '+refs/heads/refactor/typescript-ts6:refs/remotes/origin/refactor/typescript-ts6' \
+            '+refs/heads/feature/vercel-selfhost-20261112:refs/remotes/origin/feature/vercel-selfhost-20261112' \
+            '+refs/heads/feature/railway-sqlite-oneclick-20261112:refs/remotes/origin/feature/railway-sqlite-oneclick-20261112'
+      - name: Confirm independent W3 candidate against pinned TS6 and Vercel refs
+        run: |
+          set -euo pipefail
+          node scripts/check-railway-pr-stack.mjs \
+            --base origin/refactor/typescript-ts6 \
+            --vercel origin/feature/vercel-selfhost-20261112 \
+            --railway HEAD --expect-base-sha 2011a0745a36c625aa7f69de7a1b0a6c929313ee \
+            --expect-vercel-sha fd99667a3dfbdf4ccdf9ccda4b612f819dd1e275 \
+            --expect-railway-sha "$(git rev-parse HEAD)" --json --strict
+      - name: Require original PR15 to remain BLOCKED_STACKED
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          output=$(node scripts/check-railway-pr-stack.mjs \
+            --base origin/refactor/typescript-ts6 \
+            --vercel origin/feature/vercel-selfhost-20261112 \
+            --railway origin/feature/railway-sqlite-oneclick-20261112 \
+            --expect-base-sha 2011a0745a36c625aa7f69de7a1b0a6c929313ee \
+            --expect-vercel-sha fd99667a3dfbdf4ccdf9ccda4b612f819dd1e275 \
+            --expect-railway-sha d5c08de9c8b982143350bdd4419af1e4fe98df7e \
+            --json --strict)
+          code=$?
+          set -e
+          printf '%s\n' "$output" | node -e '
+            let data = "";
+            process.stdin.on("data", (chunk) => { data += chunk; });
+            process.stdin.on("end", () => {
+              const report = JSON.parse(data);
+              if (report.status !== "BLOCKED_STACKED" || report.ancestry.vercelIsAncestor !== true) process.exit(1);
+              console.log("Verified original PR15 remains BLOCKED_STACKED");
+            });
+          '
+          test "$code" -eq 2
+
+# Read-only checks: candidate PASS_INDEPENDENT, original PR15 BLOCKED_STACKED.
+# These checks certify ancestry only, not release, secrets, cost or production deployment.
