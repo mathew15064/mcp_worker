@@ -8,6 +8,10 @@ PINNED_SHA="ae588a1a56f2561ca2323457463e5b9e203de509"
 CURRENT_BRANCH="$(git -C "$ROOT" branch --show-current)"
 
 die() { printf 'LOCAL_VERIFY_REFUSED: %s\n' "$1" >&2; exit 2; }
+# Reject actual CI invocation before later tests receive a minimal synthetic
+# environment. Never treat a CI marker set to "false" as authorization.
+[[ -z "${CI:-}" && -z "${GITHUB_ACTIONS:-}" ]] ||
+  die "CI/GitHub Actions environment is forbidden; use the owner PC interactively"
 command -v git >/dev/null 2>&1 || die "git is required"
 # Branch AND canonical worktree path are a fixed allowlist, not a user-supplied
 # wildcard or environment override. The original/shared base, staging, and
@@ -360,7 +364,7 @@ if (( docker_ok )) && (( npm_ok )) && (( build_ok )); then
   run railway_docker_isolation 1200 'disposable volumes; backup/restore; read-only denial' \
     env W3_SANDBOX_ONLY=1 bash scripts/verify-railway-docker-isolation.sh "$IMAGE" || true
   run railway_offsite_encrypted 900 'five disposable PC volumes and authenticated AES-GCM/HMAC restore; remote backup NOT_TESTED' \
-    env T04_LOCAL_TEST_ONLY=1 bash scripts/test-t4-offsite-docker.sh "$IMAGE" || true
+    env -u CI T04_LOCAL_TEST_ONLY=1 bash scripts/test-t4-offsite-docker.sh "$IMAGE" || true
 else
   omit railway_oci_provenance SKIP 'requires freshly built local Docker image and committed source'
   omit railway_docker_config SKIP 'requires freshly built local Docker image and compiled tests'
