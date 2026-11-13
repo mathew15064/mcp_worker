@@ -332,8 +332,8 @@ if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
   omit docker_local_build SKIP 'Docker CLI/daemon unavailable'
   docker_ok=0
 elif [[ "$DOCKER_MODE" == offline ]] && (
-  ! docker image inspect 'node:26.13.0-alpine@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216' >/dev/null 2>&1 ||
-  ! docker image inspect 'golang:1.26.10-alpine@sha256:87c65a688975c0b1d4585d204874c45ca78354670e3a5f11368c5a492303d696' >/dev/null 2>&1
+  ! docker image inspect 'node:22.22.3-alpine@sha256:e58326d0d441090181ac150dc2078d3e2cf6a0d42e809aebba3ef5880935ffdd' >/dev/null 2>&1 ||
+  ! docker image inspect 'golang:1.24@sha256:d2d2bc1c84f7e60d7d2438a3836ae7d0c847f4888464e7ec9ba3a1339a1ee804' >/dev/null 2>&1
 ); then
   omit docker_local_build SKIP 'pinned Docker images not cached; use explicitly authorized online mode if appropriate'
   docker_ok=0
@@ -341,7 +341,10 @@ else
   build_args=(--pull=false)
   if [[ "$DOCKER_MODE" == offline ]]; then build_args+=(--network=none); fi
   if run docker_local_build 1200 "Local Docker build ($DOCKER_MODE); never deploy" \
-    docker build "${build_args[@]}" -f Dockerfile.railway -t "$IMAGE" .; then
+    docker build "${build_args[@]}" \
+      --build-arg "BOT_REPORT_GIT_SHA=$HEAD_SHA" \
+      --build-arg "BOT_REPORT_BUILD_TIME=$(git -C "$ROOT" show -s --format=%cI "$HEAD_SHA")" \
+      -f Dockerfile.railway -t "$IMAGE" .; then
     docker_ok=1
   else
     docker_ok=0
