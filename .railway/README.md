@@ -1,136 +1,82 @@
-# Railway W3-T03: one-click template readiness (REVIEW ONLY / NO-GO)
+# Railway T3 — PC-only candidate infrastructure (REVIEW ONLY)
 
-The authoring entrypoint is `.railway/railway.ts`. It describes exactly **one
-Node service, one persistent SQLite volume** at `/app/data` and **one replica**.
-No Neon, Upstash, PostgreSQL, Redis, MySQL or second service is required.
+This directory defines **one** GitHub-source Node service, **one** 512 MB SQLite
+persistent volume mounted at `/app/data`, and **one** replica in `us-west2`.
+`Dockerfile.railway` exposes the internal port 80, probes `/healthz` and
+drops privileges from a root-only volume initializer to Node UID 1000.
+No MySQL, PostgreSQL, Redis, Neon or Upstash resource is provisioned.
 
-**NOT DEPLOYABLE / NOT PUBLISHED.** The SDK source now pins the complete Wave 2
-integration snapshot (`review/railway-p15-w2-t05-integration` at
-`1d617c9abfaaea8b9feae32da269124d5e3d8fd2`), replacing the obsolete
-pre-integration `e7de57a` source. This is only a reproducible **review pin**, not
-an owner-approved release. The pinned commit does not contain W3-T03 changes;
-do not deploy from it or promote this branch as a release. Before real use,
-the owner must approve a final commit containing all accepted code, select its
-approved source/ref, and independently validate that exact commit.
+## Source pin is deliberately fail-closed
 
-## SDK and read-only verification
+`.railway/railway.ts` pins the exact local review baseline
+`9a817baabdaeb6a019083252dac6ca5077257474` by **commit SHA** and the SDK's explicit `main` branch. This branch's
+reachability to the candidate SHA is **UNVERIFIED**. This replaces the older Wave 2 review pin
+`1d617c9abfaaea8b9feae32da269124d5e3d8fd2`, **not** by declaring a
+release. GitHub reachability and independent release ancestry are NOT_TESTED.
+The branch must not override the explicit commit SHA; no env override is accepted.
+The IaC program rejects every context except `command: 'plan'` with
+`RAILWAY_REVIEW_ONLY`; SDK tests verify the rejection of `apply`, `deploy`,
+`template`, blank/unknown commands. **Do not attempt live apply or publish.**
+That guard is defense-in-depth in the IaC code, not permission to use Railway's
+UI or CLI to deploy the unapproved source by another path.
 
-- Pinned authoring package: `railway@3.12.0`; CLI must be >= 5.42.1
-  (upgrade to the current compatible CLI before use).
-- Reproducible SDK installation: `npm ci --prefix .railway` (committed lockfile).
-  Validate with the **real** `railway@3.12.0` SDK:
-  `./.railway/node_modules/.bin/tsx .railway/validate.ts`, and type-check using
-  `npx tsc --noEmit --skipLibCheck --module NodeNext --moduleResolution NodeNext --target ES2022 --allowImportingTsExtensions .railway/railway.ts .railway/validate.ts`.
-  The SDK checks a real authored graph; this is **not a linked CLI plan**.
-- Offline source tests: `npm run build && node --test dist/tests/railway-platform-config.test.js`.
-  Source-only assertions run in the checkout. The release image instead checks
-  its runtime packaging and does not embed these authoring inputs.
-- Optional isolated Docker integration gate (requires local Docker daemon):
-  `RAILWAY_DOCKER_INTEGRATION=1 npm run test`. Tests use disposable Docker
-  volumes/containers and remove them at exit. Do not run on production hosts.
-- In a separately owner-approved **new linked sandbox Railway environment**,
-  install the pinned SDK with `npm ci --prefix .railway` and run
-  `railway config plan --json`; inspect service, volume and variables before
-  approval. The plan is read-only but needs a linked Railway environment.
-- **CLI_PLAN_BLOCKED:** there is no verified owner-approved linked Railway
-  sandbox, so `railway config plan` was **not** executed. SDK graph validation
-  is offline only and cannot prove a live Railway volume/domain configuration.
-  Never run `railway config apply`, create paid resources, deploy to production,
-  or publish a Template as part of W3-T03.
+Only after explicit owner approval: replace the review-only pin with the
+**complete approved source commit**, confirm that GitHub can actually resolve
+it, review the changes to the deny guard, check independent integration and
+versioned Worker trust, then validate the exact release again. Approval is
+**not** granted by a successful local test.
 
-## Owner handoff: manual steps after separate release approval
+## Reproducible offline SDK verification on PC
 
-These are instructions for a **future owner-approved test instance**, not actions
-performed by this task. The current IaC alone is not a public template.
+From the root of this isolated worktree:
 
-1. **Approve source and cost first:** select the complete final release SHA and
-   permitted GitHub ref, verify all CI/release/signing gates and explicitly
-   authorize any sandbox, compute and volume billing. Do not use the review pin
-   for a live deployment.
-2. **Compose resources:** exactly one GitHub-sourced Node app with
-   `Dockerfile.railway`, one persistent volume mounted at `/app/data`, and
-   **one replica** in a single region. Set `DATABASE_PATH` to
-   `/app/data/bot_report.sqlite`, `MCP_PLATFORM=railway`, `PORT=80`,
-   `HOST=0.0.0.0`, `RAILWAY_RUN_UID=0`,
-   `RAILWAY_DEPLOYMENT_OVERLAP_SECONDS=0`, and the healthcheck `/healthz`.
-   Configure on-failure restart (10 retries). No external DB/cache is needed.
-3. **Save a setup secret before first startup:** locally generate a unique
-   32-byte base64url value with
-   `node -p "require('node:crypto').randomBytes(32).toString('base64url')"`.
-   Store it in the owner's password manager, then configure the private
-   `MCP_SETUP_SECRET` service variable. `preserve()` keeps an existing value;
-   it does **not** auto-generate an owner-recoverable secret. Never store this
-   key in a URL, Git commit, CI artifact, public template or chat.
-4. **Configure the origin:** enable Railway Public Networking and generate an
-   HTTPS hostname; Railway injects `RAILWAY_PUBLIC_DOMAIN` for that service.
-   For a DNS/TLS-verified custom host, instead set
-   `MCP_PUBLIC_BASE_URL=https://your-host.example` (origin only; no path,
-   port, query, credentials or whitespace). Confirm hostname/TLS before
-   issuing OAuth client redirect URIs or enrolling Workers.
-5. **Claim and validate:** visit `https://YOUR-HOST/setup`, enter the saved
-   setup key and a **different** Admin password (14+ characters), then log in
-   to the Admin Dashboard. Create an OAuth client with S256 PKCE and verify
-   HTTPS issuer and callbacks. After separately approving a signed Go Worker
-   release, verify outbound WSS enrollment and a benign MCP invocation.
+```sh
+npm ci --prefix .railway
+./.railway/node_modules/.bin/tsx .railway/validate.ts
+npx --no-install tsc --noEmit --skipLibCheck --module NodeNext --moduleResolution NodeNext --target ES2022 --allowImportingTsExtensions .railway/railway.ts .railway/validate.ts
+npm run build
+node --test dist/tests/railway-platform-config.test.js
+./scripts/test-railway-local.sh
+```
 
-**Readiness semantics:** `/healthz` is an internal liveness check. `/readyz`
-returns 503 until persistent SQLite, canonical origin and owner setup are
-complete; do not use it as the pre-setup Railway deployment healthcheck.
-The container must refuse ephemeral/forged mounts, then drop from a
-root-only volume initializer to UID 1000 for Node. Volume attach occurs at
-runtime, not Docker build or pre-deploy.
+SDK `railway@3.12.0` is locked. The first command installs dependencies
+on the local PC; the graph evaluation and validation run without Railway
+credentials or any Railway API calls. The `tsx` command executes the **real**
+Railway SDK, not only a mocked TypeScript parse. `test-railway-local.sh`
+builds locally and exercises disposable Docker resources named `mcp-t3-*`.
+An already-built image may be supplied as its first argument to skip rebuild.
+Test script cleanup targets **only** its own named container and volume. No
+Docker-wide prune, global cleanup or production resource access is allowed.
 
-**Owner secret recovery:** retain the original `MCP_SETUP_SECRET` for the
-lifetime of the instance: it derives the session and encrypted settings keys.
-If Railway variables are lost, re-enter **the same original secret** from
-the password manager and restore a validated off-volume SQLite backup.
-Rotating it in place can invalidate sessions and make existing encrypted
-settings unreadable. If the original secret is irretrievable, no documented
-safe recovery of existing encrypted data exists; do not silently replace it.
-Only an explicitly approved fresh instance/data reset is an alternative.
+`MCP_SETUP_SECRET: preserve()` never creates an operator-recoverable value.
+The owner must create and privately retain a unique 32-byte base64url value.
+The container rejects an absent or malformed secret; the setup flow relies
+on the same key to derive session and encrypted-settings secrets. Do not rotate
+the original value without a separate data migration/recovery procedure.
+Never print this value in logs, publish it, or set a Template default.
 
-**Hostname change:** update the custom origin and verified DNS/TLS together;
-reconcile OAuth redirect URIs and Worker WSS endpoints. Do not trust incoming
-Host or forwarded-host headers as canonical external origins.
+## Public HTTPS is a separately verified owner action
 
-The Dockerfile path is selected through the documented Railway service variable
-`RAILWAY_DOCKERFILE_PATH=Dockerfile.railway`; it is not a service `build`
-command. `PORT=80` matches both Node and the healthcheck. The script checks
-the actual Linux mount table, symlinks and the node user's write access before
-starting; a plain ephemeral `/app/data` or forged volume environment variables
-cannot satisfy the mount guard.
+The IaC intentionally **does not invent** a `*.up.railway.app` hostname:
+Railway assigns service-specific public domains at deployment time.
+After **separate** live approval, enable **Public Networking -> Generate Domain**
+on the one app service and confirm TLS/HTTPS and
+`RAILWAY_PUBLIC_DOMAIN`. For a verified custom host, provide a strict
+`MCP_PUBLIC_BASE_URL=https://owner-host`; do not trust the incoming Host
+header for OAuth origins. The internal container HTTP listener is not a
+public HTTPS certificate. A locally faked hostname tests origin parsing only.
 
-Railway mounts volumes only at runtime, not at build/pre-deploy. Do not migrate
-existing production SQLite files. Volume-backed services have single-instance
-availability and potential redeploy downtime. Back up off-volume, test restore
-and confirm pricing and Railway's template-composer settings separately.
+The application uses `/healthz` for deploy liveness (200) and `/readyz`
+for full setup readiness (503 before owner claim). SQLite data, WAL and SHM
+must stay inside one mounted `/app/data`. Runtime checks reject ephemeral
+mounts, unsafe SQLite path types and read-only mounts. Single-replica volume
+deployments can briefly interrupt sessions/Worker WSS, and off-volume backup
+and restore must be validated before production.
 
-## Template readiness decision — NOT PUBLISHED
+**NOT_TESTED / not permitted in T3:** linked Railway `config plan`,
+`config apply`, paid project/service/volume, live HTTPS domain, OAuth/WSS
+networking, public Template publication, signed Worker release and full
+off-volume restore on Railway. No GitHub Actions/CI, push, merge or deploy.
 
-A future Railway template composer must reproduce the verified service,
-runtime Dockerfile, `/app/data` volume, exactly one replica, healthcheck,
-restart policy, required owner-recoverable secret, public HTTPS networking
-and owner instructions above. The template must **not** add a managed DB,
-Redis, Neon, Upstash, a second service or an unrecoverable generated key.
-
-Remaining manual inputs after an approved template exists: **(1)** owner
-reviews/bears service and volume cost, **(2)** owner securely supplies/retains
-`MCP_SETUP_SECRET`, **(3)** owner enables/verifies the public Railway or custom
-HTTPS hostname, and **(4)** owner claims `/setup` and configures OAuth/Worker.
-These are real steps; this is not yet one-click-and-done.
-
-**Publication blockers:** no approved final SHA/ref; PR #25 and its stacked
-PR ancestry remain draft/review-only; no linked owner-approved sandbox
-(`CLI_PLAN_BLOCKED`); no paid Railway project, real Railway volume or live
-public HTTPS/WSS verification; signed Worker trust/release remains gated;
-no live independent-instance isolation, off-volume recovery and billing
-acceptance. Offline SDK, local Docker and CI successes do not clear them.
-
-**Safety:** no `railway config apply`, public template publication, live
-provisioning or production deployment has been carried out in W3-T03.
-
-Official references:
-- https://docs.railway.com/infrastructure-as-code/reference
-- https://docs.railway.com/builds/dockerfiles
-- https://docs.railway.com/volumes
-- https://docs.railway.com/templates/create
+See [owner quickstart](../docs/RAILWAY_QUICKSTART.md) for the target
+three-step UI experience once a release is approved.

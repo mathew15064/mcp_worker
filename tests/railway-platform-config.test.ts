@@ -26,7 +26,8 @@ if (hasSourceFixtures) {
   void test('offline Railway IaC graph contains only one service and one attached volume', () => {
     const source = read('.railway/railway.ts');
     const helpers = {
-      defineRailway: (factory: () => RailwayProject) => factory(),
+      defineRailway: (factory: (ctx: { command: string }) => RailwayProject) =>
+        factory({ command: 'plan' }),
       github: (repo: string, config: Record<string, unknown>) => ({ repo, ...config }),
       preserve: () => ({ preserved: true }),
       project: (name: string, config: { resources: Resource[] }) => ({
@@ -84,13 +85,29 @@ if (hasSourceFixtures) {
     assert.equal((env.MCP_SETUP_SECRET as { preserved: boolean }).preserved, true);
     assert.equal(
       (service.config.source as { commitSha: string }).commitSha,
-      '1d617c9abfaaea8b9feae32da269124d5e3d8fd2',
+      '9a817baabdaeb6a019083252dac6ca5077257474',
     );
-    assert.equal(
-      (service.config.source as { branch: string }).branch,
-      'review/railway-p15-w2-t05-integration',
-    );
+    assert.equal((service.config.source as { branch?: string }).branch, 'main');
+    assert.equal(service.config.domains, undefined, 'do not pretend a public HTTPS domain exists');
     assert.doesNotMatch(body, /\b(?:postgres|mysql|redis|mongo|upstash|neon)\s*\(/i);
+    // Evaluate the actual IaC body with an apply context: refusal must occur
+    // before constructing a potentially deployable graph.
+    const deniedHelpers = {
+      ...helpers,
+      defineRailway: (factory: (ctx: { command: string }) => RailwayProject) =>
+        factory({ command: 'apply' }),
+    };
+    assert.throws(
+      () =>
+        vm.runInNewContext(
+          'const { defineRailway, github, preserve, project, service, volume } = helpers;\n' +
+            body +
+            '\nresult;',
+          { helpers: deniedHelpers },
+          { timeout: 1000 },
+        ),
+      /RAILWAY_REVIEW_ONLY/,
+    );
   });
 
   void test('entrypoint checks mounted storage, SQLite links, node writes and privilege drop', () => {

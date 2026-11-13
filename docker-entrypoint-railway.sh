@@ -11,6 +11,17 @@ fi
 if [ "${DATABASE_PATH:-}" != /app/data/bot_report.sqlite ]; then
   echo '[RAILWAY_BOOT] Database must be stored on /app/data volume.' >&2; exit 1
 fi
+# Never fall back to a predictable/session-breaking ephemeral owner secret.
+# Match the application contract, and never print the secret or its value.
+setup_secret="${MCP_SETUP_SECRET:-}"
+if [ "${#setup_secret}" -lt 43 ]; then
+  echo '[RAILWAY_BOOT] A saved 43+ character base64url MCP_SETUP_SECRET is required.' >&2; exit 1
+fi
+case "$setup_secret" in
+  *[!A-Za-z0-9_-]*)
+    echo '[RAILWAY_BOOT] MCP_SETUP_SECRET must be base64url.' >&2; exit 1 ;;
+esac
+unset setup_secret
 if [ "$(id -u)" -ne 0 ]; then
   echo '[RAILWAY_BOOT] Volume initializer must start as root.' >&2; exit 1
 fi
