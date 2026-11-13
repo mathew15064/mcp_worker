@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { pipeline } from 'node:stream/promises';
 import Database from 'better-sqlite3';
 
 const SCHEMA = '2026-11-12-initial';
@@ -56,6 +57,71 @@ function validateDatabase(db: Database.Database): string {
     throw new Error('Refusing export of unclaimed owner database');
   }
   return versions[0].version;
+}
+
+function encryptionKey(dataVolume: string, exportDir: string): Buffer | undefined {
+  const provided = process.env.BACKUP_ENCRYPTION_KEY_FILE;
+  if (!provided) return undefined;
+  const file = path.resolve(provided);
+  if (!fs.existsSync(file)) throw new Error('Encryption key file is missing');
+  const info = fs.lstatSync(file);
+  if (
+    !info.isFile() ||
+    info.isSymbolicLink() ||
+    fs.realpathSync(file) !== file ||
+    (info.mode & 0o077) !== 0 ||
+    contained(file, dataVolume) ||
+    contained(file, exportDir)
+  ) {
+    throw new Error(
+      'Encryption key must be a private regular file outside data and export volumes',
+    );
+  }
+  const key = fs.readFileSync(file);
+  if (key.length !== 32) throw new Error('Encryption key must be exactly 32 raw bytes');
+  return key;
+}
+
+function encryptionStagingDir(dataVolume: string, exportDir: string): string {
+  const value = process.env.BACKUP_STAGING_DIR;
+  if (!value)
+    throw new Error('Encrypted export requires an explicit private tmpfs BACKUP_STAGING_DIR');
+  const dir = path.resolve(value);
+  if (!fs.existsSync(dir)) throw new Error('Encrypted staging directory does not exist');
+  const info = fs.lstatSync(dir);
+  if (
+    !info.isDirectory() ||
+    info.isSymbolicLink() ||
+    fs.realpathSync(dir) !== dir ||
+    (info.mode & 0o077) !== 0 ||
+    contained(dir, dataVolume) ||
+    contained(dir, exportDir) ||
+    contained(dataVolume, dir) ||
+    contained(exportDir, dir) ||
+    fs.statfsSync(dir).type !== 0x01021994 ||
+    mountId(dir) === mountId(dataVolume) ||
+    mountId(dir) === mountId(exportDir)
+  ) {
+    throw new Error(
+      'Encrypted staging must be a private tmpfs directory apart from database/export',
+    );
+  }
+  return dir;
+}
+
+async function encryptSnapshot(source: string, destination: string, key: Buffer) {
+  const nonce = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce);
+  await pipeline(
+    fs.createReadStream(source),
+    cipher,
+    fs.createWriteStream(destination, { flags: 'wx', mode: 0o600 }),
+  );
+  return {
+    algorithm: 'aes-256-gcm',
+    nonce: nonce.toString('hex'),
+    tag: cipher.getAuthTag().toString('hex'),
+  };
 }
 
 function sha256(file: string): string {
@@ -116,12 +182,15 @@ async function main(): Promise<void> {
     throw new Error('Export destination shares the SQLite data mount; refusing on-volume backup');
   }
 
+  const key = encryptionKey(dataVolume, exportDir);
+  const stagingDir = key ? encryptionStagingDir(dataVolume, exportDir) : exportDir;
   const name =
     'bot_report_mcp_' + new Date().toISOString().replace(/[:.]/g, '-') + '_' + crypto.randomUUID();
-  const finished = path.join(exportDir, name + '.sqlite');
+  const finished = path.join(exportDir, name + (key ? '.sqlite.enc' : '.sqlite'));
   const manifestPath = finished + '.manifest.json';
-  const staged = path.join(exportDir, '.' + name + '.partial.sqlite');
+  const staged = path.join(stagingDir, '.' + name + '.partial.sqlite');
   const manifestTmp = manifestPath + '.partial';
+  const encryptedTmp = path.join(exportDir, '.' + name + '.partial.enc');
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   // SQLite may create its .partial file before chmod: protect it from birth.
   const previousUmask = process.umask(0o077);
@@ -139,17 +208,22 @@ async function main(): Promise<void> {
     } finally {
       copy.close();
     }
-    const bytes = fs.statSync(staged).size;
-    const digest = sha256(staged);
+    const plaintextBytes = fs.statSync(staged).size;
+    const plaintextSha256 = sha256(staged);
+    const encryption = key ? await encryptSnapshot(staged, encryptedTmp, key) : undefined;
+    const finalizedFile = key ? encryptedTmp : staged;
+    const bytes = fs.statSync(finalizedFile).size;
+    const digest = sha256(finalizedFile);
     const manifest = {
-      format: 'bot-report-sqlite-backup-v1',
+      format: key ? 'bot-report-sqlite-backup-encrypted-v1' : 'bot-report-sqlite-backup-v1',
       file: path.basename(finished),
       sha256: digest,
       bytes,
       schemaVersion,
       createdAt: new Date().toISOString(),
+      ...(encryption ? { encryption, plaintextBytes, plaintextSha256 } : {}),
     };
-    fs.renameSync(staged, finished);
+    fs.renameSync(finalizedFile, finished);
     fs.writeFileSync(manifestTmp, JSON.stringify(manifest, null, 2) + '\n', {
       flag: 'wx',
       mode: 0o600,
@@ -158,19 +232,21 @@ async function main(): Promise<void> {
     completed = true;
     process.stdout.write(
       JSON.stringify({
-        status: 'BACKUP_EXPORTED_LOCAL',
+        status: key ? 'BACKUP_EXPORTED_ENCRYPTED_LOCAL' : 'BACKUP_EXPORTED_LOCAL',
         path: finished,
         manifest: manifestPath,
         sha256: digest,
         bytes,
         schema: schemaVersion,
         sameMountTestOverride: sameMount,
+        encrypted: Boolean(key),
       }) + '\n',
     );
   } finally {
     db.close();
     process.umask(previousUmask);
-    for (const file of [staged, manifestTmp]) {
+    if (key) key.fill(0);
+    for (const file of [staged, staged + '-wal', staged + '-shm', encryptedTmp, manifestTmp]) {
       if (fs.existsSync(file)) fs.rmSync(file);
     }
     if (!completed) {

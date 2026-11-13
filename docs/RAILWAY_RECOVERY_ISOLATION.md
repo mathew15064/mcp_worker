@@ -1,174 +1,84 @@
-# T4 — Railway SQLite local recovery and instance isolation
+# Railway One-Click SQLite recovery and instance isolation — T4 v1
 
-**Date:** 2026-11-13. **Pinned base:** 9a817baabdaeb6a019083252dac6ca5077257474.
-**Isolated branch:** work/quickstart-local-t04. **Execution:** Bot Report 2
-terminal profile PC; disposable local Node, Go and Docker fixtures.
+**Run:** RUN-RAILWAY-ONECLICK-FINAL-20261113T044633Z-4ac570e7
+**Snapshot:** v1 / 2026-11-13T04:46:33Z
+**Base:** `ae588a1a56f2561ca2323457463e5b9e203de509`
+**PC branch:** `work/railway-final-t4`
+**Status:** local encrypted fixture recovery and isolation tested; **remote encrypted storage, real Railway recovery and actual RPO/RTO NOT_TESTED**. This is not authorization to deploy or restore production.
 
-**Decision: LOCAL SANDBOX PASS for tested gates; live Railway NOT_TESTED;
-production release NO-GO.** No CI/CD, push, merge, deploy, production
-database, production secret or live Railway service was accessed.
+## Scope and security model
 
-## Findings and design
+Railway SQLite lives on one persistent app volume. Losing that volume loses all database records unless an independently held and usable backup exists. A second directory on the same volume, a local-only off-volume disk, or an unencrypted remote copy is **not** a demonstrated disaster-recovery solution. No script provisions storage, uploads a backup, reads a production key, stops Railway, changes live files, or restores onto an existing volume.
 
-### F-DR-01 — On-volume backup (fixed for local export)
+The SQLite exporter (`dist/scripts/backup-db.js`) uses the better-sqlite3 **online SQLite backup API**, not a raw copy of an open WAL database. It checks the claimed administrator, precise `2026-11-12-initial` schema and SQLite `quick_check` before and after snapshot. Export requires an explicit existing source path and destination on another Linux mount, rejecting symlinks, overlapping paths and same-mount destinations. In test mode the logical same-mount override is restricted to files beneath the OS temporary directory; it is never a durable backup.
 
-Previously scripts/backup-db.ts stored snapshots in a backups subdirectory
-beside DATABASE_PATH (normally the **same Railway data volume**) and called
-wal_checkpoint(TRUNCATE) before backing up. That neither protects against
-volume loss nor is needed by the SQLite online backup API; a forced checkpoint
-can also contend with concurrent WAL writers.
+A completed export includes a JSON manifest, which records file basename, SHA-256, size, schema version and timestamp. The manifest is a commit marker and is written last. Hashes prevent accidental mix-ups and corruption; **plain hashes are not signatures**. Encrypted bundles additionally use AES-256-GCM authentication. The exporter restricts files to 0600, temporary data to 0700 directories and cleans up snapshot/WAL/SHM sidecars. Aborted operations leave no complete manifest.
 
-The replacement CLI requires an explicit DATABASE_PATH and an **existing**
-BACKUP_EXPORT_DIR, with no dangerous in-volume fallback. It never automatically
-loads a .env file. A real source SQLite file and a real export directory are
-required; symlinks and export paths inside/containing the data volume are
-rejected. The Linux mount-ID check uses /proc/self/mountinfo to distinguish
-different mounts even when stat.dev is the same for bind mounts. If source
-and export resolve to the same mount, the command fails closed.
+## Encrypted export: approved test or separately authorized operation only
 
-The CLI validates PRAGMA quick_check, the exact version
-2026-11-12-initial from railway_schema_versions and the claimed owner
-bootstrap.admin_password_hash before and after taking a **consistent online
-better-sqlite3 backup**. It does not checkpoint/truncate the WAL or copy an
-open SQLite file. A unique snapshot is finalized with mode 0600 and a
-mode-0600 JSON manifest. The manifest records its basename, byte count,
-SHA-256, schema version and timestamp, but no owner hash, keys or secrets.
-The manifest is published last; a crash before this leaves an incomplete
-bundle which restore rejects. Handled errors remove incomplete artifacts.
+Encrypted export is opt-in and **requires a separate key file containing exactly 32 raw random bytes** (not a password, hex text or base64 text). The file must be a private 0600 regular file outside both the source data volume and export directory. Do not place it with the backup, in source control, in logs or in the manifest. Real key custody must be authorized, documented and held separately from the off-platform backup provider. Losing the key means ciphertext cannot be recovered.
 
-For Node-only integration fixtures on a single /tmp filesystem, the
-special override requires all of NODE_ENV=test,
-BACKUP_ALLOW_LOGICAL_VOLUME_TEST_ONLY=1, and **both** paths beneath the OS
-temporary directory. It bypasses only the same-mount check, not the
-source-volume path separation; the CLI reports sameMountTestOverride=true.
-This is **not** an operational backup option. Docker tests run using a real
-separate /app/data mount and off-mount /tmp with no override.
+It also requires a private 0700 **Linux tmpfs staging directory** named `BACKUP_STAGING_DIR`, outside both source and export mounts. The SQLite online snapshot is first assembled in this memory-backed location, then streamed through AES-256-GCM to `BACKUP_EXPORT_DIR`; the temporary SQLite file and any WAL/SHM sidecars are unlinked. The exporter verifies integrity/schema before encryption and stores ciphertext SHA-256, plaintext SHA-256, byte counts, a unique 96-bit nonce and authentication tag in the adjacent manifest. The key is never output. `BACKUP_STAGING_DIR` must have enough RAM/tmpfs capacity for the complete database; otherwise export should fail rather than fall back to plaintext disk. Tmpfs can still be subject to host memory/swap policies; operator approval must assess that environment. No plaintext backup is sent to the destination in encrypted mode.
 
-**A completed off-mount snapshot is still only on the local machine.**
-The command does not implement remote encrypted object storage, authentication,
-versioned retention or off-platform retrieval. An operator must export and
-verify the closed snapshot and manifest using separately approved off-host
-transport before claiming disaster-recovery durability.
+On a **disposable PC test fixture with a separately mounted export directory**, the command pattern is:
 
-### F-DR-02 — Sandbox restore preflight (strengthened)
-
-scripts/verify-railway-offvolume-restore.cjs remains **test-only**, requiring
-W3_SANDBOX_ONLY=1, source/manifest beneath /tmp and a new empty real
-destination beneath /tmp. It never overwrites an existing database. Its
-refusal gates include missing source or manifest; symlinks; nonempty destination;
-incorrect manifest filename/format/size/hash/schema; damaged SQLite; failed
-PRAGMA quick_check; missing required tables; unsupported schema; and unclaimed
-owner. The script copies to a random staged file, rechecks bytes, SHA-256,
-schema, owner and row counts, then atomically publishes bot_report.sqlite.
-Failure leaves the destination empty.
-
-SHA-256 and the adjacent manifest defend against accidental corruption and
-mismatched copies; they are **not authenticated signatures**. An adversary
-who can alter both files could forge a different matching pair. Approved remote
-object storage must separately provide access controls, authenticated
-integrity, retrieval auditing and versioning.
-
-### F-DR-03 — Identity continuity
-
-A sandbox restore with the matching MCP_SETUP_SECRET keeps claimed-owner
-state, sessions, OAuth clients and Worker records. It survives a restart and
-accepts an unexpired correctly signed owner session. A second restored copy
-using a different secret rejects that session while retaining database records.
-Secret-dependent encrypted data is not proven recoverable without matching
-secret custody; ensure an approved, separately managed escrow procedure.
-
-### Independent self-hosted instances
-
-The Node integration suite starts **two different OS server processes**,
-two SQLite paths, secrets, ports and owner credentials. It rejects cross-instance
-owner setup keys and sessions, checks OAuth PKCE clients and access/refresh
-token families (including rotation), denies cross-instance Worker enrollment,
-Ed25519 signed WSS identity and broker dispatch, and enforces per-Worker
-capabilities and harmless command isolation across restarts. The Go E2E test
-builds and starts **two actual Go Worker processes** with independent homes,
-enrollment states and workspaces, checks separate WSS connections, OAuth
-commands, cross-use refusal and reconnect.
-
-The local Docker test runs two Node containers on independent named volumes
-with loopback-only ports and distinct setup secrets; its disposable databases
-receive **different synthetic fixture owner records**. It calls the actual
-backup-db CLI inside one container, copies both backup and manifest to an
-isolated host temporary directory, runs preflight restore, then boots a third
-volume with the restored data. It checks before/after backup markers, isolation
-after three restarts, and refusal of a read-only data mount. It cleans up only
-its own named disposable containers and volumes. No untrusted shell commands
-are executed; command probes use harmless printf fixtures.
-
-## Repeatable local command (PC only)
-
-From the isolated worktree, with no production DATABASE_PATH or
-RAILWAY_VOLUME_MOUNT_PATH environment variable set:
-
-~~~bash
-cd /root/mcp_worker_w4_t04_20261113
-T04_LOCAL_TEST_ONLY=1 bash scripts/test-recovery-local.sh
-~~~
-
-The script refuses CI, the wrong branch/base and preconfigured DB paths. It
-runs npm ci, lint, typecheck, build, Node recovery/isolation integration,
-full two-Worker Go integration, a locally built Docker image and Docker
-restore/isolation checks. It requires local Node, npm, OpenSSL, Go toolchain
-support for Go 1.24 modules (GOTOOLCHAIN=auto may obtain a newer toolchain),
-a Docker daemon and network/cache access to dependencies. The optional
-T04_SKIP_DOCKER=1 is only for **partial** investigations, not full PASS.
-The only permitted image tag is t04-railway-sandbox:local. No commands invoke
-GitHub Actions, Railway deployment or production databases.
-
-For a separately mounted **disposable** local database already claimed by
-its test owner, an illustrative export is:
-
-~~~bash
-DATABASE_PATH=/tmp/disposable-volume/bot_report.sqlite \
-RAILWAY_VOLUME_MOUNT_PATH=/tmp/disposable-volume \
-BACKUP_EXPORT_DIR=/mnt/separate-disposable-export \
+```sh
+umask 077
+# Example paths are placeholders for disposable local fixtures, NOT production paths.
+mkdir -m 700 /dev/shm/t4-fixture-stage
+mkdir -m 700 /mnt/independent-fixture-export
+mkdir -m 700 /tmp/t4-fixture-keys
+openssl rand -out /tmp/t4-fixture-keys/backup.key 32
+chmod 600 /tmp/t4-fixture-keys/backup.key
+DATABASE_PATH=/tmp/fixture-data/bot_report.sqlite \
+RAILWAY_VOLUME_MOUNT_PATH=/tmp/fixture-data \
+BACKUP_EXPORT_DIR=/mnt/independent-fixture-export \
+BACKUP_STAGING_DIR=/dev/shm/t4-fixture-stage \
+BACKUP_ENCRYPTION_KEY_FILE=/tmp/t4-fixture-keys/backup.key \
   node dist/scripts/backup-db.js
+```
 
-# The completed snapshot must have its adjacent .manifest.json file:
-W3_SANDBOX_ONLY=1 node scripts/verify-railway-offvolume-restore.cjs \
-  /tmp/disposable-export/snapshot.sqlite /tmp/new-empty-disposable-volume
-~~~
+**Important:** These directories must actually be on different mounts where required; the CLI rejects a fake distinct path on the same filesystem. Do not execute this example with a real Railway `DATABASE_PATH` without a separate owner-approved backup plan. If `BACKUP_ENCRYPTION_KEY_FILE` is absent, the legacy output is **plaintext** with status `BACKUP_EXPORTED_LOCAL`; never upload it as if encrypted. Encrypted status is `BACKUP_EXPORTED_ENCRYPTED_LOCAL`, not `REMOTE_BACKUP_CONFIRMED`.
 
-The snippets illustrate path requirements, not production commands. Never
-use a production database or real owner secret for this rehearsal.
+## Disposable decrypt and restore drill (not a production utility)
 
-## Local evidence (2026-11-13)
+The sandbox CLI `scripts/verify-railway-offvolume-restore.cjs` requires `W3_SANDBOX_ONLY=1`. It accepts only a source under the host OS temporary directory and a **different, existing, empty, real** temporary directory. It refuses symlinks, occupied targets, wrong or missing manifests, altered hashes, bad schema, missing owner, damaged SQLite and wrong keys. For encrypted snapshots, `W3_BACKUP_KEY_FILE` must reference the original private raw key, separately from the backup and destination. AEAD authentication and plaintext hash, SQLite `integrity_check` and schema are validated **before** the new `bot_report.sqlite` is published. It cannot overwrite a real or existing database, and never creates cloud resources.
 
-| Gate | Local PC status | Live Railway |
-| --- | --- | --- |
-| TypeScript build, two independent Node processes/databases | PASS | NOT_TESTED |
-| WAL-consistent online backup, before/after markers | PASS | NOT_TESTED |
-| SHA-256 manifest, quick_check, schema and claimed owner | PASS | NOT_TESTED |
-| Independent restore, restart, same/different secret policy | PASS | NOT_TESTED |
-| Missing, corrupt, altered hash, missing manifest, symlink, wrong schema, absent owner, occupied target refusal | PASS | NOT_TESTED |
-| Same-mount/on-volume export refusal, restricted fixture override | PASS | NOT_TESTED |
-| Session, OAuth, Worker identity/enrollment and command isolation | PASS — two Node processes | NOT_TESTED |
-| Two real Go Workers with separate state, WSS, reconnect | PASS | NOT_TESTED |
-| Docker export/preflight/restore, 3 volumes, 3 restarts, read-only failure | PASS | NOT_TESTED |
-| Read-only Node directory when running tests as root | SKIP — covered separately by Docker read-only mount | NOT_TESTED |
-| Off-host encrypted storage, retention, durable retrieval | NOT_TESTED | NOT_TESTED |
-| Actual Railway networking, public TLS, volume/project isolation | NOT_TESTED | NOT_TESTED |
-| Production data-loss recovery, RPO/RTO, rollback | NOT_TESTED | NOT_TESTED |
+```sh
+# Only for a fixture stored beneath /tmp; never pass a production path.
+mkdir -m 700 /tmp/t4-new-empty-fixture-volume
+W3_SANDBOX_ONLY=1 W3_BACKUP_KEY_FILE=/tmp/t4-fixture-keys/backup.key \
+  node scripts/verify-railway-offvolume-restore.cjs \
+  /tmp/t4-fixture-export/fixture.sqlite.enc /tmp/t4-new-empty-fixture-volume
+```
 
-Local Docker produced a single-run SHA-256 for a disposable snapshot.
-Its value is not a production backup, permanent recovery point or evidence
-of Railway durability. The fixtures' credentials and SQLite bytes are not
-committed or copied into test logs.
+The same preflight supports old **plaintext** fixture `.sqlite` bundles (no key). An encrypted file and its adjacent manifest are an inseparable recovery pair; do not rename either without an authorized manifest-handling procedure. The drill purposely does **not** implement production restore.
 
-## Risks and separately authorized live acceptance
+## Off-Railway protection and recovery ownership
 
-The remote encrypted backup transport, object-store identity, immutable
-retention, retrieval verification, owner/key custody, secure public WSS,
-real Railway mounted-volume identity, cost and long-term recovery RPO/RTO
-are **outside local T4 verification**. Later live work must use a separately
-authorized **nonproduction** Railway project, a real external encrypted
-object store and an isolated restore project, measure backup freshness and
-recovery time, and test approved rollback procedures without ever overwriting
-a mounted live SQLite file. A self-hosted SQLite volume should retain its
-single-writer constraints.
+Before claiming disaster readiness, the owner must separately approve and verify:
 
-**Release gate: live disaster recovery readiness is NOT_TESTED / NO-GO.**
+1. An independent off-Railway storage provider and account, remote access controls (least privilege), transport encryption, service credentials, access audit, and object versioning/immutability. A local volume or a Railway volume snapshot does not meet this requirement. Upload **only** the completed `.sqlite.enc` and its matching manifest after checksum verification; no automatic upload is enabled.
+2. An independently held backup encryption key and separately recoverable application secret material, including `MCP_SETUP_SECRET` and any other operational encryption/signing credentials required by the deployed version. Protect them in different failure domains, restrict access, record responsible custodians, and test recovery using synthetic substitutes. Database bytes alone cannot recover lost application secrets. Never put real keys in evidence or a Git repository.
+3. A funded retention/versioning plan with scheduled exports, integrity checks, tested decrypt-and-restore to a **new** isolated environment, alerting on misses, and explicit deletion/rotation policies. As an **illustrative policy, not an implemented service**, retain 7 daily, 4 weekly and 3 monthly authenticated encrypted recovery points; use provider immutability and verify expired versions are removed safely. Keep prior decryption keys while their snapshots remain retained.
+4. A separately approved restore decision: establish the last good encrypted snapshot and key, verify authentic remote retrieval, compare application/schema compatibility, provision a **new empty** volume and isolated application, recover secrets, run checks, confirm owner/OAuth/Worker identities, then permit traffic cutover only after owner approval. Never overwrite a mounted production DB, drop/delete a live Railway volume, or bring up a second active Worker using the same identity. Preserve rollback data.
+5. Perform an authorized **nonproduction** cross-host/cloud recovery drill, record backup age, retrieval/decryption duration, boot/service verification duration and return-to-service criteria. Only then may an owner set operational RPO/RTO targets based on measured results.
+
+**RPO:** NOT_MEASURED. A daily schedule would only be a *nominal* 24-hour maximum between successful exports, not a guaranteed RPO (missed uploads and failures increase exposure). **RTO:** NOT_MEASURED. Local fixture restoration time excludes provider retrieval, secret escrow, provisioning, DNS and approval delays. Neither value can be promised from PC tests.
+
+## Identity and independence verification
+
+The Node tests use different process instances, SQLite directories, owner credentials, OAuth PKCE clients/tokens, Ed25519 Worker enrollment and WSS keys, sessions and setup secrets. They refuse cross-instance login, tokens, Worker connections and dispatch, and preserve same-secret owner sessions through restart. SQLite snapshots retain owner, OAuth client, session and Worker *database records*; the associated running Worker private key/state remains machine-specific and must be recovered through its own approved procedure. A different `MCP_SETUP_SECRET` can reject old signed sessions even when the restored database records remain intact.
+
+The real Go WSS test uses two separately enrolled Go Workers, homes and workspaces with per-instance OAuth, command boundaries and reconnect. The disposable Docker exercise uses two original volumes plus a third restored volume, independent fixture owners, distinct setup secrets, loopback-only ports, pre/post-backup markers, restart isolation and a read-only volume refusal. The Docker exercise currently verifies **plaintext** off-volume restore; authenticated encrypted round-trip is verified by the separate Node fixture test. No live Railway, off-host storage, production credentials or production database is accessed.
+
+## Reproduce exactly on Bot Report 2 PC
+
+```sh
+cd /root/mcp_worker_railway_final_t4_20261113
+T04_LOCAL_TEST_ONLY=1 bash scripts/test-recovery-local.sh
+```
+
+The wrapper refuses CI, the wrong branch/base, preconfigured database/volume variables and non-disposable Docker image tags. It runs `npm ci`, local lint/typecheck/build, Node disaster recovery plus encryption and isolation, real Go Worker WSS isolation, and a Docker build + 3-volume restore test. Running as root skips the discretionary-permission read-only Node test; the Docker read-only mount test covers that denial separately. Cloud upload, remote encrypted retrieval, cloud restore, native Windows/macOS Worker acceptance and measured RPO/RTO remain **NOT_TESTED**.
+
+**Release readiness:** off-platform durability is not proven; **owner approval required for any live recovery**. Never translate a PC PASS into a live Railway PASS.

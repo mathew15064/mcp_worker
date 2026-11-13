@@ -1,41 +1,40 @@
 # Backup, restore and upgrade
 
-## Railway SQLite — explicit off-volume export (review candidate)
+## Railway One-Click SQLite — verified local export and encrypted recovery
 
-The Railway SQLite mode is different from the legacy MySQL/Compose procedure
-below. The `npm run backup-db` command now **refuses** an implicit default:
-set `DATABASE_PATH` and `BACKUP_EXPORT_DIR` explicitly. The export directory
-must already exist, must be a real non-symlink directory on a **different mount**
-from the live SQLite volume and must not contain/overlap the database path.
-Never write backups under `/app/data/backups` and never `cp` a live WAL database.
+**Scope:** The Railway SQLite path differs from the legacy MySQL/Compose instructions below. See [the T4 recovery and isolation runbook](RAILWAY_RECOVERY_ISOLATION.md) for the complete operator workflow, negative tests, separate key custody, retention and approval gates. This is NOT a production restore command.
 
-For an **approved, isolated test environment only**, prepare a separate
-mounted export directory and then run:
+`npm run backup-db` refuses implicit source or destination values: specify `DATABASE_PATH`, `RAILWAY_VOLUME_MOUNT_PATH` and `BACKUP_EXPORT_DIR` explicitly. The existing export directory must be a real non-symlink directory on a **different Linux mount** from the SQLite data volume. Never place snapshots in `/app/data/backups` or copy an active WAL database. SQLite's online backup API creates a consistent snapshot, validated against the claimed owner and supported schema; the completed snapshot and manifest include a SHA-256/byte-count check.
+
+The default **unencrypted** output is `*.sqlite` plus `*.sqlite.manifest.json`, with status `BACKUP_EXPORTED_LOCAL`. This is a local snapshot and **not protected remote storage**.
+
+An **encrypted export** additionally requires:
+
+- `BACKUP_ENCRYPTION_KEY_FILE`: an existing 0600 regular file with exactly 32 raw random bytes, stored apart from source and export. Do not commit or upload the key with the bundle.
+- `BACKUP_STAGING_DIR`: a private 0700 directory on Linux **tmpfs** outside both data and export mounts, with enough space for the database. This prevents the SQLite plaintext staging file from being written to persistent export disk; host swap and tmpfs operational security still require review.
+- The same explicit `DATABASE_PATH`, `RAILWAY_VOLUME_MOUNT_PATH` and separately mounted `BACKUP_EXPORT_DIR`.
+
+The encrypted output is `*.sqlite.enc` plus `*.sqlite.enc.manifest.json` with status `BACKUP_EXPORTED_ENCRYPTED_LOCAL`. It uses AES-256-GCM with a fresh random nonce per backup, authenticated tag, ciphertext SHA-256 and plaintext checksum. The key is not included. **Encrypted local export is not remote backup**: after a separate owner-approved plan, the operator must transport the completed bundle to independent off-Railway versioned storage and test retrieval. Never claim recovery without separately recoverable application secrets (including `MCP_SETUP_SECRET`) and the original encryption key.
+
+The local-only restore preflight is:
 
 ```sh
-DATABASE_PATH=/app/data/bot_report.sqlite \
-RAILWAY_VOLUME_MOUNT_PATH=/app/data \
-BACKUP_EXPORT_DIR=/mnt/separate-export \
-  npm run backup-db
+# Source and empty destination must both be disposable directories under /tmp.
+W3_SANDBOX_ONLY=1 W3_BACKUP_KEY_FILE=/tmp/fixture-key   node scripts/verify-railway-offvolume-restore.cjs   /tmp/export/fixture.sqlite.enc /tmp/new-empty-fixture-volume
 ```
 
-The SQLite online backup emits a completed `.sqlite` snapshot and `.manifest.json`
-with SHA-256, size and schema version. The snapshot and manifest are **not**
-automatically encrypted or uploaded to remote durable storage. Copy them only
-through an owner-approved encrypted and authenticated off-host procedure, retain
-the matching `MCP_SETUP_SECRET` separately and verify restore to a new isolated
-volume. The restore preflight in
-`docs/RAILWAY_RECOVERY_ISOLATION.md` is **sandbox-only**, never a production
-restore command. Local Docker recovery tests do not prove Railway disaster
-recovery or external backup durability. No Railway data has been backed up or
-restored as part of the integration review.
+It authenticates ciphertext and key, checks manifest/sha/schema/integrity/owner and publishes only into an empty sandbox target. It refuses overwrites, symlinks, missing keys, corrupt data or production paths. No supported production restore has been authorized or performed.
+
+**Remote durable storage/restore, cloud IAM, retention enforcement, key recovery, and measured RPO/RTO: NOT_TESTED.** Owner approval is required for any live export/recovery action.
+
+## Legacy MySQL / Compose (separate deployment type)
 
 Back up the installer env, application data, and MySQL data as one matched
 set. The env includes the encryption key that decrypts the bootstrap; losing
 it can make a healthy database unusable. Worker identity/config on each
 machine is separate; securely back up its Worker home and installation
 metadata before maintenance. Never copy an active identity onto two running
-machines. Browser sessions are in memory and are not restored.
+machines. Legacy Compose session handling differs from Railway: the Railway SQLite session table is captured, but an unexpired session remains usable only with matching signing secrets and application policy.
 
 The example below is a **cold backup** of the default standalone Linux
 installation using the already-built app image as a tar helper. Stop the

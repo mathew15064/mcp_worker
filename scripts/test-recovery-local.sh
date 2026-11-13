@@ -15,8 +15,8 @@ if [[ -n "${DATABASE_PATH:-}" || -n "${RAILWAY_VOLUME_MOUNT_PATH:-}" ]]; then
 fi
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$root"
-if [[ "$(git branch --show-current)" != "work/quickstart-local-t04" ]] ||
-   ! git merge-base --is-ancestor 9a817baabdaeb6a019083252dac6ca5077257474 HEAD; then
+if [[ "$(git branch --show-current)" != "work/railway-final-t4" ]] ||
+   ! git merge-base --is-ancestor ae588a1a56f2561ca2323457463e5b9e203de509 HEAD; then
   echo "Refused: use the isolated T4 worktree based on the pinned SHA" >&2
   exit 2
 fi
@@ -31,6 +31,7 @@ npm run build
 echo "T04_LOCAL_CHECK: two Node instances, WAL backup, restore and failure gates"
 node --test --test-concurrency=1 \
   dist/tests/railway-disaster-recovery.test.js \
+  dist/tests/railway-backup-encryption.test.js \
   dist/tests/railway-instance-isolation.test.js
 echo "T04_LOCAL_CHECK: two real Go workers, independent identities and command policy"
 BOT_REPORT_W3_T04_GO_E2E=1 \

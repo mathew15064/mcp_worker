@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { pipeline } = require('node:stream/promises');
 const Database = require('better-sqlite3');
 
 const SCHEMA = '2026-11-12-initial';
@@ -36,7 +37,10 @@ function metadata(file, manifestPath, expectedName = path.basename(file)) {
   let info;
   try { info = JSON.parse(fs.readFileSync(manifestPath, 'utf8')); }
   catch { fail('invalid backup manifest'); }
-  if (info.format !== 'bot-report-sqlite-backup-v1' ||
+  const encrypted = info.format === 'bot-report-sqlite-backup-encrypted-v1';
+  if (encrypted !== file.endsWith('.sqlite.enc'))
+    fail('manifest encryption mode and snapshot filename disagree');
+  if ((!encrypted && info.format !== 'bot-report-sqlite-backup-v1') ||
       info.file !== expectedName ||
       !/^[a-f0-9]{64}$/.test(info.sha256 || '') ||
       !Number.isSafeInteger(info.bytes) || info.bytes < 4096 ||
@@ -45,17 +49,24 @@ function metadata(file, manifestPath, expectedName = path.basename(file)) {
       !Number.isFinite(Date.parse(info.createdAt))) {
     fail('invalid or incompatible backup manifest');
   }
+  if (encrypted &&
+      (!info.encryption || info.encryption.algorithm !== 'aes-256-gcm' ||
+       !/^[a-f0-9]{24}$/.test(info.encryption.nonce || '') ||
+       !/^[a-f0-9]{32}$/.test(info.encryption.tag || '') ||
+       !Number.isSafeInteger(info.plaintextBytes) || info.plaintextBytes < 4096 ||
+       !/^[a-f0-9]{64}$/.test(info.plaintextSha256 || ''))) {
+    fail('invalid encrypted backup manifest');
+  }
   if (fs.statSync(file).size !== info.bytes || digest(file) !== info.sha256) {
     fail('SHA-256 or size mismatch; backup is corrupt or modified');
   }
   return info;
 }
-function verify(file, manifestPath = file + '.manifest.json', expectedName) {
-  const info = metadata(file, manifestPath, expectedName);
+function inspectSqlite(file) {
   let db;
   try {
     db = new Database(file, { readonly: true, fileMustExist: true });
-    if (db.pragma('quick_check', { simple: true }) !== 'ok') fail('quick_check not ok');
+    if (db.pragma('integrity_check', { simple: true }) !== 'ok') fail('integrity_check not ok');
     const tables = ['railway_schema_versions', 'system_settings', 'sessions',
       'mcp_oauth_clients', 'mcp_oauth_access_tokens', 'mcp_oauth_refresh_tokens', 'workers'];
     for (const table of tables) {
@@ -63,8 +74,8 @@ function verify(file, manifestPath = file + '.manifest.json', expectedName) {
         fail('missing required table: ' + table);
     }
     const versions = db.prepare('SELECT version FROM railway_schema_versions').all();
-    if (versions.length !== 1 || versions[0].version !== SCHEMA ||
-        versions[0].version !== info.schemaVersion) fail('unsupported schema version');
+    if (versions.length !== 1 || versions[0].version !== SCHEMA)
+      fail('unsupported schema version');
     const owner = db.prepare("SELECT value FROM system_settings WHERE key='bootstrap.admin_password_hash'").get();
     if (!owner || typeof owner.value !== 'string' || !/^\$2[aby]\$/.test(owner.value))
       fail('owner account is not claimed');
@@ -74,22 +85,40 @@ function verify(file, manifestPath = file + '.manifest.json', expectedName) {
       sessions: db.prepare('SELECT COUNT(*) AS n FROM sessions').get().n,
       clients: db.prepare('SELECT COUNT(*) AS n FROM mcp_oauth_clients').get().n,
       workers: db.prepare('SELECT COUNT(*) AS n FROM workers').get().n,
-      sha256: info.sha256,
-      bytes: info.bytes,
     };
   } catch (error) {
     if (error.message.startsWith('SANDBOX_RESTORE_REFUSED:')) throw error;
     fail('invalid SQLite content or incompatible schema');
   } finally { if (db) db.close(); }
 }
-function restore(source, volume) {
+function verify(file, manifestPath = file + '.manifest.json', expectedName) {
+  const info = metadata(file, manifestPath, expectedName);
+  if (info.format !== 'bot-report-sqlite-backup-v1')
+    fail('encrypted file requires authenticated sandbox decryption');
+  const checked = inspectSqlite(file);
+  if (checked.schema !== info.schemaVersion) fail('manifest schema mismatch');
+  return { ...checked, sha256: info.sha256, bytes: info.bytes };
+}
+function loadPrivateKey(source, destination) {
+  const provided = process.env.W3_BACKUP_KEY_FILE;
+  if (!provided) fail('W3_BACKUP_KEY_FILE required for encrypted restore');
+  const file = path.resolve(provided);
+  regular(file);
+  if ((fs.statSync(file).mode & 0o077) !== 0 ||
+      inside(file, path.dirname(source)) || inside(file, destination))
+    fail('key must be private and separate from backup and destination');
+  const key = fs.readFileSync(file);
+  if (key.length !== 32) fail('decryption key must contain 32 raw bytes');
+  return key;
+}
+async function restore(source, volume) {
   if (process.env.W3_SANDBOX_ONLY !== '1') fail('explicit W3_SANDBOX_ONLY=1 required');
   if (!source || !volume) fail('usage: SOURCE_BACKUP NEW_EMPTY_SANDBOX_VOLUME');
   const tmp = fs.realpathSync(os.tmpdir());
   const src = path.resolve(source);
   const target = path.resolve(volume);
   if (!inside(src, tmp) || !inside(target, tmp) || src === target ||
-      inside(src, target)) {
+      inside(src, target) || inside(target, src)) {
     fail('source and target must be separate sandbox locations under OS temp root');
   }
   if (!fs.existsSync(src)) fail('source backup missing');
@@ -100,27 +129,65 @@ function restore(source, volume) {
     fail('destination must be an existing empty real sandbox directory');
   }
   const manifest = src + '.manifest.json';
-  const evidence = verify(src, manifest);
+  const info = metadata(src, manifest);
+  const encrypted = info.format === 'bot-report-sqlite-backup-encrypted-v1';
   const output = path.join(target, 'bot_report.sqlite');
   const staged = path.join(target, '.restore-staged-' + crypto.randomUUID());
+  let key;
   try {
-    fs.copyFileSync(src, staged, fs.constants.COPYFILE_EXCL);
-    const checked = verify(staged, manifest, path.basename(src));
-    if (JSON.stringify(checked) !== JSON.stringify(evidence)) fail('staged backup differs');
+    if (encrypted) {
+      key = loadPrivateKey(src, target);
+      const decipher = crypto.createDecipheriv(
+        'aes-256-gcm', key, Buffer.from(info.encryption.nonce, 'hex'),
+      );
+      decipher.setAuthTag(Buffer.from(info.encryption.tag, 'hex'));
+      try {
+        await pipeline(
+          fs.createReadStream(src),
+          decipher,
+          fs.createWriteStream(staged, { flags: 'wx', mode: 0o600 }),
+        );
+      } catch {
+        fail('authenticated decryption failed (wrong key or tampered ciphertext)');
+      }
+      if (fs.statSync(staged).size !== info.plaintextBytes ||
+          digest(staged) !== info.plaintextSha256)
+        fail('decrypted plaintext SHA-256 or size mismatch');
+    } else {
+      fs.copyFileSync(src, staged, fs.constants.COPYFILE_EXCL);
+    }
+    const checked = inspectSqlite(staged);
+    if (checked.schema !== info.schemaVersion) fail('restored schema mismatch');
+    if (!encrypted) {
+      const stagedEvidence = verify(staged, manifest, path.basename(src));
+      const originalEvidence = verify(src, manifest);
+      if (JSON.stringify(stagedEvidence) !== JSON.stringify(originalEvidence))
+        fail('staged backup differs');
+    }
+    // Readonly SQLite inspection may leave empty WAL/SHM sidecars; never publish them.
+    for (const suffix of ['-wal', '-shm']) {
+      if (fs.existsSync(staged + suffix)) fs.rmSync(staged + suffix);
+    }
+    // Nothing can be published until authentication, hash and schema checks pass.
     fs.chmodSync(staged, 0o600);
     fs.renameSync(staged, output);
     process.stdout.write(JSON.stringify({
       status: 'RESTORED_SANDBOX_ONLY',
-      ...evidence,
+      ...checked,
+      sha256: info.sha256, bytes: info.bytes,
+      encrypted,
     }) + '\n');
   } finally {
-    if (fs.existsSync(staged)) fs.rmSync(staged);
+    if (key) key.fill(0);
+    for (const file of [staged, staged + '-wal', staged + '-shm']) {
+      if (fs.existsSync(file)) fs.rmSync(file);
+    }
   }
 }
-try {
-  if (require.main === module) restore(process.argv[2], process.argv[3]);
-} catch (error) {
-  process.stderr.write(error.message + '\n');
-  process.exitCode = 1;
+if (require.main === module) {
+  restore(process.argv[2], process.argv[3]).catch((error) => {
+    process.stderr.write(error.message + '\n');
+    process.exitCode = 1;
+  });
 }
 module.exports = { verify, restore };
