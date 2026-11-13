@@ -2,6 +2,9 @@ name: Worker cross-platform artifacts (manual, no release)
 
 on:
   workflow_dispatch:
+  # Task-scoped verification without modifying PR topology or publishing artifacts.
+  push:
+    branches: [feat/railway-p15-w3-t02-release-security]
   pull_request:
     paths:
       - 'src/routes/workerRoutes.ts'
