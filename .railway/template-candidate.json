@@ -1,24 +1,29 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "status": "REVIEW_ONLY_NOT_PUBLISHED",
   "templateUrl": null,
   "templateCode": null,
-  "description": "Railway template composer blueprint; this JSON is an auditable checklist, NOT a Railway API import or published template.",
+  "description": "Manual Railway Template Composer operator checklist only; not an importable template or deployment.",
   "source": {
-    "provider": "github",
-    "repository": "mathew15064/mcp_worker",
-    "ownerApprovedReleaseBranch": null,
-    "ownerApprovedCommitSha": null,
+    "provider": "docker-image",
+    "registryImage": null,
+    "immutableManifestDigest": null,
+    "immutableReference": null,
+    "approvedSourceCommitSha": null,
+    "localDockerImageId": null,
+    "ownerApproved": false,
     "immutablePinRequired": true,
-    "notes": "Composer uses an approved release branch URL; verify the deployed commit equals the separately approved immutable SHA."
+    "registryPushAuthorized": false,
+    "notes": "Build and test on PC. Owner must independently approve source and explicitly authorize a manual registry push. Registry returns a real manifest digest, which must be verified against PC-built image provenance before Composer entry. No GitHub-source build."
   },
   "services": [
     {
       "name": "mcp-worker",
-      "kind": "node-application",
+      "kind": "prebuilt-oci-application",
       "replicas": 1,
-      "source": "github",
-      "dockerfilePath": "Dockerfile.railway",
+      "source": "docker-image",
+      "imageReference": null,
+      "automaticImageUpdates": false,
       "healthcheckPath": "/healthz",
       "healthcheckTimeoutSeconds": 120,
       "restartPolicy": "ON_FAILURE",
@@ -30,7 +35,6 @@
         "HOST": "0.0.0.0",
         "PORT": "80",
         "ADMIN_USERNAME": "admin",
-        "RAILWAY_DOCKERFILE_PATH": "Dockerfile.railway",
         "RAILWAY_RUN_UID": "0",
         "RAILWAY_DEPLOYMENT_OVERLAP_SECONDS": "0"
       },
@@ -39,13 +43,14 @@
           "key": "MCP_SETUP_SECRET",
           "defaultValue": null,
           "secret": true,
-          "description": "Generate and retain a fresh unique 32-byte base64url value (43 characters); never paste into a template default."
+          "description": "Provide a fresh CSPRNG-generated canonical 32-byte base64url secret (43 chars). Save privately. Never enter an example or put the secret in the image."
         }
       ],
       "publicNetworking": {
         "protocol": "HTTP",
         "domain": null,
-        "requiresOwnerDomainGeneration": true
+        "requiresOwnerDomainGeneration": true,
+        "verifyHttps": true
       }
     }
   ],
@@ -61,12 +66,17 @@
   "externalDatabases": [],
   "automaticCloudActions": false,
   "automaticGitHubActions": false,
+  "registryOptions": {
+    "publicRegistry": "Possible after explicit owner approval; ensure image/code contains no secrets and supports public distribution.",
+    "privateRegistry": "Railway private-registry credentials require Pro plan (verify current Railway billing/policy before paid use).",
+    "mustUseDigest": true
+  },
   "publicationBlockers": [
-    "owner-approved immutable release commit and reachable protected branch",
-    "owner confirms GitHub Actions disabled before any push",
-    "owner approves Railway billing and real deploy",
-    "owner publishes template separately",
-    "public HTTPS domain generation and TLS validation",
-    "live OAuth/Worker/WSS/SQLite and backup acceptance"
+    "owner approves specific committed PC-tested source SHA",
+    "owner approves manual upload to a chosen registry (no upload authorized by T3)",
+    "owner captures and independently verifies an immutable registry manifest digest",
+    "owner reviews registry visibility, access and Railway plan/billing",
+    "owner authorizes private pilot; verify HTTPS domain/TLS and persistent volume",
+    "owner separately approves public template publication after pilot"
   ]
 }

@@ -20,9 +20,11 @@ fi
 prefix="mcp-t3-$(node -e "process.stdout.write(require('node:crypto').randomBytes(7).toString('hex'))")"
 container="$prefix-app"
 volume="$prefix-sqlite"
+other_container="$prefix-isolated"
+other_volume="$prefix-isolated-sqlite"
 cleanup() {
-  docker rm -f "$container" >/dev/null 2>&1 || true
-  docker volume rm "$volume" >/dev/null 2>&1 || true
+  docker rm -f "$container" "$other_container" >/dev/null 2>&1 || true
+  docker volume rm "$volume" "$other_volume" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 secret="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))")"
@@ -118,7 +120,31 @@ docker exec -u node "$container" node -e '
   db.close();
 '
 verify_sqlite persisted-across-restart
-docker restart "$container" >/dev/null
+# A second independently mounted SQLite volume must not see the first owner's
+# database marker, even while both isolated containers are running.
+docker volume create --label io.mcp-worker.t3.disposable=true "$other_volume" >/dev/null
+other_secret="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))")"
+docker run -d --name "$other_container" --label io.mcp-worker.t3.disposable=true \
+  -v "$other_volume:/app/data" "${common[@]}" \
+  -e RAILWAY_VOLUME_NAME="$other_volume" -e MCP_SETUP_SECRET="$other_secret" "$image" >/dev/null
+unset other_secret
+for i in {1..45}; do
+  if docker exec "$other_container" node -e "fetch('http://127.0.0.1:80/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+docker exec "$other_container" node -e "fetch('http://127.0.0.1:80/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" >/dev/null
+docker exec -u node "$other_container" node -e '
+  const Db=require("better-sqlite3");
+  const db=new Db("/app/data/bot_report.sqlite",{readonly:true,fileMustExist:true});
+  if(db.pragma("quick_check",{simple:true})!=="ok" ||
+     db.prepare("SELECT value FROM system_settings WHERE key=?").get("t3.local.marker"))
+    process.exitCode=1;
+  db.close();
+'
+verify_sqlite persisted-across-restart
+docker restart "$container"  >/dev/null
 probe /healthz 200
 probe /readyz 503
 verify_sqlite persisted-across-restart
@@ -129,5 +155,5 @@ for i in {1..35}; do
   sleep 1
 done
 [[ "$(docker inspect -f '{{.State.Health.Status}}' "$container")" == healthy ]]
-echo 'RAILWAY_DOCKER_LOCAL_PASS: volume=1 restart=PASS uid=1000 sqlite_quick_check=ok healthz=200 readyz=503 docker_health=healthy missing_mount=DENIED secret=DENIED'
+echo 'RAILWAY_DOCKER_LOCAL_PASS: volume=1 restart=PASS uid=1000 sqlite_quick_check=ok healthz=200 readyz=503 docker_health=healthy isolated_volume=PASS missing_mount=DENIED secret=DENIED'
 echo 'RAILWAY_LIVE_NOT_TESTED: no Railway resources or public HTTPS were created'

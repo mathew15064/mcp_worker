@@ -1,27 +1,27 @@
 /**
- * REVIEW ONLY: offline SDK topology for a future owner-approved release.
- * A zero-SHA and nonexistent release branch are deliberate non-deployable
- * placeholders, NOT a production source, and this module rejects apply/deploy.
- * Owner approval, exact reachable release pin and a separately reviewed guard
- * change are required before any live action or template publication.
+ * T3 REVIEW ONLY: offline Railway SDK topology with a deliberately INVALID
+ * image-source sentinel. A GitHub source MUST NOT be used: Railway would
+ * build remotely. No image digest has been published or owner-approved.
+ *
+ * The program rejects every non-plan context and is NOT a deployment path.
+ * Real Template Composer configuration is manual and separately authorized.
  */
-import { defineRailway, github, preserve, project, service, volume } from 'railway/iac';
+import { defineRailway, image, preserve, project, service, volume } from 'railway/iac';
+
+const UNAPPROVED_IMAGE_SENTINEL = 'OWNER_APPROVAL_REQUIRED_PREBUILT_IMAGE_DIGEST';
 
 export default defineRailway((ctx) => {
   if (ctx.command !== 'plan') {
     throw new Error(
-      'RAILWAY_REVIEW_ONLY: no approved source; Railway apply/deploy/template blocked',
+      'RAILWAY_REVIEW_ONLY: no approved registry digest; apply/deploy/template blocked',
     );
   }
 
   const data = volume('sqlite-data', { region: 'us-west2', sizeMB: 512 });
   const app = service('mcp-worker', {
-    source: github('mathew15064/mcp_worker', {
-      // Intentionally impossible source until the owner approves an immutable
-      // release commit + reachable branch. Do not auto-fill from a local HEAD.
-      branch: 'release/OWNER_APPROVAL_REQUIRED',
-      commitSha: '0000000000000000000000000000000000000000',
-    }),
+    // Intentionally invalid registry source. NEVER resolve from git, a local
+    // Docker config/image ID, a mutable tag, or a guessed registry digest.
+    source: image(UNAPPROVED_IMAGE_SENTINEL),
     replicas: 1,
     healthcheck: '/healthz',
     healthcheckTimeout: 120,
@@ -34,15 +34,13 @@ export default defineRailway((ctx) => {
       PORT: '80',
       HOST: '0.0.0.0',
       ADMIN_USERNAME: 'admin',
-      RAILWAY_DOCKERFILE_PATH: 'Dockerfile.railway',
-      // Root initializes only the volume; the process then runs as UID 1000.
+      // Railway root-owned volume needs a transient privileged initializer;
+      // entrypoint then execs the application as node UID/GID 1000.
       RAILWAY_RUN_UID: '0',
       RAILWAY_DEPLOYMENT_OVERLAP_SECONDS: '0',
-      // NEVER auto-generate: owner must securely store and enter their key.
       MCP_SETUP_SECRET: preserve(),
     },
-    // A real HTTPS service domain is unique to each Railway project and must
-    // be generated and verified by the owner in Public Networking, not faked.
+    // HTTPS and real domain require owner-approved Railway provisioning.
   });
   return project('mcp-worker-private', { resources: [app, data] });
 });

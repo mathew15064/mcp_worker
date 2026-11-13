@@ -63,9 +63,13 @@ RUN set -eux; cd /tmp; npm pack npm@11.21.2 --silent; \
 # Optional build provenance. Deploy tooling injects these; direct/manual builds may leave them as unknown.
 ARG BOT_REPORT_GIT_SHA=unknown
 ARG BOT_REPORT_BUILD_TIME=unknown
+ARG BOT_REPORT_TREE_SHA=unknown
 ARG BOT_REPORT_NODE_IMAGE
 LABEL org.opencontainers.image.revision="${BOT_REPORT_GIT_SHA}" \
       org.opencontainers.image.created="${BOT_REPORT_BUILD_TIME}" \
+      org.opencontainers.image.source="https://github.com/mathew15064/mcp_worker" \
+      org.bot-report.source-tree="${BOT_REPORT_TREE_SHA}" \
+      org.bot-report.build-origin="local-pc-only" \
       org.bot-report.node-base="${BOT_REPORT_NODE_IMAGE}"
 
 # Railway's primary persistent database is SQLite on the mounted /app/data volume.

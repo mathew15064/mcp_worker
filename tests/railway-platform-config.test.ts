@@ -28,7 +28,7 @@ if (hasSourceFixtures) {
     const helpers = {
       defineRailway: (factory: (ctx: { command: string }) => RailwayProject) =>
         factory({ command: 'plan' }),
-      github: (repo: string, config: Record<string, unknown>) => ({ repo, ...config }),
+      image: (imageName: string) => ({ type: 'image', image: imageName }),
       preserve: () => ({ preserved: true }),
       project: (name: string, config: { resources: Resource[] }) => ({
         kind: 'project',
@@ -52,7 +52,7 @@ if (hasSourceFixtures) {
       .replace('export default defineRailway(', 'const result = defineRailway(');
     assert.notEqual(body, source, 'The known IaC import and declaration must match');
     const graph = vm.runInNewContext(
-      'const { defineRailway, github, preserve, project, service, volume } = helpers;\n' +
+      'const { defineRailway, image, preserve, project, service, volume } = helpers;\n' +
         body +
         '\nresult;',
       { helpers },
@@ -81,15 +81,16 @@ if (hasSourceFixtures) {
     assert.equal(env.PORT, '80');
     assert.equal(env.HOST, '0.0.0.0');
     assert.equal(env.RAILWAY_RUN_UID, '0');
-    assert.equal(env.RAILWAY_DOCKERFILE_PATH, 'Dockerfile.railway');
+    assert.equal(env.RAILWAY_DOCKERFILE_PATH, undefined);
     assert.equal((env.MCP_SETUP_SECRET as { preserved: boolean }).preserved, true);
+    assert.deepEqual(JSON.parse(JSON.stringify(service.config.source)), {
+      type: 'image',
+      image: 'OWNER_APPROVAL_REQUIRED_PREBUILT_IMAGE_DIGEST',
+    });
+    assert.doesNotMatch(source, /\bgithub\s*\(/);
     assert.equal(
-      (service.config.source as { commitSha: string }).commitSha,
-      '0000000000000000000000000000000000000000',
-    );
-    assert.equal(
-      (service.config.source as { branch?: string }).branch,
-      'release/OWNER_APPROVAL_REQUIRED',
+      JSON.parse(read('.railway/template-candidate.json')).source.provider,
+      'docker-image',
     );
     assert.equal(service.config.domains, undefined, 'do not pretend a public HTTPS domain exists');
     assert.doesNotMatch(body, /\b(?:postgres|mysql|redis|mongo|upstash|neon)\s*\(/i);
@@ -103,7 +104,7 @@ if (hasSourceFixtures) {
     assert.throws(
       () =>
         vm.runInNewContext(
-          'const { defineRailway, github, preserve, project, service, volume } = helpers;\n' +
+          'const { defineRailway, image, preserve, project, service, volume } = helpers;\n' +
             body +
             '\nresult;',
           { helpers: deniedHelpers },
