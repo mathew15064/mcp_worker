@@ -24,6 +24,8 @@ and system settings. The terminal_list tool still lists Worker aliases for compa
 The local IaC review target is [.railway/railway.ts](.railway/railway.ts).
 Do not treat a source branch or local plan as an authorized live deployment.
 
+**Release-image rule:** all build/test work happens on the owner's Local PC. A GitHub-source Railway service would perform a remote build and is **not** the approved One-Click path. After explicit owner approval, publish the exact locally built/tested OCI image to an approved container registry; record and independently verify the registry's immutable `repository@sha256:...` manifest digest. Configure Railway Template Composer with **Docker Image** as the service source, not GitHub source or a mutable tag. Railway may then pull/run that image only after distinct billing and deployment approval. No approved registry digest, live project or public template URL exists today. See [Railway Quickstart](docs/RAILWAY_QUICKSTART.md), [release readiness](docs/RELEASE_READINESS.md) and [dependency security review](docs/DEPENDENCY_SECURITY_REVIEW.md).
+
 After separately approved billing, immutable source and a real HTTPS domain,
 a first-time owner follows this path:
 
@@ -109,7 +111,7 @@ not change database configuration or issue credentials automatically.
 For a local-only first call, create an Admin OAuth client with the exact
 redirect URI `http://127.0.0.1:43871/callback` and only the
 `bot_report.read` scope. Save the one-time secret privately. On the same
-machine as the browser and standalone service, with Node.js 26 installed,
+machine as the browser and standalone service, with Node.js 22 installed,
 run:
 
 ```sh

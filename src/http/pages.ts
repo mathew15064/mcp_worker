@@ -448,7 +448,7 @@ function onboardingPage({
   ];
   const localHelp =
     mode === 'local' && ready
-      ? `<div class="migration-note"><strong>Local first-call helper</strong><span>Register callback <code>http://127.0.0.1:43871/callback</code> with Read scope only. On the same host, from the project directory with Node.js 26 installed, run:</span><code>node dist/scripts/first-mcp-call.js ${escapeHtml(baseUrl)}</code><span>Enter credentials privately, open the displayed authorization URL, approve Read access, and refresh this page. The helper revokes the access token after the call.</span></div>`
+      ? `<div class="migration-note"><strong>Local first-call helper</strong><span>Register callback <code>http://127.0.0.1:43871/callback</code> with Read scope only. On the same host, from the project directory with Node.js 22 installed, run:</span><code>node dist/scripts/first-mcp-call.js ${escapeHtml(baseUrl)}</code><span>Enter credentials privately, open the displayed authorization URL, approve Read access, and refresh this page. The helper revokes the access token after the call.</span></div>`
       : '';
   const rows = steps
     .map(

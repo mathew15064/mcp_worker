@@ -225,6 +225,19 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
       503,
       'Browser probe must see the actual signed release gate',
     );
+    // No native-platform or manifest endpoint may bypass the shared Railway
+    // release blocker. A healthy server (readyz=200) cannot approve binaries.
+    for (const route of [
+      '/worker/install-linux.sh',
+      '/worker/install-macos.sh',
+      '/worker/install-windows.ps1',
+      '/worker/dist/WORKER_RELEASE',
+      '/worker/dist/SHA256SUMS',
+      '/worker/dist/SHA256SUMS.sig',
+    ]) {
+      const blocked = await fetch(base + route, { method: 'HEAD', headers });
+      assert.equal(blocked.status, 503, route + ' must fail closed before release approval');
+    }
     const firstClientPage = await fetch(base + '/admin/clients?first_call=1', {
       headers: { ...headers, cookie: authenticatedCookie },
     });
