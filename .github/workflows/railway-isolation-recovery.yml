@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - feat/railway-p15-w3-t04-recovery-isolation
+      - review/railway-p15-w3-t05-integration
   workflow_dispatch:
 
 permissions:

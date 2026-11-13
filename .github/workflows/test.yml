@@ -7,6 +7,7 @@ on:
       - main
       - refactor/typescript
       - refactor/typescript-ts6
+      - review/railway-p15-w3-t05-integration
 
 permissions:
   contents: read

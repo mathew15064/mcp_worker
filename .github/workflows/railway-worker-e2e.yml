@@ -2,6 +2,8 @@ name: Railway Worker WSS OAuth MCP E2E
 
 on:
   pull_request:
+  push:
+    branches: [review/railway-p15-w3-t05-integration]
   workflow_dispatch:
 
 permissions:
