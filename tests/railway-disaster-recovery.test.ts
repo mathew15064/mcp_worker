@@ -20,7 +20,36 @@ import {
 } from '../scripts/verify-railway-harness';
 
 const restoreScript = path.join(process.cwd(), 'scripts/verify-railway-offvolume-restore.cjs');
-type BackupInfo = { path: string; bytes: number };
+const backupScript = path.join(process.cwd(), 'dist/scripts/backup-db.js');
+type BackupInfo = { path: string; manifest: string; sha256: string; bytes: number; schema: string };
+function exportBackup(s: Sandbox, directory: string): BackupInfo {
+  const result = spawnSync(process.execPath, [backupScript], {
+    env: {
+      PATH: process.env.PATH || '/usr/bin:/bin',
+      NODE_ENV: 'test',
+      MCP_PLATFORM: 'railway',
+      DATABASE_PATH: s.dbPath,
+      RAILWAY_VOLUME_MOUNT_PATH: s.volume,
+      BACKUP_EXPORT_DIR: directory,
+      BACKUP_ALLOW_LOGICAL_VOLUME_TEST_ONLY: '1',
+    },
+    encoding: 'utf8',
+    timeout: 30000,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  return JSON.parse(result.stdout) as BackupInfo;
+}
+function sealFixture(file: string, sourceManifest: string): void {
+  const metadata = JSON.parse(fs.readFileSync(sourceManifest, 'utf8')) as {
+    file: string;
+    sha256: string;
+    bytes: number;
+  };
+  metadata.file = path.basename(file);
+  metadata.bytes = fs.statSync(file).size;
+  metadata.sha256 = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  fs.writeFileSync(file + '.manifest.json', JSON.stringify(metadata), { mode: 0o600 });
+}
 function restore(source: string, destination: string) {
   return spawnSync(process.execPath, [restoreScript, source, destination], {
     env: { PATH: process.env.PATH || '/usr/bin:/bin', W3_SANDBOX_ONLY: '1' },
@@ -78,7 +107,6 @@ void test('online WAL backup goes off-volume, restores independent sandbox and s
   const wrongSecret = makeSandbox(root, 'recovery-wrong-secret', cert);
   const offVolume = path.join(root, 'off-volume');
   fs.mkdirSync(offVolume, { mode: 0o700 });
-  const backupFile = path.join(offVolume, 'snapshot.sqlite');
   const password = 'Isolated-DR-Owner-2026!';
   t.after(async () => {
     await Promise.all([stopSandbox(source), stopSandbox(restored), stopSandbox(wrongSecret)]);
@@ -109,11 +137,26 @@ void test('online WAL backup goes off-volume, restores independent sandbox and s
   });
   assert.equal(enrolled.status, 201);
   await rpc(source, 'marker', { key: 'recovery.marker', value: 'before-online-backup' });
+  const backup = exportBackup(source, offVolume);
+  const backupFile = backup.path;
   assert.notEqual(path.dirname(backupFile), source.volume);
-  const backup = await rpc<BackupInfo>(source, 'backup', { target: backupFile });
+  assert.equal(path.dirname(backupFile), offVolume);
   assert.ok(backup.bytes > 4096);
-  assert.equal(backup.path, backupFile);
+  assert.equal(backup.manifest, backupFile + '.manifest.json');
+  assert.equal(fs.statSync(backupFile).mode & 0o777, 0o600);
+  assert.equal(fs.statSync(backup.manifest).mode & 0o777, 0o600);
+  const metadata = JSON.parse(fs.readFileSync(backup.manifest, 'utf8')) as {
+    file: string;
+    sha256: string;
+    bytes: number;
+    schemaVersion: string;
+  };
+  assert.equal(metadata.file, path.basename(backupFile));
+  assert.equal(metadata.schemaVersion, '2026-11-12-initial');
+  assert.equal(metadata.bytes, backup.bytes);
+  assert.equal(metadata.sha256, backup.sha256);
   const backupHash = crypto.createHash('sha256').update(fs.readFileSync(backupFile)).digest('hex');
+  assert.equal(backup.sha256, backupHash);
   assert.equal(snapshot(backupFile).quickCheck, 'ok');
   await rpc(source, 'marker', { key: 'recovery.marker', value: 'after-online-backup' });
   assert.equal(snapshot(backupFile).marker, 'before-online-backup');
@@ -184,6 +227,8 @@ void test('missing, corrupt and unsupported backup refusal never writes target; 
   const empty = makeSandbox(root, 'missing-restore', cert);
   const corruptTarget = makeSandbox(root, 'corrupt-restore', cert);
   const unknownTarget = makeSandbox(root, 'unknown-schema-restore', cert);
+  const ownerTarget = makeSandbox(root, 'unclaimed-restore', cert);
+  const hashTarget = makeSandbox(root, 'hash-restore', cert);
   t.after(async () => {
     await Promise.all([stopSandbox(source), stopSandbox(empty), stopSandbox(corruptTarget)]);
     cleanupRoot(root);
@@ -193,26 +238,111 @@ void test('missing, corrupt and unsupported backup refusal never writes target; 
   assert.notEqual(absent.status, 0);
   assert.match(absent.stderr, /source backup missing/);
   assert.deepEqual(fs.readdirSync(empty.volume), []);
-  const broken = path.join(root, 'bad-backup.sqlite');
-  fs.writeFileSync(broken, 'SQLite corruption fixture; not a live database', { mode: 0o600 });
-  const rejected = restore(broken, corruptTarget.volume);
-  assert.notEqual(rejected.status, 0);
-  assert.deepEqual(fs.readdirSync(corruptTarget.volume), []);
 
   await startSandbox(source);
+  const exportDirectory = path.join(root, 'exported-backups');
+  fs.mkdirSync(exportDirectory, { mode: 0o700 });
+  // Neither unclaimed databases nor paths inside the active data volume may export.
+  const beforeOwner = spawnSync(process.execPath, [backupScript], {
+    env: {
+      PATH: process.env.PATH || '/usr/bin:/bin',
+      NODE_ENV: 'test',
+      MCP_PLATFORM: 'railway',
+      DATABASE_PATH: source.dbPath,
+      RAILWAY_VOLUME_MOUNT_PATH: source.volume,
+      BACKUP_EXPORT_DIR: exportDirectory,
+      BACKUP_ALLOW_LOGICAL_VOLUME_TEST_ONLY: '1',
+    },
+    encoding: 'utf8',
+  });
+  assert.notEqual(beforeOwner.status, 0);
+  assert.match(beforeOwner.stderr, /unclaimed owner/);
+  assert.deepEqual(fs.readdirSync(exportDirectory), []);
   assert.equal(await setupOwner(source, 'Correct-Owner-Password-2026!'), 303);
-  const valid = path.join(root, 'valid-snapshot.sqlite');
-  await rpc(source, 'backup', { target: valid });
+  const sameMount = spawnSync(process.execPath, [backupScript], {
+    env: {
+      PATH: process.env.PATH || '/usr/bin:/bin',
+      NODE_ENV: 'test',
+      MCP_PLATFORM: 'railway',
+      DATABASE_PATH: source.dbPath,
+      RAILWAY_VOLUME_MOUNT_PATH: source.volume,
+      BACKUP_EXPORT_DIR: exportDirectory,
+    },
+    encoding: 'utf8',
+  });
+  assert.notEqual(sameMount.status, 0);
+  assert.match(sameMount.stderr, /shares the SQLite data mount/);
+  const onVolume = path.join(source.volume, 'backups');
+  fs.mkdirSync(onVolume, { mode: 0o700 });
+  const onVolumeAttempt = spawnSync(process.execPath, [backupScript], {
+    env: {
+      PATH: process.env.PATH || '/usr/bin:/bin',
+      NODE_ENV: 'test',
+      MCP_PLATFORM: 'railway',
+      DATABASE_PATH: source.dbPath,
+      RAILWAY_VOLUME_MOUNT_PATH: source.volume,
+      BACKUP_EXPORT_DIR: onVolume,
+      BACKUP_ALLOW_LOGICAL_VOLUME_TEST_ONLY: '1',
+    },
+    encoding: 'utf8',
+  });
+  assert.notEqual(onVolumeAttempt.status, 0);
+  assert.match(onVolumeAttempt.stderr, /outside the data volume/);
+  assert.deepEqual(fs.readdirSync(onVolume), []);
+  const valid = exportBackup(source, exportDirectory);
   await stopSandbox(source);
+
+  const broken = path.join(root, 'bad-backup.sqlite');
+  fs.writeFileSync(broken, Buffer.alloc(8192, 0x7f), { mode: 0o600 });
+  sealFixture(broken, valid.manifest);
+  const rejected = restore(broken, corruptTarget.volume);
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /invalid SQLite content/);
+  assert.deepEqual(fs.readdirSync(corruptTarget.volume), []);
+
   const tampered = path.join(root, 'unknown-schema.sqlite');
-  fs.copyFileSync(valid, tampered);
+  fs.copyFileSync(valid.path, tampered);
   const db = new Database(tampered);
   db.prepare('UPDATE railway_schema_versions SET version=?').run('2099-unsupported');
   db.close();
+  sealFixture(tampered, valid.manifest);
   const unknown = restore(tampered, unknownTarget.volume);
   assert.notEqual(unknown.status, 0);
   assert.match(unknown.stderr, /unsupported schema version/);
   assert.deepEqual(fs.readdirSync(unknownTarget.volume), []);
+
+  const unclaimed = path.join(root, 'unclaimed.sqlite');
+  fs.copyFileSync(valid.path, unclaimed);
+  const unclaimedDb = new Database(unclaimed);
+  unclaimedDb
+    .prepare("DELETE FROM system_settings WHERE key='bootstrap.admin_password_hash'")
+    .run();
+  unclaimedDb.close();
+  sealFixture(unclaimed, valid.manifest);
+  const noOwner = restore(unclaimed, ownerTarget.volume);
+  assert.notEqual(noOwner.status, 0);
+  assert.match(noOwner.stderr, /owner account is not claimed/);
+  assert.deepEqual(fs.readdirSync(ownerTarget.volume), []);
+
+  const altered = path.join(root, 'altered.sqlite');
+  fs.copyFileSync(valid.path, altered);
+  sealFixture(altered, valid.manifest);
+  fs.appendFileSync(altered, 'modified after SHA-256 was recorded');
+  const noHash = restore(altered, hashTarget.volume);
+  assert.notEqual(noHash.status, 0);
+  assert.match(noHash.stderr, /SHA-256 or size mismatch/);
+  assert.deepEqual(fs.readdirSync(hashTarget.volume), []);
+
+  const missingManifest = path.join(root, 'no-manifest.sqlite');
+  fs.copyFileSync(valid.path, missingManifest);
+  assert.notEqual(restore(missingManifest, hashTarget.volume).status, 0);
+  const symlink = path.join(root, 'linked-snapshot.sqlite');
+  fs.symlinkSync(valid.path, symlink);
+  assert.notEqual(restore(symlink, hashTarget.volume).status, 0);
+  assert.deepEqual(fs.readdirSync(hashTarget.volume), []);
+  fs.writeFileSync(hashTarget.dbPath, 'must never overwrite');
+  assert.notEqual(restore(valid.path, hashTarget.volume).status, 0);
+  assert.equal(fs.readFileSync(hashTarget.dbPath, 'utf8'), 'must never overwrite');
 
   // Independent corruption of the *live sandbox copy* must reject startup and not wipe bytes.
   const dbBytes = Buffer.from('not a SQLite file');
