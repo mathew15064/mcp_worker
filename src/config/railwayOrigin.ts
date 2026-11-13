@@ -3,6 +3,10 @@ export function canonicalRailwayOrigin(env: NodeJS.ProcessEnv = process.env): st
   const custom = env.MCP_PUBLIC_BASE_URL || '';
   const provided = custom || env.RAILWAY_PUBLIC_DOMAIN || '';
   if (!provided) return null;
+  // A custom origin must be an explicit HTTPS URL. Reject invisible whitespace
+  // that URL() would otherwise silently trim from a configured authority.
+  if (/\s|[\u0000-\u001f\u007f]/.test(provided) || (custom && !custom.startsWith('https://')))
+    throw new Error('Invalid canonical Railway origin.');
   const url = new URL(provided.startsWith('https://') ? provided : 'https://' + provided);
   const hostname = url.hostname;
   // Reject empty, malformed and ambiguous DNS labels; URL normalizes host case

@@ -27,6 +27,9 @@ assert.equal(data.type, 'volume');
 if (app.type !== 'service' || data.type !== 'volume') throw Error('unexpected graph type');
 assert.equal(app.deploy?.numReplicas, 1, 'exactly one replica');
 assert.equal(app.deploy?.healthcheckPath, '/healthz');
+assert.equal(app.deploy?.healthcheckTimeout, 120);
+assert.equal(app.deploy?.restartPolicyType, 'ON_FAILURE');
+assert.equal(app.deploy?.restartPolicyMaxRetries, 10);
 assert.equal(Object.keys(app.volumeAttachments ?? {}).length, 1);
 assert.equal(app.volumeAttachments?.['sqlite-data']?.volume, data.address);
 assert.equal(app.volumeAttachments?.['sqlite-data']?.mountPath, '/app/data');
@@ -34,7 +37,11 @@ assert.deepEqual(app.variables?.DATABASE_PATH, {
   type: 'literal',
   value: '/app/data/bot_report.sqlite',
 });
-assert.equal(app.source?.commitSha, 'e7de57a28f4894d302a6dfb24a577ea7b38b9a08');
+// Full Wave 2 snapshot only; this pin is NOT an approved release SHA.
+assert.equal(app.source?.commitSha, '1d617c9abfaaea8b9feae32da269124d5e3d8fd2');
+assert.equal(app.source?.branch, 'review/railway-p15-w2-t05-integration');
+assert.deepEqual(app.variables?.MCP_SETUP_SECRET, { type: 'preserve' });
+assert.deepEqual(app.variables?.RAILWAY_DEPLOYMENT_OVERLAP_SECONDS, { type: 'literal', value: '0' });
 assert.equal(app.source?.repo, 'mathew15064/mcp_worker');
 assert.equal(app.source?.type, 'github');
 const graph: RailwayGraph = {

@@ -6,6 +6,7 @@ on:
     branches:
       - feat/railway-p15-w2-t02-template
       - review/railway-p15-w2-t05-integration
+      - feat/railway-p15-w3-t03-template-ready
   workflow_dispatch:
 
 permissions:
@@ -19,7 +20,9 @@ jobs:
       github.head_ref == 'feat/railway-p15-w2-t02-template' ||
       github.ref_name == 'feat/railway-p15-w2-t02-template' ||
       github.head_ref == 'review/railway-p15-w2-t05-integration' ||
-      github.ref_name == 'review/railway-p15-w2-t05-integration'
+      github.ref_name == 'review/railway-p15-w2-t05-integration' ||
+      github.head_ref == 'feat/railway-p15-w3-t03-template-ready' ||
+      github.ref_name == 'feat/railway-p15-w3-t03-template-ready'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -51,13 +54,15 @@ jobs:
           RAILWAY_DOCKER_INTEGRATION: '1'
           RAILWAY_TEST_IMAGE: mcp-railway-sqlite:ci
         run: node --test dist/tests/railway-platform-config-docker.test.js
-      - name: Verify fail-closed volume and persisted SQLite restart
+      - name: Verify fail-closed volume, off-volume backup/restore and SQLite restart
         shell: bash
         run: |
           set -euo pipefail
           container="mcp-railway-ci-$GITHUB_RUN_ID"
           volume="mcp-railway-data-$GITHUB_RUN_ID"
-          trap 'docker rm -f "$container" >/dev/null 2>&1 || true; docker volume rm "$volume" >/dev/null 2>&1 || true' EXIT
+          restore_volume="mcp-railway-restore-$GITHUB_RUN_ID"
+          backup_dir="$(mktemp -d)"
+          trap 'docker rm -f "$container" >/dev/null 2>&1 || true; docker volume rm "$volume" >/dev/null 2>&1 || true; docker volume rm "$restore_volume" >/dev/null 2>&1 || true; rm -rf "$backup_dir"' EXIT
           # The image must refuse to start without a Railway volume identity.
           if docker run --rm             -e MCP_PLATFORM=railway             -e RAILWAY_VOLUME_MOUNT_PATH=/app/data             -e RAILWAY_VOLUME_NAME=             -e DATABASE_PATH=/app/data/bot_report.sqlite             mcp-railway-sqlite:ci >/dev/null 2>&1; then
             echo 'Missing-volume fail-closed gate failed' >&2
@@ -98,6 +103,24 @@ jobs:
             if(marker?.value!=="persisted" || b.pragma("quick_check",{simple:true})!=="ok")process.exitCode=1;
             b.close();
           '
+          # Copy an online-consistent backup OFF the live volume, then restore
+          # into an independent disposable volume as the unprivileged runtime.
+          docker cp "$container":/app/data/railway-ci-backup.sqlite "$backup_dir/railway-ci-backup.sqlite"
+          test -s "$backup_dir/railway-ci-backup.sqlite"
+          docker volume create "$restore_volume" >/dev/null
+          docker run --rm --entrypoint sh \
+            -v "$restore_volume":/app/data \
+            -v "$backup_dir/railway-ci-backup.sqlite":/tmp/backup.sqlite:ro \
+            mcp-railway-sqlite:ci -c \
+            'set -eu; cp /tmp/backup.sqlite /app/data/restored.sqlite; chown node:node /app/data /app/data/restored.sqlite; chmod 0700 /app/data; chmod 0600 /app/data/restored.sqlite'
+          docker run --rm --entrypoint node --user 1000:1000 \
+            -v "$restore_volume":/app/data mcp-railway-sqlite:ci -e '
+              const Database=require("better-sqlite3");
+              const db=new Database("/app/data/restored.sqlite",{readonly:true,fileMustExist:true});
+              const row=db.prepare("SELECT value FROM system_settings WHERE key=?").get("railway.ci.marker");
+              if(row?.value!=="persisted" || db.pragma("quick_check",{simple:true})!=="ok")process.exitCode=1;
+              db.close();
+            '
           docker restart "$container" >/dev/null
           probe 200 /healthz
           probe 200 /setup
@@ -119,4 +142,4 @@ jobs:
             if(marker?.value!=="persisted")process.exitCode=1;
             db.close();
           '
-          echo 'Railway SQLite image, online backup, offline restore, and restart gates passed.'
+          echo 'Railway SQLite image, off-volume backup, independent-volume restore, and restart gates passed.'
