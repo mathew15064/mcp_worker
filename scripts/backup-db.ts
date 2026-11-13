@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Explicit, fail-closed local SQLite export. This does NOT transfer to durable
- * off-host storage: operators must retrieve and encrypt the completed bundle.
+ * off-host storage: only the authenticated encrypted bundle is eligible for
+ * a separately approved external transfer.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -223,8 +224,33 @@ async function main(): Promise<void> {
       createdAt: new Date().toISOString(),
       ...(encryption ? { encryption, plaintextBytes, plaintextSha256 } : {}),
     };
+    // The ciphertext GCM tag alone cannot authenticate unauthenticated JSON
+    // metadata. Derive a distinct manifest MAC key; never store it with output.
+    const authenticatedManifest = key
+      ? {
+          ...manifest,
+          authentication: {
+            algorithm: 'hmac-sha256-hkdf-v1',
+            tag: crypto
+              .createHmac(
+                'sha256',
+                Buffer.from(
+                  crypto.hkdfSync(
+                    'sha256',
+                    key,
+                    Buffer.from('bot-report-railway-backup-v1'),
+                    Buffer.from('manifest-authentication-v1'),
+                    32,
+                  ),
+                ),
+              )
+              .update(JSON.stringify(manifest), 'utf8')
+              .digest('hex'),
+          },
+        }
+      : manifest;
     fs.renameSync(finalizedFile, finished);
-    fs.writeFileSync(manifestTmp, JSON.stringify(manifest, null, 2) + '\n', {
+    fs.writeFileSync(manifestTmp, JSON.stringify(authenticatedManifest, null, 2) + '\n', {
       flag: 'wx',
       mode: 0o600,
     });

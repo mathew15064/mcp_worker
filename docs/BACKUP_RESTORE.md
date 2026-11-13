@@ -14,16 +14,20 @@ An **encrypted export** additionally requires:
 - `BACKUP_STAGING_DIR`: a private 0700 directory on Linux **tmpfs** outside both data and export mounts, with enough space for the database. This prevents the SQLite plaintext staging file from being written to persistent export disk; host swap and tmpfs operational security still require review.
 - The same explicit `DATABASE_PATH`, `RAILWAY_VOLUME_MOUNT_PATH` and separately mounted `BACKUP_EXPORT_DIR`.
 
-The encrypted output is `*.sqlite.enc` plus `*.sqlite.enc.manifest.json` with status `BACKUP_EXPORTED_ENCRYPTED_LOCAL`. It uses AES-256-GCM with a fresh random nonce per backup, authenticated tag, ciphertext SHA-256 and plaintext checksum. The key is not included. **Encrypted local export is not remote backup**: after a separate owner-approved plan, the operator must transport the completed bundle to independent off-Railway versioned storage and test retrieval. Never claim recovery without separately recoverable application secrets (including `MCP_SETUP_SECRET`) and the original encryption key.
+The encrypted output is `*.sqlite.enc` plus `*.sqlite.enc.manifest.json` with status `BACKUP_EXPORTED_ENCRYPTED_LOCAL`. It uses AES-256-GCM with a fresh random nonce per backup, authenticated tag, ciphertext SHA-256 and plaintext checksum. The complete encrypted manifest is separately authenticated with HMAC-SHA-256 using an HKDF-derived key (distinct from the AES-GCM key), so changing even valid-looking JSON fields fails restore. An unkeyed SHA-256 is only a corruption detector, not manifest authentication. The key is not included. **Encrypted local export is not remote backup**: after a separate owner-approved plan, the operator must transport the completed bundle to independent off-Railway versioned storage and test retrieval. Never claim recovery without separately recoverable application secrets (including `MCP_SETUP_SECRET`) and the original encryption key.
 
 The local-only restore preflight is:
 
 ```sh
 # Source and empty destination must both be disposable directories under /tmp.
-W3_SANDBOX_ONLY=1 W3_BACKUP_KEY_FILE=/tmp/fixture-key   node scripts/verify-railway-offvolume-restore.cjs   /tmp/export/fixture.sqlite.enc /tmp/new-empty-fixture-volume
+W3_SANDBOX_ONLY=1 W3_BACKUP_KEY_FILE=/tmp/fixture-key \
+  node scripts/verify-railway-offvolume-restore.cjs \
+    /tmp/export/fixture.sqlite.enc /tmp/new-empty-fixture-volume
 ```
 
 It authenticates ciphertext and key, checks manifest/sha/schema/integrity/owner and publishes only into an empty sandbox target. It refuses overwrites, symlinks, missing keys, corrupt data or production paths. No supported production restore has been authorized or performed.
+
+For the **disposable PC transport simulation only**, use `T04_OFFSITE_SIMULATION_ONLY=1` and `T04_LOGICAL_STORE_TEST_ONLY=1` with `node scripts/railway-offsite-simulate.cjs deposit|retrieve SOURCE.sqlite.enc NEW_EMPTY_DIRECTORY`. The simulator refuses plaintext, missing HMAC-shaped manifests, symlinks, occupied stores, unsafe mount assumptions and any key-bearing environment variable. It copies the ciphertext and manifest, verifies readback, and never uploads to a remote provider. A matching independently held key is still required for the **separate** sandbox restore command; syntax or ciphertext checksum checks on a storage host do not substitute for HMAC verification at recovery. Logical same-mount simulation is explicitly **not** an off-host durability test. `T04_LOCAL_TEST_ONLY=1 bash scripts/test-recovery-local.sh` additionally executes an encrypted Docker exercise using separate disposable export, independent object-store, retrieved and fresh restore named volumes.
 
 **Remote durable storage/restore, cloud IAM, retention enforcement, key recovery, and measured RPO/RTO: NOT_TESTED.** Owner approval is required for any live export/recovery action.
 

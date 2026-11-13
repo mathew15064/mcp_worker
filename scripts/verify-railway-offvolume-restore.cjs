@@ -54,13 +54,31 @@ function metadata(file, manifestPath, expectedName = path.basename(file)) {
        !/^[a-f0-9]{24}$/.test(info.encryption.nonce || '') ||
        !/^[a-f0-9]{32}$/.test(info.encryption.tag || '') ||
        !Number.isSafeInteger(info.plaintextBytes) || info.plaintextBytes < 4096 ||
-       !/^[a-f0-9]{64}$/.test(info.plaintextSha256 || ''))) {
+       !/^[a-f0-9]{64}$/.test(info.plaintextSha256 || '') ||
+       !info.authentication ||
+       info.authentication.algorithm !== 'hmac-sha256-hkdf-v1' ||
+       !/^[a-f0-9]{64}$/.test(info.authentication.tag || ''))) {
     fail('invalid encrypted backup manifest');
   }
   if (fs.statSync(file).size !== info.bytes || digest(file) !== info.sha256) {
     fail('SHA-256 or size mismatch; backup is corrupt or modified');
   }
   return info;
+}
+function authenticateManifest(info, key) {
+  if (info.format !== 'bot-report-sqlite-backup-encrypted-v1')
+    fail('plaintext manifest is not eligible for offsite recovery');
+  const { authentication, ...payload } = info;
+  const derived = Buffer.from(crypto.hkdfSync(
+    'sha256', key, Buffer.from('bot-report-railway-backup-v1'),
+    Buffer.from('manifest-authentication-v1'), 32,
+  ));
+  try {
+    const expected = crypto.createHmac('sha256', derived)
+      .update(JSON.stringify(payload), 'utf8').digest();
+    if (!crypto.timingSafeEqual(expected, Buffer.from(authentication.tag, 'hex')))
+      fail('authenticated manifest mismatch (wrong key or tampered metadata)');
+  } finally { derived.fill(0); }
 }
 function inspectSqlite(file) {
   let db;
@@ -137,6 +155,7 @@ async function restore(source, volume) {
   try {
     if (encrypted) {
       key = loadPrivateKey(src, target);
+      authenticateManifest(info, key);
       const decipher = crypto.createDecipheriv(
         'aes-256-gcm', key, Buffer.from(info.encryption.nonce, 'hex'),
       );

@@ -20,6 +20,7 @@ import {
 
 const backupCli = path.join(process.cwd(), 'dist/scripts/backup-db.js');
 const restoreCli = path.join(process.cwd(), 'scripts/verify-railway-offvolume-restore.cjs');
+const offsiteCli = path.join(process.cwd(), 'scripts/railway-offsite-simulate.cjs');
 
 function exportEncrypted(
   dbPath: string,
@@ -49,6 +50,24 @@ function sandboxRestore(source: string, destination: string, keyFile?: string) {
       PATH: process.env.PATH || '/usr/bin:/bin',
       W3_SANDBOX_ONLY: '1',
       ...(keyFile ? { W3_BACKUP_KEY_FILE: keyFile } : {}),
+    },
+    encoding: 'utf8',
+    timeout: 30000,
+  });
+}
+function simulateTransfer(
+  operation: string,
+  source: string,
+  directory: string,
+  logical = true,
+  keyEnv = false,
+) {
+  return spawnSync(process.execPath, [offsiteCli, operation, source, directory], {
+    env: {
+      PATH: process.env.PATH || '/usr/bin:/bin',
+      T04_OFFSITE_SIMULATION_ONLY: '1',
+      ...(logical ? { T04_LOGICAL_STORE_TEST_ONLY: '1' } : {}),
+      ...(keyEnv ? { W3_BACKUP_KEY_FILE: '/NEVER-PASS-TO-STORAGE' } : {}),
     },
     encoding: 'utf8',
     timeout: 30000,
@@ -129,15 +148,53 @@ void test('AES-256-GCM fixture backup decrypts and restores identity, session, O
     sha256: string;
     plaintextSha256: string;
     encryption: { algorithm: string; nonce: string; tag: string };
+    authentication: { algorithm: string; tag: string };
+    plaintextBytes: number;
   };
   assert.equal(manifest.format, 'bot-report-sqlite-backup-encrypted-v1');
   assert.equal(manifest.encryption.algorithm, 'aes-256-gcm');
+  assert.equal(manifest.authentication.algorithm, 'hmac-sha256-hkdf-v1');
+  assert.match(manifest.authentication.tag, /^[a-f0-9]{64}$/);
   assert.equal(manifest.sha256, backup.sha256);
   assert.match(manifest.plaintextSha256, /^[a-f0-9]{64}$/);
   assert.equal(fs.statSync(backup.path).mode & 0o777, 0o600);
 
+  // Two independent simulated transfer stages: offsite object-store namespace,
+  // then retrieval to an empty landing directory. Neither stage receives a key.
+  const store = empty(root, 'independent-object-store-simulation');
+  const landing = empty(root, 'retrieval-landing');
+  const unsafeMount = simulateTransfer('deposit', backup.path, store, false);
+  assert.notEqual(unsafeMount.status, 0);
+  assert.match(unsafeMount.stderr, /same-mount transfer/);
+  assert.deepEqual(fs.readdirSync(store), []);
+  const deposit = simulateTransfer('deposit', backup.path, store);
+  assert.equal(deposit.status, 0, deposit.stderr);
+  const deposited = JSON.parse(deposit.stdout) as {
+    status: string;
+    artifact: string;
+    remoteStorageVerified: boolean;
+    sameMountLogicalOnly: boolean;
+  };
+  assert.equal(deposited.status, 'PC_SIMULATED_DEPOSIT_ONLY');
+  assert.equal(deposited.remoteStorageVerified, false);
+  assert.equal(deposited.sameMountLogicalOnly, true);
+  assert.deepEqual(
+    fs.readdirSync(store).sort(),
+    [path.basename(backup.path), path.basename(backup.manifest)].sort(),
+  );
+  assert.equal(
+    simulateTransfer('retrieve', deposited.artifact, landing, true, true).status === 0,
+    false,
+  );
+  assert.deepEqual(fs.readdirSync(landing), []);
+  const retrieval = simulateTransfer('retrieve', deposited.artifact, landing);
+  assert.equal(retrieval.status, 0, retrieval.stderr);
+  const retrieved = JSON.parse(retrieval.stdout) as { artifact: string; status: string };
+  assert.equal(retrieved.status, 'PC_SIMULATED_RETRIEVAL_ONLY');
+  assert.equal(fs.readFileSync(retrieved.artifact).equals(fs.readFileSync(backup.path)), true);
+  assert.equal(fs.existsSync(path.join(store, path.basename(keyFile))), false);
   await rpc(a, 'marker', { key: 'recovery.marker', value: 'encrypted-after' });
-  const restored = sandboxRestore(backup.path, b.volume, keyFile);
+  const restored = sandboxRestore(retrieved.artifact, b.volume, keyFile);
   assert.equal(restored.status, 0, restored.stderr);
   const report = JSON.parse(restored.stdout) as {
     status: string;
@@ -207,7 +264,7 @@ void test('AES-256-GCM fixture backup decrypts and restores identity, session, O
   const wrongTarget = empty(root, 'wrong-key-target');
   const wrong = sandboxRestore(backup.path, wrongTarget, wrongKey);
   assert.notEqual(wrong.status, 0);
-  assert.match(wrong.stderr, /authenticated decryption failed/);
+  assert.match(wrong.stderr, /authenticated manifest mismatch/);
   assert.deepEqual(fs.readdirSync(wrongTarget), []);
 
   const tampered = path.join(exportDir, 'tampered.sqlite.enc');
@@ -222,12 +279,65 @@ void test('AES-256-GCM fixture backup decrypts and restores identity, session, O
     bytes: corrupted.length,
     sha256: crypto.createHash('sha256').update(corrupted).digest('hex'),
   };
+  const alteredPayload = Object.fromEntries(
+    Object.entries(alteredManifest).filter(([field]) => field !== 'authentication'),
+  );
+  const authKey = Buffer.from(
+    crypto.hkdfSync(
+      'sha256',
+      fs.readFileSync(keyFile),
+      Buffer.from('bot-report-railway-backup-v1'),
+      Buffer.from('manifest-authentication-v1'),
+      32,
+    ),
+  );
+  alteredManifest.authentication = {
+    algorithm: 'hmac-sha256-hkdf-v1',
+    tag: crypto
+      .createHmac('sha256', authKey)
+      .update(JSON.stringify(alteredPayload), 'utf8')
+      .digest('hex'),
+  };
+  authKey.fill(0);
   fs.writeFileSync(tampered + '.manifest.json', JSON.stringify(alteredManifest), { mode: 0o600 });
   const corruptTarget = empty(root, 'ciphertext-tamper-target');
   const rejected = sandboxRestore(tampered, corruptTarget, keyFile);
   assert.notEqual(rejected.status, 0);
   assert.match(rejected.stderr, /authenticated decryption failed/);
   assert.deepEqual(fs.readdirSync(corruptTarget), []);
+
+  // Valid-looking metadata changes are rejected by the keyed manifest MAC.
+  const metaModified = path.join(exportDir, 'modified-manifest.sqlite.enc');
+  fs.copyFileSync(backup.path, metaModified);
+  const changedMetadata = {
+    ...manifest,
+    file: path.basename(metaModified),
+    plaintextSha256: '0'.repeat(64),
+  };
+  fs.writeFileSync(metaModified + '.manifest.json', JSON.stringify(changedMetadata), {
+    mode: 0o600,
+  });
+  const metadataTarget = empty(root, 'manifest-tamper-target');
+  const metadataResult = sandboxRestore(metaModified, metadataTarget, keyFile);
+  assert.notEqual(metadataResult.status, 0);
+  assert.match(metadataResult.stderr, /authenticated manifest mismatch/);
+  assert.deepEqual(fs.readdirSync(metadataTarget), []);
+
+  const plaintextFile = path.join(root, 'forbidden-plaintext.sqlite');
+  fs.writeFileSync(plaintextFile, 'SQLite format 3');
+  const plaintextStore = empty(root, 'plaintext-store-refusal');
+  assert.notEqual(simulateTransfer('deposit', plaintextFile, plaintextStore).status, 0);
+  assert.deepEqual(fs.readdirSync(plaintextStore), []);
+  const occupiedStore = empty(root, 'occupied-offsite-store');
+  fs.writeFileSync(path.join(occupiedStore, 'some-existing-object'), 'preserve');
+  assert.notEqual(simulateTransfer('deposit', backup.path, occupiedStore).status, 0);
+  assert.equal(
+    fs.readFileSync(path.join(occupiedStore, 'some-existing-object'), 'utf8'),
+    'preserve',
+  );
+  const linkedStore = path.join(root, 'linked-object-store');
+  fs.symlinkSync(store, linkedStore);
+  assert.notEqual(simulateTransfer('deposit', backup.path, linkedStore).status, 0);
 
   const linked = path.join(root, 'linked-backup.sqlite.enc');
   fs.symlinkSync(backup.path, linked);

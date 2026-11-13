@@ -15,7 +15,7 @@ if [[ -n "${DATABASE_PATH:-}" || -n "${RAILWAY_VOLUME_MOUNT_PATH:-}" ]]; then
 fi
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$root"
-if [[ "$(git branch --show-current)" != "work/railway-final-t4" ]] ||
+if [[ "$(git branch --show-current)" != "work/oneclick-unblock-t4" ]] ||
    ! git merge-base --is-ancestor ae588a1a56f2561ca2323457463e5b9e203de509 HEAD; then
   echo "Refused: use the isolated T4 worktree based on the pinned SHA" >&2
   exit 2
@@ -50,5 +50,7 @@ else
   docker build -f Dockerfile.railway -t "$image" .
   echo "T04_LOCAL_CHECK: isolate Docker volumes and verify readonly refusal"
   W3_SANDBOX_ONLY=1 bash scripts/verify-railway-docker-isolation.sh "$image"
+  echo "T04_LOCAL_CHECK: authenticated offsite retrieval across five disposable Docker volumes"
+  T04_LOCAL_TEST_ONLY=1 bash scripts/test-t4-offsite-docker.sh "$image"
 fi
 echo "T04_LOCAL_TESTS_COMPLETE: local-only evidence; Railway live NOT_TESTED"
