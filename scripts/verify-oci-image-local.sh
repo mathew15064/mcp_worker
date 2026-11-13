@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Read-only image identity check against the exact committed PC checkout.
-# Local image ID = config digest, NOT a published registry manifest digest.
+# Docker local image ID / RepoDigests can reflect a local OCI manifest index;
+# neither demonstrates a published remote registry manifest digest.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 image="${1:?usage: verify-oci-image-local.sh LOCAL_IMAGE_TAG}"
@@ -23,5 +24,6 @@ image_id="$(docker image inspect --format '{{.Id}}' "$image")"
 repo_digests="$(docker image inspect --format '{{json .RepoDigests}}' "$image")"
 echo "OCI_LOCAL_PASS source_sha=$source_sha tree_sha=$tree_sha image_id=$image_id os=linux/amd64"
 echo "OCI_LOCAL_REPO_DIGEST_OBSERVED=$repo_digests"
+echo 'OCI_LOCAL_ID_NOTE: Docker BuildKit/containerd may use a local OCI manifest-list ID, not the image config SHA'
 echo "OCI_REGISTRY_MANIFEST_DIGEST=NOT_AVAILABLE_UNTIL_OWNER_APPROVED_REGISTRY_PUBLISH"
 echo 'OCI_RUNTIME_NOTE: image config starts root for mount chown, real PID1 UID1000 checked by Docker integration test'

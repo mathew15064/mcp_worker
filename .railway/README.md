@@ -22,9 +22,9 @@ push. There is no existing registry digest or public template URL.
 - `verify-image-pin.sh`: *read-only* immutable reference format and local
   provenance preflight, **not** live registry digest equivalence or approval.
 - `scripts/verify-oci-image-local.sh`: after committed source and PC build,
-  verifies image configuration ID, source SHA/tree OCI labels, platform,
-  healthcheck and entrypoint. A Docker local image ID is **not** a manifest
-  digest. Runtime UID 1000 and volume safety are tested with Docker.
+  verifies Docker local image ID, source SHA/tree OCI labels, platform,
+  healthcheck and entrypoint. A Docker local image ID or RepoDigests entry is **not proof of a
+  remotely published** registry manifest digest. Runtime UID 1000 and volume safety are tested with Docker.
 - `Dockerfile.railway`: locally built with pinned base stages; short
   root volume initializer, then `su-exec node` runs server PID1 UID 1000.
   `MCP_SETUP_SECRET` is required, never has a default; mountinfo guard

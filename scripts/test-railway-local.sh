@@ -126,7 +126,8 @@ docker volume create --label io.mcp-worker.t3.disposable=true "$other_volume" >/
 other_secret="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))")"
 docker run -d --name "$other_container" --label io.mcp-worker.t3.disposable=true \
   -v "$other_volume:/app/data" "${common[@]}" \
-  -e RAILWAY_VOLUME_NAME="$other_volume" -e MCP_SETUP_SECRET="$other_secret" "$image" >/dev/null
+  -e RAILWAY_VOLUME_NAME="$other_volume" -e MCP_SETUP_SECRET="$other_secret" \
+  -e RAILWAY_PUBLIC_DOMAIN=t3-isolated-local.up.railway.app "$image" >/dev/null
 unset other_secret
 for i in {1..45}; do
   if docker exec "$other_container" node -e "fetch('http://127.0.0.1:80/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; then

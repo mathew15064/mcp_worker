@@ -40,11 +40,11 @@ RAILWAY_DOCKER_INTEGRATION=1 RAILWAY_TEST_IMAGE="$LOCAL_IMAGE" \
   node --test dist/tests/railway-platform-config-docker.test.js
 ```
 
-Capture the full source commit SHA, tree SHA, PC Docker image `Id` (config
-digest, e.g., `sha256:<64 hex>`), OS/architecture, pinned base images, OCI
-labels, test exit codes and `RepoDigests`. **An image config ID, Docker
-archive checksum, base-image digest, or a locally minted tag is NOT the
-pushed registry manifest digest.** If the registry has not been published
+Capture the full source commit SHA, tree SHA, PC Docker image `Id` (local Docker object identity, possibly an OCI manifest-list
+digest under BuildKit/containerd, e.g. `sha256:<64 hex>`), OS/architecture, pinned base images, OCI
+labels, test exit codes and `RepoDigests`. **A local image ID, locally produced OCI index, synthetic local RepoDigests
+entry, image config ID, Docker archive checksum, base-image digest, or a local
+tag is NOT proof of an uploaded registry manifest digest.** If the registry has not been published
 under separate owner authorization, record
 `REGISTRY_MANIFEST_DIGEST=NOT_AVAILABLE`; never guess one.
 
