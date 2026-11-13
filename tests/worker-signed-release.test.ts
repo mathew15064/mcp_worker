@@ -8,7 +8,12 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 
-type ApprovedRelease = { version: string; commit: string; publicKeyBase64: string };
+type ApprovedRelease = {
+  version: string;
+  commit: string;
+  publicKeyBase64: string;
+  previousPublicKeySha256?: string;
+};
 type Installer = (baseUrl: string, approval?: ApprovedRelease) => string;
 type WorkerRouteApi = {
   installerScript: Installer;
@@ -34,6 +39,7 @@ function signer() {
     publicKeyBase64: Buffer.from(
       keys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
     ).toString('base64'),
+    fingerprint: hash(keys.publicKey.export({ type: 'spki', format: 'der' })),
   };
 }
 type Package = { binary: Buffer; metadata: Buffer; sums: Buffer; signature: Buffer };
@@ -199,7 +205,11 @@ void test(
         BOT_REPORT_WORKER_SKIP_PATH: '1',
       };
       async function install(
-        approval = { version: VERSION_A, commit: COMMIT_A, publicKeyBase64: key.publicKeyBase64 },
+        approval: ApprovedRelease = {
+          version: VERSION_A,
+          commit: COMMIT_A,
+          publicKeyBase64: key.publicKeyBase64,
+        },
         extra: NodeJS.ProcessEnv = {},
       ) {
         const script = win
@@ -237,6 +247,10 @@ void test(
       assert.equal(
         fs.readFileSync(path.join(stateRoot, 'release-commit'), 'utf8').trim(),
         COMMIT_A,
+      );
+      assert.equal(
+        fs.readFileSync(path.join(stateRoot, 'release-key-sha256'), 'utf8').trim(),
+        key.fingerprint,
       );
       const identity = Buffer.from('test-only-identity-sentinel');
       const config = Buffer.from('test-only-config-sentinel');
@@ -348,6 +362,68 @@ void test(
           binaryB,
         );
       });
+      const binaryC = Buffer.concat([binaryB, Buffer.from('\nSIGNED_TEST_ROTATION_ONLY\n')]);
+      const rotated = {
+        version: '2.3.7',
+        commit: 'aabbccddeeff',
+        publicKeyBase64: wrong.publicKeyBase64,
+      };
+      await t.test('new signer is not trusted without an approved rotation', async () => {
+        active = bundle(wrong, file, binaryC, rotated.version, rotated.commit);
+        await unchanged('unapproved new root', install(rotated), binaryB);
+        assert.equal(
+          fs.readFileSync(path.join(stateRoot, 'release-key-sha256'), 'utf8').trim(),
+          key.fingerprint,
+        );
+      });
+      await t.test(
+        'same-version key change is rejected even with old root allowlisted',
+        async () => {
+          active = bundle(wrong, file, binaryC, VERSION_B, COMMIT_B);
+          await unchanged(
+            'same-version rotation',
+            install({
+              ...rotated,
+              version: VERSION_B,
+              commit: COMMIT_B,
+              previousPublicKeySha256: key.fingerprint,
+            }),
+            binaryB,
+          );
+        },
+      );
+      await t.test('explicit one-way owner-reviewed trust-root rotation', async () => {
+        active = bundle(wrong, file, binaryC, rotated.version, rotated.commit);
+        const result = await install({ ...rotated, previousPublicKeySha256: key.fingerprint });
+        assert.equal(result.code, 0, 'approved rotation: ' + result.output);
+        assert.deepEqual(fs.readFileSync(installed), binaryC);
+        assert.equal(
+          fs.readFileSync(path.join(stateRoot, 'release-key-sha256'), 'utf8').trim(),
+          wrong.fingerprint,
+        );
+        assert.equal(
+          fs.readFileSync(path.join(stateRoot, 'release-version'), 'utf8').trim(),
+          rotated.version,
+        );
+      });
+      await t.test('old trust root cannot silently take control after rotation', async () => {
+        active = bundle(key, file, binaryA, '2.3.8', 'aabbccddeeff');
+        await unchanged(
+          'root regression',
+          install({
+            version: '2.3.8',
+            commit: 'aabbccddeeff',
+            publicKeyBase64: key.publicKeyBase64,
+          }),
+          binaryC,
+        );
+      });
+      await t.test('corrupted installed trust record fails closed', async () => {
+        fs.writeFileSync(path.join(stateRoot, 'release-key-sha256'), 'corrupt\n');
+        active = bundle(wrong, file, binaryC, rotated.version, rotated.commit);
+        await unchanged('corrupt local root', install(rotated), binaryC);
+        fs.writeFileSync(path.join(stateRoot, 'release-key-sha256'), wrong.fingerprint + '\n');
+      });
     } finally {
       if (server) await new Promise<void>((resolve) => server?.close(() => resolve()));
       fs.rmSync(root, { recursive: true, force: true });
@@ -362,6 +438,7 @@ void test(
   },
   async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-manifest-sign-'));
+    const privateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-offline-key-'));
     try {
       const scripts = path.join(root, 'scripts');
       const bin = path.join(root, 'worker', 'bin');
@@ -393,23 +470,39 @@ void test(
       }
       fs.writeFileSync(path.join(bin, 'SHA256SUMS'), sums());
       const key = signer();
-      const privatePath = path.join(root, 'ephemeral-private.pem');
+      const privatePath = path.join(privateDir, 'ephemeral-private.pem');
       fs.writeFileSync(privatePath, key.privateKey.export({ type: 'pkcs8', format: 'pem' }), {
         mode: 0o600,
       });
-      function sign(expectedVersion: string) {
+      function sign(expectedVersion: string, privateFile = privatePath, commit = COMMIT_A) {
         return execute(
           'sh',
-          [script, privatePath],
+          [script, privateFile],
           {
             ...process.env,
             WORKER_RELEASE_EXPECTED_VERSION: expectedVersion,
-            WORKER_RELEASE_EXPECTED_COMMIT: COMMIT_A,
+            WORKER_RELEASE_EXPECTED_COMMIT: commit,
           },
           root,
         );
       }
       assert.notEqual((await sign(VERSION_B)).code, 0, 'wrong approval version accepted');
+      assert.notEqual(
+        (await sign(VERSION_A, privatePath, '0123456')).code,
+        0,
+        'short commit accepted',
+      );
+      const insideKey = path.join(root, 'private-in-source.pem');
+      fs.copyFileSync(privatePath, insideKey);
+      assert.notEqual(
+        (await sign(VERSION_A, insideKey)).code,
+        0,
+        'signing key inside source accepted',
+      );
+      fs.chmodSync(privatePath, 0o644);
+      assert.notEqual((await sign(VERSION_A)).code, 0, 'world-readable key accepted');
+      fs.chmodSync(privatePath, 0o600);
+      assert.equal(fs.existsSync(path.join(bin, 'SHA256SUMS.sig')), false);
       fs.writeFileSync(
         path.join(bin, 'SHA256SUMS'),
         sums().replace(/^[0-9a-f]{64}/, '0'.repeat(64)),
@@ -420,8 +513,14 @@ void test(
       const manifest = fs.readFileSync(path.join(bin, 'SHA256SUMS'));
       const signature = fs.readFileSync(path.join(bin, 'SHA256SUMS.sig'));
       assert.equal(crypto.verify('sha256', manifest, key.publicPem, signature), true);
+      assert.notEqual(
+        (await sign(VERSION_A)).code,
+        0,
+        'overwriting existing detached signature accepted',
+      );
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(privateDir, { recursive: true, force: true });
     }
   },
 );

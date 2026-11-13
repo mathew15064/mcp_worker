@@ -13,11 +13,14 @@ type ApprovedWorkerRelease = Readonly<{
   version: string;
   commit: string;
   publicKeyBase64: string;
+  // Only for an owner-reviewed, one-way rotation from an installed trust root.
+  previousPublicKeySha256?: string;
 }>;
 const APPROVED_WORKER_RELEASE: ApprovedWorkerRelease = Object.freeze({
   version: '',
   commit: '',
   publicKeyBase64: '',
+  previousPublicKeySha256: '',
 });
 
 const router = express.Router();
@@ -83,6 +86,7 @@ function unixInstallerScript(
   const pinnedVersion = shellSingleQuote(approved.version);
   const pinnedCommit = shellSingleQuote(approved.commit);
   const pinnedKey = shellSingleQuote(approved.publicKeyBase64);
+  const previousKey = shellSingleQuote(approved.previousPublicKeySha256 || '');
   return `#!/bin/sh
 set -eu
 
@@ -91,6 +95,7 @@ EXPECTED_OS=${osName}
 PINNED_VERSION=${pinnedVersion}
 PINNED_COMMIT=${pinnedCommit}
 PINNED_PUBLIC_KEY_B64=${pinnedKey}
+PINNED_PREVIOUS_KEY_SHA256=${previousKey}
 INSTALL_ROOT="${'${BOT_REPORT_WORKER_INSTALL_ROOT:-$HOME/.local/share/bot-report-worker}'}"
 BIN_DIR="${'${BOT_REPORT_WORKER_BIN_DIR:-$HOME/.local/bin}'}"
 WORKER_HOME="${'${BOT_REPORT_WORKER_HOME:-$HOME/.bot-report-worker}'}"
@@ -123,10 +128,13 @@ need openssl
 }
 case "$PINNED_VERSION" in *[!0-9.]*|'') echo "[systemtd] invalid release version" >&2; exit 1;; esac
 case "$PINNED_COMMIT" in *[!0-9a-f]*|'') echo "[systemtd] invalid release commit" >&2; exit 1;; esac
+if [ -n "$PINNED_PREVIOUS_KEY_SHA256" ]; then
+  printf '%s' "$PINNED_PREVIOUS_KEY_SHA256" | grep -Eq '^[0-9a-f]{64}$' || { echo "[systemtd] invalid prior trust root" >&2; exit 1; }
+fi
 printf '%s\n' "$PINNED_VERSION" | grep -Eq '^[0-9]+[.][0-9]+[.][0-9]+$' ||
   { echo "[systemtd] invalid semantic version" >&2; exit 1; }
 COMMIT_LEN="$(printf '%s' "$PINNED_COMMIT" | wc -c | tr -d ' ')"
-[ "$COMMIT_LEN" -ge 7 ] && [ "$COMMIT_LEN" -le 40 ] || { echo "[systemtd] invalid release commit length" >&2; exit 1; }
+[ "$COMMIT_LEN" -ge 12 ] && [ "$COMMIT_LEN" -le 40 ] || { echo "[systemtd] invalid release commit length" >&2; exit 1; }
 if [ "$ACTION" = rollback ]; then
   echo "[systemtd] manual rollback prohibited; explicitly approve a signed release" >&2
   exit 1
@@ -164,6 +172,8 @@ printf '%s' "$PINNED_PUBLIC_KEY_B64" | openssl base64 -d -A > "$TMP/release-key.
 openssl rsa -pubin -in "$TMP/release-key.pem" -noout >/dev/null 2>&1 || {
   echo "[systemtd] invalid pinned RSA public key" >&2; exit 1;
 }
+openssl pkey -pubin -in "$TMP/release-key.pem" -outform DER -out "$TMP/release-key.der" 2>/dev/null || exit 1
+PINNED_KEY_SHA256="$(openssl dgst -sha256 "$TMP/release-key.der" | awk '{print $NF}')"
 curl -fsSL "$BASE_URL/worker/dist/SHA256SUMS" -o "$TMP/SHA256SUMS"
 curl -fsSL "$BASE_URL/worker/dist/SHA256SUMS.sig" -o "$TMP/SHA256SUMS.sig"
 openssl dgst -sha256 -verify "$TMP/release-key.pem" -signature "$TMP/SHA256SUMS.sig" "$TMP/SHA256SUMS" >/dev/null || {
@@ -188,16 +198,26 @@ ACTUAL_RELEASE="$(openssl dgst -sha256 "$TMP/WORKER_RELEASE" | awk '{print $NF}'
 }
 RECORDED_VERSION="$WORKER_HOME/release-version"
 RECORDED_COMMIT="$WORKER_HOME/release-commit"
+RECORDED_KEY="$WORKER_HOME/release-key-sha256"
+OLD_VERSION=''
+OLD_COMMIT=''
 if [ -f "$SYSTEMTD" ] && [ ! -f "$RECORDED_VERSION" ]; then
   echo "[systemtd] existing runtime lacks verified release record" >&2; exit 1
 fi
-if [ -e "$RECORDED_VERSION" ] || [ -e "$RECORDED_COMMIT" ]; then
-  [ -f "$RECORDED_VERSION" ] && [ -f "$RECORDED_COMMIT" ] &&
-    [ ! -L "$RECORDED_VERSION" ] && [ ! -L "$RECORDED_COMMIT" ] || {
+if [ -e "$RECORDED_VERSION" ] || [ -e "$RECORDED_COMMIT" ] || [ -e "$RECORDED_KEY" ]; then
+  [ -f "$RECORDED_VERSION" ] && [ -f "$RECORDED_COMMIT" ] && [ -f "$RECORDED_KEY" ] &&
+    [ ! -L "$RECORDED_VERSION" ] && [ ! -L "$RECORDED_COMMIT" ] && [ ! -L "$RECORDED_KEY" ] || {
     echo "[systemtd] incomplete or unsafe release record" >&2; exit 1;
   }
   OLD_VERSION="$(cat "$RECORDED_VERSION")"
   OLD_COMMIT="$(cat "$RECORDED_COMMIT")"
+  OLD_KEY_SHA256="$(cat "$RECORDED_KEY")"
+  printf '%s' "$OLD_KEY_SHA256" | grep -Eq '^[0-9a-f]{64}$' || { echo "[systemtd] invalid recorded trust root" >&2; exit 1; }
+  if [ "$OLD_KEY_SHA256" != "$PINNED_KEY_SHA256" ]; then
+    [ "$PINNED_PREVIOUS_KEY_SHA256" = "$OLD_KEY_SHA256" ] && [ "$OLD_VERSION" != "$PINNED_VERSION" ] || {
+      echo "[systemtd] unapproved signing trust-root replacement" >&2; exit 1;
+    }
+  fi
   awk -v old="$OLD_VERSION" -v new="$PINNED_VERSION" 'BEGIN {
     if (old !~ /^[0-9]+\\.[0-9]+\\.[0-9]+$/ || new !~ /^[0-9]+\\.[0-9]+\\.[0-9]+$/) exit 1
     split(old,a,"."); split(new,b,".")
@@ -252,6 +272,9 @@ for ALIAS in "$BIN_DIR/systemtd" "$BIN_DIR/bot-report-worker"; do
   fi
 done
 if [ "$SERVICE" = 0 ] && [ "$ACTION" = install ] && [ -f "$SYSTEMTD" ] && cmp -s "$SYSTEMTD" "$TMP/systemtd"; then
+  [ "$OLD_VERSION" = "$PINNED_VERSION" ] && [ "$OLD_COMMIT" = "$PINNED_COMMIT" ] || {
+    echo "[systemtd] identical binary with different release identity" >&2; exit 1;
+  }
   echo "[systemtd] runtime already current; identity and rollback retained"
   exit 0
 fi
@@ -386,7 +409,8 @@ fi
 
 printf '%s\\n' "$PINNED_VERSION" > "$WORKER_HOME/release-version"
 printf '%s\\n' "$PINNED_COMMIT" > "$WORKER_HOME/release-commit"
-chmod 0600 "$WORKER_HOME/release-version" "$WORKER_HOME/release-commit"
+printf '%s\\n' "$PINNED_KEY_SHA256" > "$WORKER_HOME/release-key-sha256"
+chmod 0600 "$WORKER_HOME/release-version" "$WORKER_HOME/release-commit" "$WORKER_HOME/release-key-sha256"
 
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
@@ -426,13 +450,16 @@ function windowsInstallerPayloadScript(
   const pinnedVersion = powershellSingleQuote(approved.version);
   const pinnedCommit = powershellSingleQuote(approved.commit);
   const pinnedKey = powershellSingleQuote(approved.publicKeyBase64);
+  const previousKey = powershellSingleQuote(approved.previousPublicKeySha256 || '');
   return `$ErrorActionPreference = 'Stop'
 $BaseUrl = ${base}
 $PinnedVersion = ${pinnedVersion}
 $PinnedCommit = ${pinnedCommit}
 $PinnedPublicKeyB64 = ${pinnedKey}
+$PinnedPreviousKeySha256 = ${previousKey}
 if (-not $PinnedVersion -or -not $PinnedCommit -or -not $PinnedPublicKeyB64) { throw 'Signed release not approved' }
-if ($PinnedVersion -cnotmatch '^[0-9]+\\.[0-9]+\\.[0-9]+$' -or $PinnedCommit -cnotmatch '^[0-9a-f]{7,40}$') { throw 'Invalid release pin' }
+if ($PinnedVersion -cnotmatch '^[0-9]+\\.[0-9]+\\.[0-9]+$' -or $PinnedCommit -cnotmatch '^[0-9a-f]{12,40}$') { throw 'Invalid release pin' }
+if ($PinnedPreviousKeySha256 -and $PinnedPreviousKeySha256 -cnotmatch '^[0-9a-f]{64}$') { throw 'Invalid prior trust root' }
 Get-Command openssl -ErrorAction Stop | Out-Null
 $InstallRoot = if ($env:BOT_REPORT_WORKER_INSTALL_ROOT) { $env:BOT_REPORT_WORKER_INSTALL_ROOT } else { Join-Path $env:LOCALAPPDATA 'BotReportWorker' }
 $Target = Join-Path $InstallRoot 'current'
@@ -471,6 +498,10 @@ try {
   [IO.File]::WriteAllBytes($KeyPath, [Convert]::FromBase64String($PinnedPublicKeyB64))
   & openssl rsa -pubin -in $KeyPath -noout 2>$null
   if ($LASTEXITCODE -ne 0) { throw 'Invalid pinned RSA public key' }
+  $PublicDer = Join-Path $Tmp 'release-key.der'
+  & openssl pkey -pubin -in $KeyPath -outform DER -out $PublicDer 2>$null
+  if ($LASTEXITCODE -ne 0) { throw 'Cannot fingerprint pinned public key' }
+  $PinnedKeySha256 = (Get-FileHash -Algorithm SHA256 $PublicDer).Hash.ToLowerInvariant()
   Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/worker/dist/SHA256SUMS" -OutFile $Sums
   Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/worker/dist/SHA256SUMS.sig" -OutFile $Signature
   & openssl dgst -sha256 -verify $KeyPath -signature $Signature $Sums | Out-Null
@@ -494,15 +525,21 @@ try {
   }
   $VersionPath = Join-Path $WorkerHome 'release-version'
   $CommitPath = Join-Path $WorkerHome 'release-commit'
+  $KeyRecordPath = Join-Path $WorkerHome 'release-key-sha256'
   $Existing = Join-Path $Target 'bot-report-worker.exe'
   if ((Test-Path $Existing) -and -not (Test-Path $VersionPath)) { throw 'Existing runtime lacks verified release record' }
-  if ((Test-Path $VersionPath) -or (Test-Path $CommitPath)) {
-    if (-not (Test-Path $VersionPath) -or -not (Test-Path $CommitPath)) { throw 'Incomplete release record' }
-    foreach ($Record in @($VersionPath,$CommitPath)) {
+  if ((Test-Path $VersionPath) -or (Test-Path $CommitPath) -or (Test-Path $KeyRecordPath)) {
+    if (-not (Test-Path $VersionPath) -or -not (Test-Path $CommitPath) -or -not (Test-Path $KeyRecordPath)) { throw 'Incomplete release record' }
+    foreach ($Record in @($VersionPath,$CommitPath,$KeyRecordPath)) {
       if ((Get-Item -LiteralPath $Record).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Unsafe release record' }
     }
     $OldVersion = (Get-Content $VersionPath -Raw).Trim()
     $OldCommit = (Get-Content $CommitPath -Raw).Trim()
+    $OldKeySha256 = (Get-Content $KeyRecordPath -Raw).Trim()
+    if ($OldKeySha256 -cnotmatch '^[0-9a-f]{64}$') { throw 'Malformed recorded trust root' }
+    if ($OldKeySha256 -cne $PinnedKeySha256 -and ($PinnedPreviousKeySha256 -cne $OldKeySha256 -or $PinnedVersion -ceq $OldVersion)) {
+      throw 'Unapproved signing trust-root replacement'
+    }
     if ($OldVersion -notmatch '^[0-9]+\\.[0-9]+\\.[0-9]+$') { throw 'Malformed release record' }
     if ([version]$PinnedVersion -lt [version]$OldVersion) { throw 'Signed release rollback rejected' }
     if ($OldVersion -ceq $PinnedVersion -and $OldCommit -cne $PinnedCommit) { throw 'Release version reused for another commit' }
@@ -518,6 +555,7 @@ try {
   $Old = Join-Path $Tmp 'old.exe'
   $Next = Join-Path $Target ('.next-' + [guid]::NewGuid().ToString('N') + '.exe')
   if ((Test-Path $Existing) -and ($Action -eq 'install') -and ((Get-FileHash -Algorithm SHA256 $Existing).Hash.ToLowerInvariant() -eq $Actual)) {
+    if ($OldVersion -cne $PinnedVersion -or $OldCommit -cne $PinnedCommit) { throw 'Identical binary with different release identity' }
     Write-Host '[bot-report-worker] runtime already current; rollback retained'
     return
   }
@@ -565,6 +603,7 @@ try {
   }
   Set-Content -Encoding ascii -Path $VersionPath -Value $PinnedVersion
   Set-Content -Encoding ascii -Path $CommitPath -Value $PinnedCommit
+  Set-Content -Encoding ascii -Path $KeyRecordPath -Value $PinnedKeySha256
   $env:Path = "$Target;$env:Path"
   Write-Host "[bot-report-worker] installed standalone runtime: $(Join-Path $Target 'bot-report-worker.exe') (windows/$Arch)"
   if (Test-Path (Join-Path $WorkerHome 'state.json')) {
