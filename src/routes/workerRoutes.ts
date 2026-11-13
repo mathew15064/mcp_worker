@@ -117,6 +117,24 @@ need curl
 need uname
 need id
 need openssl
+# Signed artifacts cannot be fetched over insecure public HTTP or via a
+# redirect that downgrades HTTPS; allow HTTP only for loopback test fixtures.
+case "$BASE_URL" in
+  https://*)
+    printf '%s' "$BASE_URL" | grep -Eq '^https://[a-zA-Z0-9.-]+(:[0-9]{1,5})?$' || {
+      echo "[systemtd] invalid HTTPS release origin" >&2; exit 1;
+    }
+    DOWNLOAD_SCHEME=https ;;
+  *)
+    if printf '%s' "$BASE_URL" | grep -Eq '^http://(127[.]0[.]0[.]1|localhost):[0-9]{1,5}$'; then
+      DOWNLOAD_SCHEME=http
+    else
+      echo "[systemtd] HTTPS release origin required" >&2; exit 1
+    fi ;;
+esac
+download_release_file() {
+  curl -fsSL --max-redirs 0 --proto "=$DOWNLOAD_SCHEME" --proto-redir "=$DOWNLOAD_SCHEME" "$BASE_URL/worker/dist/$1" -o "$2"
+}
 [ -n "$PINNED_VERSION" ] && [ -n "$PINNED_COMMIT" ] && [ -n "$PINNED_PUBLIC_KEY_B64" ] || {
   echo "[systemtd] signed release not approved" >&2; exit 1;
 }
@@ -168,8 +186,8 @@ openssl rsa -pubin -in "$TMP/release-key.pem" -noout >/dev/null 2>&1 || {
 }
 openssl pkey -pubin -in "$TMP/release-key.pem" -outform DER -out "$TMP/release-key.der" 2>/dev/null || exit 1
 PINNED_KEY_SHA256="$(openssl dgst -sha256 "$TMP/release-key.der" | awk '{print $NF}')"
-curl -fsSL "$BASE_URL/worker/dist/SHA256SUMS" -o "$TMP/SHA256SUMS"
-curl -fsSL "$BASE_URL/worker/dist/SHA256SUMS.sig" -o "$TMP/SHA256SUMS.sig"
+download_release_file SHA256SUMS "$TMP/SHA256SUMS"
+download_release_file SHA256SUMS.sig "$TMP/SHA256SUMS.sig"
 openssl dgst -sha256 -verify "$TMP/release-key.pem" -signature "$TMP/SHA256SUMS.sig" "$TMP/SHA256SUMS" >/dev/null || {
   echo "[systemtd] signature verification failed" >&2; exit 1;
 }
@@ -182,7 +200,7 @@ manifest_hash() {
     }' "$TMP/SHA256SUMS"
 }
 RELEASE_HASH="$(manifest_hash WORKER_RELEASE)" || { echo "[systemtd] missing or duplicate release checksum" >&2; exit 1; }
-curl -fsSL "$BASE_URL/worker/dist/WORKER_RELEASE" -o "$TMP/WORKER_RELEASE"
+download_release_file WORKER_RELEASE "$TMP/WORKER_RELEASE"
 ACTUAL_RELEASE="$(openssl dgst -sha256 "$TMP/WORKER_RELEASE" | awk '{print $NF}')"
 [ "$ACTUAL_RELEASE" = "$RELEASE_HASH" ] || { echo "[systemtd] release metadata checksum failed" >&2; exit 1; }
 [ "$(wc -l < "$TMP/WORKER_RELEASE" | tr -d ' ')" = 2 ] &&
@@ -212,19 +230,23 @@ if [ -e "$RECORDED_VERSION" ] || [ -e "$RECORDED_COMMIT" ] || [ -e "$RECORDED_KE
       echo "[systemtd] unapproved signing trust-root replacement" >&2; exit 1;
     }
   fi
+  # Compare canonical decimal components as text, not awk floating-point numbers:
+  # huge semver components must not round together and allow a downgrade.
   awk -v old="$OLD_VERSION" -v new="$PINNED_VERSION" 'BEGIN {
     if (old !~ /^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$/ || new !~ /^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$/) exit 1
     split(old,a,"."); split(new,b,".")
     for (i=1;i<=3;i++) {
-      if (b[i]+0<a[i]+0) exit 1
-      if (b[i]+0>a[i]+0) exit 0
+      if (length(b[i])<length(a[i])) exit 1
+      if (length(b[i])>length(a[i])) exit 0
+      if (("v" b[i])<("v" a[i])) exit 1
+      if (("v" b[i])>("v" a[i])) exit 0
     }
   }' || { echo "[systemtd] signed release rollback rejected" >&2; exit 1; }
   if [ "$OLD_VERSION" = "$PINNED_VERSION" ] && [ "$OLD_COMMIT" != "$PINNED_COMMIT" ]; then
     echo "[systemtd] release version reused for another commit" >&2; exit 1
   fi
 fi
-curl -fsSL "$BASE_URL/worker/dist/$FILE" -o "$TMP/systemtd"
+download_release_file "$FILE" "$TMP/systemtd"
 EXPECTED="$(manifest_hash "$FILE")" || { echo "[systemtd] missing or duplicate binary checksum" >&2; exit 1; }
 if [ -z "$EXPECTED" ]; then
   echo "[systemtd] checksum manifest does not contain $FILE." >&2
@@ -460,6 +482,8 @@ $PinnedCommit = ${pinnedCommit}
 $PinnedPublicKeyB64 = ${pinnedKey}
 $PinnedPreviousKeySha256 = ${previousKey}
 if (-not $PinnedVersion -or -not $PinnedCommit -or -not $PinnedPublicKeyB64) { throw 'Signed release not approved' }
+# The only HTTP exception is a locally bound, disposable verification fixture.
+if ($BaseUrl -cnotmatch '^https://[a-zA-Z0-9.-]+(:[0-9]{1,5})?$' -and $BaseUrl -cnotmatch '^http://(127\\.0\\.0\\.1|localhost):[0-9]{1,5}$') { throw 'HTTPS release origin required' }
 if ($PinnedVersion -cnotmatch '^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$' -or $PinnedCommit -cnotmatch '^[0-9a-f]{12,40}$') { throw 'Invalid release pin' }
 if ($PinnedPreviousKeySha256 -and $PinnedPreviousKeySha256 -cnotmatch '^[0-9a-f]{64}$') { throw 'Invalid prior trust root' }
 Get-Command openssl -ErrorAction Stop | Out-Null
@@ -504,8 +528,8 @@ try {
   & openssl pkey -pubin -in $KeyPath -outform DER -out $PublicDer 2>$null
   if ($LASTEXITCODE -ne 0) { throw 'Cannot fingerprint pinned public key' }
   $PinnedKeySha256 = (Get-FileHash -Algorithm SHA256 $PublicDer).Hash.ToLowerInvariant()
-  Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/worker/dist/SHA256SUMS" -OutFile $Sums
-  Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/worker/dist/SHA256SUMS.sig" -OutFile $Signature
+  Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -Uri "$BaseUrl/worker/dist/SHA256SUMS" -OutFile $Sums
+  Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -Uri "$BaseUrl/worker/dist/SHA256SUMS.sig" -OutFile $Signature
   & openssl dgst -sha256 -verify $KeyPath -signature $Signature $Sums | Out-Null
   if ($LASTEXITCODE -ne 0) { throw 'Manifest signature verification failed' }
   $Entries = @(Get-Content $Sums | ForEach-Object {
@@ -517,7 +541,7 @@ try {
     if ($Found.Count -ne 1) { throw "Missing or duplicate checksum: $Name" }
     return $Found[0].Hash
   }
-  Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/worker/dist/WORKER_RELEASE" -OutFile $Metadata
+  Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -Uri "$BaseUrl/worker/dist/WORKER_RELEASE" -OutFile $Metadata
   if ((Get-FileHash -Algorithm SHA256 $Metadata).Hash.ToLowerInvariant() -cne (ExpectedHash 'WORKER_RELEASE')) {
     throw 'Release metadata checksum failed'
   }
@@ -546,7 +570,7 @@ try {
     if ([version]$PinnedVersion -lt [version]$OldVersion) { throw 'Signed release rollback rejected' }
     if ($OldVersion -ceq $PinnedVersion -and $OldCommit -cne $PinnedCommit) { throw 'Release version reused for another commit' }
   }
-  Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/worker/dist/$File" -OutFile $Downloaded
+  Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -Uri "$BaseUrl/worker/dist/$File" -OutFile $Downloaded
   $Expected = ExpectedHash $File
   $Actual = (Get-FileHash -Algorithm SHA256 $Downloaded).Hash.ToLowerInvariant()
   if ($Actual -ne $Expected.ToLowerInvariant()) { throw "Checksum verification failed for $File" }
@@ -624,7 +648,7 @@ try {
 }
 
 function normalizeProfileBase(value: unknown) {
-  const clean = String(value || '')
+  const clean = (typeof value === 'string' ? value : '')
     .trim()
     .replace(/[\x00-\x1f\x7f]/g, '')
     .slice(0, 90);
@@ -784,21 +808,31 @@ router.post('/worker/v1/enroll', enrollmentLimiter, async (req, res, next) => {
         message: 'MySQL must be ready before workers can enroll.',
       });
     }
+    // Express parses request bodies as any; keep the boundary typed and let
+    // the enrollment service perform authoritative runtime validation.
+    const body = (req.body ?? {}) as {
+      token: string;
+      name: string;
+      public_key: string;
+      capabilities?: string[];
+      create_profile?: boolean;
+      profile_name?: string;
+    };
     const worker = await workerAuthService.enroll({
-      token: req.body?.token,
-      name: req.body?.name,
-      publicKey: req.body?.public_key,
-      capabilities: req.body?.capabilities,
+      token: body.token,
+      name: body.name,
+      publicKey: body.public_key,
+      capabilities: body.capabilities,
     });
     if (!worker)
       throw Object.assign(new Error('Worker enrollment did not return an identity.'), {
         code: 'WORKER_ENROLLMENT_INVALID',
         status: 500,
       });
-    const wantsProfile = req.body?.create_profile === true;
+    const wantsProfile = body.create_profile === true;
     const profile = wantsProfile
       ? await createEnrollmentProfile(worker, {
-          requestedName: req.body?.profile_name,
+          requestedName: body.profile_name,
         })
       : null;
     return res.status(201).json({

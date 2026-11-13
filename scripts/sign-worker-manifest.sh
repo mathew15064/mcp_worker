@@ -2,8 +2,9 @@
 # Offline approval-only signing. Never place a real private key in source/CI.
 set -eu
 umask 077
-[ "$#" -eq 1 ] || { echo "Usage: WORKER_RELEASE_EXPECTED_VERSION=x.y.z WORKER_RELEASE_EXPECTED_COMMIT=hex $0 /absolute/private-key.pem" >&2; exit 2; }
-[ -n "${WORKER_RELEASE_EXPECTED_VERSION:-}" ] && [ -n "${WORKER_RELEASE_EXPECTED_COMMIT:-}" ] || { echo 'Release approval version/commit required' >&2; exit 2; }
+[ "$#" -eq 1 ] || { echo "Usage: WORKER_RELEASE_EXPECTED_VERSION=x.y.z WORKER_RELEASE_EXPECTED_COMMIT=hex WORKER_RELEASE_EXPECTED_PUBLIC_KEY_SHA256=64-lowercase-hex $0 /absolute/private-key.pem" >&2; exit 2; }
+[ -n "${WORKER_RELEASE_EXPECTED_VERSION:-}" ] && [ -n "${WORKER_RELEASE_EXPECTED_COMMIT:-}" ] && [ -n "${WORKER_RELEASE_EXPECTED_PUBLIC_KEY_SHA256:-}" ] || { echo 'Release approval version/commit/public-key fingerprint required' >&2; exit 2; }
+printf '%s' "$WORKER_RELEASE_EXPECTED_PUBLIC_KEY_SHA256" | grep -Eq '^[0-9a-f]{64}$' || { echo 'Approved SPKI SHA-256 must be 64 lowercase hex characters' >&2; exit 2; }
 case "$WORKER_RELEASE_EXPECTED_VERSION" in *[!0-9.]*|'') echo 'Invalid expected version' >&2; exit 2;; esac
 case "$WORKER_RELEASE_EXPECTED_COMMIT" in *[!0-9a-f]*|'') echo 'Invalid expected commit' >&2; exit 2;; esac
 printf '%s' "$WORKER_RELEASE_EXPECTED_VERSION" | grep -Eq '^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$' || { echo 'Invalid semantic version' >&2; exit 2; }
@@ -50,6 +51,13 @@ sha256sum bot-report-worker-* WORKER_RELEASE | cmp -s - SHA256SUMS || {
 }
 sha256sum -c SHA256SUMS >/dev/null
 openssl rsa -in "$KEY" -check -noout >/dev/null 2>&1 || { echo 'An RSA signing key is required' >&2; exit 1; }
+# Public-key fingerprint is a separately reviewed release tuple member.
+# Derive SPKI DER from the actual signing key; never trust the filename or
+# a self-declared public key in the artifact bundle.
+DERIVED_KEY_SHA256="$(openssl pkey -in "$KEY" -pubout -outform DER 2>/dev/null | openssl dgst -sha256 | awk '{print $NF}')"
+[ "$DERIVED_KEY_SHA256" = "$WORKER_RELEASE_EXPECTED_PUBLIC_KEY_SHA256" ] || {
+  echo 'Signing key does not match the independently approved public-key fingerprint' >&2; exit 1;
+}
 tmp="$(mktemp ./SHA256SUMS.sig.XXXXXX)"
 pub="$(mktemp ./release-public.XXXXXX)"
 trap 'rm -f "$tmp" "$pub"' EXIT HUP INT TERM

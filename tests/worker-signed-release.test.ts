@@ -106,9 +106,29 @@ void test('no approved release is embedded in any downloadable installer', () =>
   );
 });
 
+void test('installer protocols refuse public plaintext and redirect downgrade', () => {
+  for (const script of [
+    workerRoutes.installerScript('https://worker.example.test'),
+    workerRoutes.macInstallerScript('https://worker.example.test'),
+  ]) {
+    assert.match(script, /HTTPS release origin required/);
+    assert.match(script, /--proto "=\$DOWNLOAD_SCHEME"/);
+    assert.match(script, /--proto-redir "=\$DOWNLOAD_SCHEME"/);
+  }
+  const windows = workerRoutes.windowsInstallerPayloadScript('https://worker.example.test');
+  assert.match(windows, /HTTPS release origin required/);
+  assert.equal((windows.match(/-MaximumRedirection 0/g) ?? []).length, 4);
+});
+
 void test('Railway installer and binary distribution stay HTTP 503 without approval', async () => {
   const previousPlatform = process.env.MCP_PLATFORM;
+  const previousApproval = process.env.WORKER_SIGNED_RELEASE_APPROVED;
+  const previousKey = process.env.WORKER_TRUSTED_PUBLIC_KEY;
   process.env.MCP_PLATFORM = 'railway';
+  // Runtime variables must never turn a source-unapproved release into a
+  // distributable Worker, even with a purported signing key present.
+  process.env.WORKER_SIGNED_RELEASE_APPROVED = 'true';
+  process.env.WORKER_TRUSTED_PUBLIC_KEY = 'unreviewed-key';
   const app = express();
   app.use(workerRoutes as unknown as express.Router);
   const server = http.createServer(app);
@@ -141,6 +161,10 @@ void test('Railway installer and binary distribution stay HTTP 503 without appro
     await new Promise<void>((resolve) => server.close(() => resolve()));
     if (previousPlatform === undefined) delete process.env.MCP_PLATFORM;
     else process.env.MCP_PLATFORM = previousPlatform;
+    if (previousApproval === undefined) delete process.env.WORKER_SIGNED_RELEASE_APPROVED;
+    else process.env.WORKER_SIGNED_RELEASE_APPROVED = previousApproval;
+    if (previousKey === undefined) delete process.env.WORKER_TRUSTED_PUBLIC_KEY;
+    else process.env.WORKER_TRUSTED_PUBLIC_KEY = previousKey;
   }
 });
 
@@ -479,6 +503,36 @@ void test(
         assert.deepEqual(fs.readFileSync(path.join(stateRoot, 'state.json')), identity);
         assert.deepEqual(fs.readFileSync(path.join(stateRoot, 'config.json')), config);
       });
+      await t.test('large semver components cannot round into an accepted downgrade', async () => {
+        const releaseVersion = path.join(stateRoot, 'release-version');
+        const savedVersion = fs.readFileSync(releaseVersion, 'utf8');
+        const higherVersion = '9007199254740993.0.0';
+        const lowerVersion = '9007199254740992.0.0';
+        try {
+          // A valid future release could have a semver component beyond JS/awk
+          // floating-point precision; local installed records are authoritative.
+          fs.writeFileSync(releaseVersion, higherVersion + '\n');
+          active = bundle(
+            key,
+            file,
+            await makeBinary(lowerVersion, COMMIT_B),
+            lowerVersion,
+            COMMIT_B,
+          );
+          const downgraded = await install({
+            version: lowerVersion,
+            commit: COMMIT_B,
+            publicKeyBase64: key.publicKeyBase64,
+          });
+          assert.notEqual(downgraded.code, 0, 'rounded semver accepted a rollback');
+          assert.match(downgraded.output, /rollback rejected/i);
+          assert.deepEqual(fs.readFileSync(installed), binaryB);
+          assert.equal(fs.readFileSync(releaseVersion, 'utf8'), higherVersion + '\n');
+        } finally {
+          fs.writeFileSync(releaseVersion, savedVersion);
+          active = packageB;
+        }
+      });
       await t.test('previously valid signed release cannot downgrade', async () => {
         active = packageA;
         await unchanged('signed downgrade', install(), binaryB);
@@ -661,7 +715,12 @@ void test(
       fs.writeFileSync(privatePath, key.privateKey.export({ type: 'pkcs8', format: 'pem' }), {
         mode: 0o600,
       });
-      function sign(expectedVersion: string, privateFile = privatePath, commit = approvedCommit) {
+      function sign(
+        expectedVersion: string,
+        privateFile = privatePath,
+        commit = approvedCommit,
+        fingerprint = key.fingerprint,
+      ) {
         return execute(
           'sh',
           [script, privateFile],
@@ -669,11 +728,22 @@ void test(
             ...process.env,
             WORKER_RELEASE_EXPECTED_VERSION: expectedVersion,
             WORKER_RELEASE_EXPECTED_COMMIT: commit,
+            WORKER_RELEASE_EXPECTED_PUBLIC_KEY_SHA256: fingerprint,
           },
           root,
         );
       }
       assert.notEqual((await sign(VERSION_B)).code, 0, 'wrong approval version accepted');
+      assert.notEqual(
+        (await sign(VERSION_A, privatePath, approvedCommit, '')).code,
+        0,
+        'missing approved public-key fingerprint accepted',
+      );
+      assert.notEqual(
+        (await sign(VERSION_A, privatePath, approvedCommit, '0'.repeat(64))).code,
+        0,
+        'signing key outside approved trust-root fingerprint accepted',
+      );
       assert.notEqual(
         (await sign(VERSION_A, privatePath, '0123456')).code,
         0,

@@ -12,6 +12,10 @@ public tag, GitHub Release, installer, binary, deployment or key creation.
   `APPROVED_WORKER_RELEASE` pin. An installer downloaded from an untrusted
   endpoint is **not** a root of trust, even if it verifies its subsequent
   artifacts. Transport HTTPS is required for public distribution.
+- Installer artifact downloads require HTTPS without protocol-downgrade
+  redirects; only disposable loopback verification fixtures permit HTTP. The
+  Windows script disallows redirects. The release origin must be separately
+  reviewed and controlled by the owner.
 - The reviewed pin supplies **all** of: strict `x.y.z` version, 12–40 lowercase
   hex commit prefix, base64-encoded PEM RSA public key, and (only for an explicit
   rotation) `previousPublicKeySha256`. None is configurable by an environment
@@ -42,7 +46,9 @@ public tag, GitHub Release, installer, binary, deployment or key creation.
   owner-reviewed link is **unauthorized replacement**, not rotation.
   Key compromise is a security incident: revoke distribution, investigate
   identity and artifacts, and obtain a separate owner-approved recovery plan.
-- Manual rollback (even with a locally saved checksum) remains forbidden.
+- Unix installer semantic versions are compared as exact decimal-component
+  strings, avoiding floating-point rounding of large version components.
+  Manual rollback (even with a locally saved checksum) remains forbidden.
   Automatic restoration of the previous binary following failed start is
   operational recovery only; it does not authorize installation of an older
   signed release. The recorded version/commit/trust root remain unchanged on
@@ -101,8 +107,11 @@ HTTP header, user input or self-signed manifest as authority to change roots.
    do not execute, rely on or upload anything via GitHub Actions/CI.
 4. In the owner-only signing environment, obtain the private key securely
    **outside** the repository, verify permission `0600` or `0400`, and run
-   `WORKER_RELEASE_EXPECTED_VERSION=X.Y.Z WORKER_RELEASE_EXPECTED_COMMIT=123456789abc ./scripts/sign-worker-manifest.sh /absolute/outside-source/private.pem`.
-   The signer rejects stale signatures; sign only after a fresh unsigned build.
+   `WORKER_RELEASE_EXPECTED_VERSION=X.Y.Z WORKER_RELEASE_EXPECTED_COMMIT=123456789abc WORKER_RELEASE_EXPECTED_PUBLIC_KEY_SHA256=<independently-approved-64-char-SPKI-sha256> ./scripts/sign-worker-manifest.sh /absolute/outside-source/private.pem`.
+   The signer rejects stale signatures and refuses any private key whose derived
+   SPKI SHA-256 differs from the separately approved fingerprint. Sign only
+   after a fresh unsigned build. The three expected fields are manual
+   owner-provided **confirmation inputs**, not a substitute for approval.
    This is an offline manual action, **never** an Actions job.
 5. Independently derive and out-of-band compare the public-key fingerprint:
    `openssl pkey -pubin -in public.pem -outform DER -out public.der` followed
@@ -119,6 +128,20 @@ HTTP header, user input or self-signed manifest as authority to change roots.
    then separately approves a narrowly scoped publication/deployment change.
    The existing unconditional Railway HTTP 503 must **not** be removed by
    this task or implicitly by a key update.
+
+## Read-only status contract for Admin/onboarding consumers (T5)
+
+Import `railwayWorkerDistributionBlocked(): boolean` from
+`src/services/workerReleaseGate.ts` to display **Railway signed release
+pending**. A `true` value is a hard **NO-GO** and must suppress public
+installation instructions; it is not an installer-token or signing API. On
+non-Railway local development this function can be `false` even when the
+shipped installer has empty release pins and refuses execution: consumers
+must **never** infer production approval or a verified signed artifact solely
+from `false`. The HTTP routes remain the authoritative boundary and emit
+503 / `WORKER_SIGNED_RELEASE_PENDING` on Railway until the separately
+approved source-controlled release and distribution change. No runtime
+environment variable authorizes a key, trust-root change, or public release.
 
 ## Verification and separation of duties
 
