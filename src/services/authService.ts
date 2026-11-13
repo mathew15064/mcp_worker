@@ -6,7 +6,7 @@ class AuthService {
   async authenticate(username: string, password: string) {
     if (!username || !password)
       return { success: false, message: 'Username and password are required' };
-    const admin = adminIdentity.authenticate(username, password);
+    const admin = await adminIdentity.authenticate(username, password);
     if (admin) return { success: true, user: admin };
     if (databaseManager.isOperational()) {
       const user = await userService.authenticate(username, password);

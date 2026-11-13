@@ -1,19 +1,14 @@
-/** Shared contracts for SSH compatibility and the native Go Worker executor.
- * Actual Worker results cross an authenticated WebSocket boundary, where their
- * shape is supplied by the corresponding operation. Wire fields are unchanged.
+/** Contracts for Worker-only execution through the authenticated outbound WSS broker.
+ * Historical SSH database tables remain for nondestructive migration, but no
+ * application code connects to SSH or accepts SSH credentials.
  */
 export interface ExecutionProfile {
   id: string;
   name: string;
   description?: string | null;
-  transport: 'worker' | 'ssh';
+  transport: 'worker';
   enabled: boolean;
   worker_id?: string | null;
-  credential_envelope?: string | null;
-  host?: string;
-  username?: string;
-  port?: number;
-  tmux_session?: string;
 }
 export type ExecutionRecord = Record<string, unknown>;
 export type ShellInspection = ExecutionRecord & {

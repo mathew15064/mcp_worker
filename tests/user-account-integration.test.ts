@@ -46,7 +46,7 @@ async function pageWithCsrf(base: string, pathname: string, cookie: string) {
 }
 
 void test(
-  'database users own isolated OAuth client profiles and sessions revoke on admin changes',
+  'existing user identities retain isolated OAuth profiles and sessions without Users management routes',
   { skip: !enabled },
   async (t) => {
     const database = 'bot_report_user_test';
@@ -117,14 +117,19 @@ void test(
     });
     const base = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
 
-    const adminLogin = await login(base, 'admin', 'UserAdmin2026!', '/admin/users');
+    const adminLogin = await login(base, 'admin', 'UserAdmin2026!', '/admin');
     assert.equal(adminLogin.response.status, 302);
-    assert.equal(adminLogin.response.headers.get('location'), '/admin/users');
-    const adminUsers = await pageWithCsrf(base, '/admin/users', adminLogin.cookie);
-    assert.equal(adminUsers.response.status, 200);
-    assert.match(adminUsers.html, /New User/);
-    assert.ok(adminUsers.csrf);
-
+    assert.equal(adminLogin.response.headers.get('location'), '/admin');
+    const adminPage = await pageWithCsrf(base, '/admin', adminLogin.cookie);
+    assert.equal(adminPage.response.status, 200);
+    assert.doesNotMatch(adminPage.html, /href="\/admin\/users"/);
+    assert.ok(adminPage.csrf);
+    const disabledUsersRoute = await fetch(base + '/admin/users', {
+      headers: { cookie: adminLogin.cookie },
+      redirect: 'manual',
+    });
+    assert.equal(disabledUsersRoute.status, 404);
+    const userService = (await import('../src/services/userService.js')).default;
     for (const user of [
       {
         username: 'alice',
@@ -139,14 +144,13 @@ void test(
         password: 'BobPassword2026!',
       },
     ]) {
-      const created = await fetch(`${base}/admin/users`, {
-        method: 'POST',
-        redirect: 'manual',
-        headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: adminLogin.cookie },
-        body: new URLSearchParams({ _csrf: adminUsers.csrf, ...user }).toString(),
+      const created = await userService.createUser({
+        username: user.username,
+        email: user.email,
+        displayName: user.display_name,
+        password: user.password,
       });
-      assert.equal(created.status, 302);
-      assert.equal(created.headers.get('location'), '/admin/users');
+      assert.ok(created);
     }
 
     const userRepo = (await import('../src/repositories/userRepository.js')).default;
@@ -380,13 +384,8 @@ void test(
     assert.equal((await workerRepo.listProfilesByOwner(alice.id)).length, 0);
     assert.ok(await workerRepo.findWorkerById(globalWorker.id));
 
-    const disableAlice = await fetch(`${base}/admin/users/${alice.id}/disable`, {
-      method: 'POST',
-      redirect: 'manual',
-      headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: adminLogin.cookie },
-      body: new URLSearchParams({ _csrf: adminUsers.csrf }).toString(),
-    });
-    assert.equal(disableAlice.status, 302);
+    const disabledAlice = await userService.setStatus(alice.id, 'disabled');
+    assert.equal(disabledAlice?.status, 'disabled');
     const revokedSession = await fetch(`${base}/account/clients`, {
       redirect: 'manual',
       headers: { cookie: aliceLogin.cookie },
@@ -420,23 +419,9 @@ void test(
         error instanceof Error && 'code' in error && error.code === 'USER_DISABLED',
     );
 
-    const enableAlice = await fetch(`${base}/admin/users/${alice.id}/enable`, {
-      method: 'POST',
-      redirect: 'manual',
-      headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: adminLogin.cookie },
-      body: new URLSearchParams({ _csrf: adminUsers.csrf }).toString(),
-    });
-    assert.equal(enableAlice.status, 302);
-    const resetAlice = await fetch(`${base}/admin/users/${alice.id}/reset-password`, {
-      method: 'POST',
-      redirect: 'manual',
-      headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: adminLogin.cookie },
-      body: new URLSearchParams({
-        _csrf: adminUsers.csrf,
-        password: 'AlicePasswordReset2026!',
-      }).toString(),
-    });
-    assert.equal(resetAlice.status, 302);
+    const enabledAlice = await userService.setStatus(alice.id, 'active');
+    assert.equal(enabledAlice?.status, 'active');
+    await userService.resetPassword(alice.id, 'AlicePasswordReset2026!');
     assert.equal((await login(base, 'alice', 'AlicePassword2026!')).response.status, 401);
     const aliceRelogin = await login(base, 'alice', 'AlicePasswordReset2026!');
     assert.equal(aliceRelogin.response.status, 302);

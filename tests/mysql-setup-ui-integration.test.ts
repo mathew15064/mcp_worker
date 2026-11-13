@@ -241,7 +241,7 @@ void test(
     assert.equal(offlineCreate.status, 302);
     const offlinePage = await fetch(`${base}/admin/workers`, { headers: { cookie } });
     const offlineHtml = await offlinePage.text();
-    assert.match(offlineHtml, /currently online/);
+    assert.match(offlineHtml, /enabled, online Worker/);
     assert.doesNotMatch(offlineHtml, /Worker UI Dev/);
 
     // Simulate only the broker's online status in this isolated HTTP fixture.
@@ -260,10 +260,10 @@ void test(
     });
     const profileCreated = await createProfile();
     assert.equal(profileCreated.status, 302);
-    assert.equal(profileCreated.headers.get('location'), '/admin/terminals');
-    const terminalsAfter = await fetch(`${base}/admin/terminals`, { headers: { cookie } });
-    const terminalsAfterHtml = await terminalsAfter.text();
-    assert.match(terminalsAfterHtml, /Worker UI Dev/);
+    assert.equal(profileCreated.headers.get('location'), '/admin/workers');
+    const workersTargets = await fetch(`${base}/admin/workers`, { headers: { cookie } });
+    const workersTargetsHtml = await workersTargets.text();
+    assert.match(workersTargetsHtml, /Worker UI Dev/);
     const workersAfter = await fetch(`${base}/admin/workers`, { headers: { cookie } });
     const workersAfterHtml = await workersAfter.text();
     assert.match(workersAfterHtml, /MySQL UI Worker/);

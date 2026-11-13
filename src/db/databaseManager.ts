@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import config from '../config/env';
 import bootstrapConfigStore from './bootstrapConfigStore';
 import { getDb } from './connection';
@@ -7,6 +8,7 @@ import { MysqlAdapter } from './adapters/mysqlAdapter';
 import type { DatabaseAdapter, SqlRow } from './contracts';
 import type Database from 'better-sqlite3';
 import { MigrationRunner } from './migrationRunner';
+import { runMigrations } from './migrations';
 type MysqlInput = Parameters<typeof MysqlAdapter.create>[0];
 type SourceInfo = Awaited<ReturnType<MigrationRunner['inspectSource']>>;
 interface Candidate {
@@ -109,6 +111,9 @@ class DatabaseManager {
     if (this.initialized) return this.status();
     this.initialized = true;
 
+    if (process.env.MCP_PLATFORM === 'railway') {
+      return this.connectRailwaySqlite();
+    }
     if (bootstrapConfigStore.exists()) {
       return this.reconnect();
     }
@@ -124,6 +129,115 @@ class DatabaseManager {
     this.state = STATES.UNCONFIGURED;
     this.adapter = null;
     this.sourceInfo = null;
+    return this.status();
+  }
+
+  /**
+   * Dedicated, single-replica Railway backend. Never use ephemeral container
+   * storage: the platform volume must match the configured SQLite directory.
+   * Schema changes are additive and idempotent via the existing SQLite schema
+   * upgrade path, run atomically before accepting HTTP connections.
+   */
+  connectRailwaySqlite() {
+    const volumePath = process.env.RAILWAY_VOLUME_MOUNT_PATH;
+    if (!volumePath || !path.isAbsolute(volumePath)) {
+      throw Object.assign(new Error('Railway persistent volume is required.'), {
+        code: 'RAILWAY_VOLUME_MISSING',
+      });
+    }
+    const dbPath = config.DATABASE_PATH;
+    const expected = path.dirname(dbPath);
+    // Reject aliases and symlinked ancestors, not just a symlink at the DB file.
+    if (path.resolve(volumePath) !== expected || fs.realpathSync(volumePath) !== expected) {
+      throw Object.assign(new Error('SQLite database must be inside the Railway volume.'), {
+        code: 'RAILWAY_VOLUME_PATH_MISMATCH',
+      });
+    }
+    if (!fs.statSync(volumePath).isDirectory()) {
+      throw new Error('Railway volume mount must be a directory.');
+    }
+    fs.accessSync(volumePath, fs.constants.R_OK | fs.constants.W_OK);
+    for (const file of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`, `${dbPath}-journal`]) {
+      const entry = fs.lstatSync(file, { throwIfNoEntry: false });
+      if (entry && (!entry.isFile() || entry.isSymbolicLink())) {
+        throw Object.assign(new Error('Railway SQLite files must be regular files.'), {
+          code: 'RAILWAY_DB_SYMLINK_DENIED',
+        });
+      }
+    }
+    if (fs.existsSync(dbPath)) fs.accessSync(dbPath, fs.constants.R_OK | fs.constants.W_OK);
+    // A writable directory flag is insufficient when mounted read-only.
+    const probe = fs.mkdtempSync(path.join(volumePath, '.mcp-worker-write-'));
+    try {
+      fs.writeFileSync(path.join(probe, 'check'), 'ok', { flag: 'wx', mode: 0o600 });
+    } finally {
+      fs.rmSync(probe, { recursive: true, force: true });
+    }
+
+    const db = getDb();
+    if (db.pragma('quick_check', { simple: true }) !== 'ok') {
+      throw Object.assign(new Error('SQLite integrity check failed.'), {
+        code: 'RAILWAY_DB_INTEGRITY_FAILED',
+      });
+    }
+    db.transaction(() => {
+      const ledger = db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .get('railway_schema_versions');
+      if (ledger) {
+        const versions = db.prepare('SELECT version FROM railway_schema_versions').all() as {
+          version: string;
+        }[];
+        if (versions.length !== 1 || versions[0]?.version !== '2026-11-12-initial') {
+          throw Object.assign(new Error('Unsupported Railway SQLite schema version.'), {
+            code: 'RAILWAY_SCHEMA_UNSUPPORTED',
+          });
+        }
+      }
+      runMigrations(db);
+      // IF NOT EXISTS does not validate pre-existing table shapes. Reject
+      // incompatible/partial legacy schemas before advertising readiness.
+      const requiredColumns: Record<string, string[]> = {
+        system_settings: ['key', 'value', 'updated_at'],
+        sessions: ['sid', 'sess', 'expired'],
+        users: ['id', 'username', 'password_hash', 'role', 'session_version'],
+        mcp_oauth_clients: ['id', 'client_id', 'status', 'profile_id', 'owner_user_id'],
+      };
+      for (const [table, required] of Object.entries(requiredColumns)) {
+        const found = new Set(
+          (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(
+            (column) => column.name,
+          ),
+        );
+        if (required.some((column) => !found.has(column))) {
+          throw Object.assign(new Error(`Incompatible Railway SQLite table: ${table}`), {
+            code: 'RAILWAY_SCHEMA_INCOMPATIBLE',
+          });
+        }
+      }
+      db.exec(
+        'CREATE TABLE IF NOT EXISTS railway_schema_versions (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)',
+      );
+      db.prepare(
+        'INSERT OR IGNORE INTO railway_schema_versions (version, applied_at) VALUES (?, ?)',
+      ).run('2026-11-12-initial', new Date().toISOString());
+    })();
+    if (db.pragma('quick_check', { simple: true }) !== 'ok') {
+      throw Object.assign(new Error('SQLite integrity check failed.'), {
+        code: 'RAILWAY_DB_INTEGRITY_FAILED',
+      });
+    }
+    this.adapter = new SqliteAdapter(db);
+    this.state = STATES.READY;
+    this.initialized = true;
+    this.lastError = null;
+    this.sourceInfo = {
+      initialized: true,
+      migrationTable: false,
+      total: 1,
+      ran: 1,
+      pending: [],
+    };
     return this.status();
   }
 
@@ -172,6 +286,16 @@ class DatabaseManager {
   }
   isMysqlReady() {
     return this.state === STATES.READY && this.adapter?.kind === 'mysql';
+  }
+  isRailwaySqliteReady() {
+    return (
+      this.state === STATES.READY &&
+      this.adapter?.kind === 'sqlite' &&
+      process.env.MCP_PLATFORM === 'railway'
+    );
+  }
+  isSqlReady() {
+    return this.isMysqlReady() || this.isRailwaySqliteReady();
   }
   isSetupOnly() {
     return (
@@ -312,7 +436,11 @@ class DatabaseManager {
     const saved = bootstrapConfigStore.readPublic();
     return {
       state: this.state,
-      engine: this.isMysqlReady() ? 'mysql' : this.state === STATES.LEGACY_SQLITE ? 'sqlite' : null,
+      engine: this.isMysqlReady()
+        ? 'mysql'
+        : this.state === STATES.LEGACY_SQLITE || this.isRailwaySqliteReady()
+          ? 'sqlite'
+          : null,
       mysql: saved ? { ...saved, version: this.mysqlInfo?.version || null } : null,
       source: this.sourceInfo
         ? {

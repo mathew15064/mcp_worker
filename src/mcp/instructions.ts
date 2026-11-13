@@ -11,7 +11,7 @@ Preferred workflow:
 8. Use process_start/process_logs/process_status/process_stop for long-running servers, watchers, workers, or E2E support processes.
 9. Use artifact_collect for verification evidence.
 10. Use workspace_exec only as the generic fallback when no specialized structured tool fits.
-11. Use terminal_* only for interactive tmux coordination, not as the default coding path.
+11. Use terminal_list to discover enrolled Worker execution target aliases. MCP commands run through outbound Worker WSS; direct SSH is not supported.
 
 Verification rules:
 - Tool success proves only that an operation completed; it does not prove task correctness.
