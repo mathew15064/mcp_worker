@@ -15,9 +15,13 @@ if [[ -n "${DATABASE_PATH:-}" || -n "${RAILWAY_VOLUME_MOUNT_PATH:-}" ]]; then
 fi
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$root"
-if [[ "$(git branch --show-current)" != "work/oneclick-unblock-t4" ]] ||
-   ! git merge-base --is-ancestor ae588a1a56f2561ca2323457463e5b9e203de509 HEAD; then
-  echo "Refused: use the isolated T4 worktree based on the pinned SHA" >&2
+case "$(git branch --show-current):$root" in
+  work/oneclick-unblock-t4:/root/mcp_worker_oneclick_unblock_t4_20261113|\
+  work/railway-oneclick-final-integration-20261113:/root/mcp_worker_railway_oneclick_final_integration_20261113) ;;
+  *) echo "Refused: only the pinned T4 or final integration PC worktree is allowed" >&2; exit 2 ;;
+esac
+if ! git merge-base --is-ancestor ae588a1a56f2561ca2323457463e5b9e203de509 HEAD; then
+  echo "Refused: worktree must descend from pinned PC base" >&2
   exit 2
 fi
 for command in node npm openssl go; do

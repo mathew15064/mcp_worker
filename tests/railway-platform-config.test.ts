@@ -88,10 +88,11 @@ if (hasSourceFixtures) {
       image: 'OWNER_APPROVAL_REQUIRED_PREBUILT_IMAGE_DIGEST',
     });
     assert.doesNotMatch(source, /\bgithub\s*\(/);
-    assert.equal(
-      JSON.parse(read('.railway/template-candidate.json')).source.provider,
-      'docker-image',
-    );
+    const template: unknown = JSON.parse(read('.railway/template-candidate.json'));
+    assert.ok(template && typeof template === 'object' && 'source' in template);
+    const templateSource = template.source;
+    assert.ok(templateSource && typeof templateSource === 'object' && 'provider' in templateSource);
+    assert.equal(templateSource.provider, 'docker-image');
     assert.equal(service.config.domains, undefined, 'do not pretend a public HTTPS domain exists');
     assert.doesNotMatch(body, /\b(?:postgres|mysql|redis|mongo|upstash|neon)\s*\(/i);
     // Evaluate the actual IaC body with an apply context: refusal must occur
