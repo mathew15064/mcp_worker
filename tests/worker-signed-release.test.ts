@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
+import express from 'express';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -105,6 +106,44 @@ void test('no approved release is embedded in any downloadable installer', () =>
   );
 });
 
+void test('Railway installer and binary distribution stay HTTP 503 without approval', async () => {
+  const previousPlatform = process.env.MCP_PLATFORM;
+  process.env.MCP_PLATFORM = 'railway';
+  const app = express();
+  app.use(workerRoutes as unknown as express.Router);
+  const server = http.createServer(app);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const address = server.address();
+    assert.ok(address && typeof address !== 'string');
+    for (const endpoint of [
+      '/worker/install.sh',
+      '/worker/install-linux.sh',
+      '/worker/install-macos.sh',
+      '/worker/install.ps1',
+      '/worker/install-windows.ps1',
+      '/worker/dist/SHA256SUMS',
+      '/worker/dist/SHA256SUMS.sig',
+      '/worker/dist/WORKER_RELEASE',
+      '/worker/dist/bot-report-worker-linux-amd64',
+      '/worker/dist/cli.js',
+    ]) {
+      const response: Response = await fetch('http://127.0.0.1:' + address.port + endpoint);
+      assert.equal(response.status, 503, endpoint);
+      assert.equal(response.headers.get('cache-control'), 'no-store', endpoint);
+      const body = (await response.json()) as { code: string };
+      assert.equal(body.code, 'WORKER_SIGNED_RELEASE_PENDING', endpoint);
+    }
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    if (previousPlatform === undefined) delete process.env.MCP_PLATFORM;
+    else process.env.MCP_PLATFORM = previousPlatform;
+  }
+});
+
 void test(
   'offline native installer rejects fake, unsigned, wrong-key, wrong-version and rollback',
   {
@@ -134,16 +173,19 @@ void test(
     const tempHome = path.join(root, 'home');
     fs.mkdirSync(tempHome);
     const fixture = path.join(root, win ? 'fixture.exe' : 'fixture.sh');
+    const stub = path.join(root, 'fixture.go');
     if (win) {
-      const stub = path.join(root, 'fixture.go');
       fs.writeFileSync(
         stub,
         [
           'package main',
           'import ("fmt"; "os")',
+          'var version = "unset"',
+          'var commit = "unset"',
           'func main() {',
           ' if len(os.Args) < 2 { return }',
           ' switch os.Args[1] {',
+          ' case "version": fmt.Printf("systemtd %s commit=%s runtime=stub windows/amd64\\n", version, commit)',
           ' case "status": if os.Getenv("SIGNED_TEST_RUNNING") == "1" { fmt.Println("status: RUNNING") } else { fmt.Println("status: STOPPED") }',
           ' case "start": if os.Getenv("SIGNED_TEST_FAIL_START") == "1" { os.Exit(1) }',
           ' }',
@@ -151,17 +193,52 @@ void test(
           '',
         ].join('\n'),
       );
-      const built = await execute('go', ['build', '-o', fixture, stub], process.env, root);
-      assert.equal(built.code, 0, built.output);
-    } else {
-      fs.writeFileSync(
-        fixture,
-        '#!/bin/sh\ncase "$1" in version|stop|uninstall) exit 0;; status) if [ "${SIGNED_TEST_RUNNING:-0}" = 1 ]; then echo "status: RUNNING"; else echo "status: STOPPED"; fi; exit 0;; start) [ "${SIGNED_TEST_FAIL_START:-0}" != 1 ];; *) exit 0;; esac\n',
-        { mode: 0o755 },
+    }
+    async function makeBinary(version: string, commit: string) {
+      if (win) {
+        const built = await execute(
+          'go',
+          [
+            'build',
+            '-ldflags',
+            '-X main.version=' + version + ' -X main.commit=' + commit,
+            '-o',
+            fixture,
+            stub,
+          ],
+          process.env,
+          root,
+        );
+        assert.equal(built.code, 0, built.output);
+        return fs.readFileSync(fixture);
+      }
+      return Buffer.from(
+        [
+          '#!/bin/sh',
+          'case "$1" in',
+          ' version) printf "systemtd ' +
+            version +
+            ' commit=' +
+            commit +
+            ' runtime=stub ' +
+            process.platform +
+            '/' +
+            arch +
+            '\\n";;',
+          ' stop|uninstall) exit 0;;',
+          ' status) if [ "${SIGNED_TEST_RUNNING:-0}" = 1 ]; then echo "status: RUNNING"; else echo "status: STOPPED"; fi;;',
+          ' start) [ "${SIGNED_TEST_FAIL_START:-0}" != 1 ];;',
+          ' *) exit 0;;',
+          'esac',
+          '',
+        ].join('\n'),
       );
     }
-    const binaryA = fs.readFileSync(fixture);
-    const binaryB = Buffer.concat([binaryA, Buffer.from('\nSIGNED_TEST_ONLY_VARIANT_B\n')]);
+    const binaryA = await makeBinary(VERSION_A, COMMIT_A);
+    const binaryB = await makeBinary(VERSION_B, COMMIT_B);
+    const binaryWrongCommit = await makeBinary(VERSION_B, COMMIT_A);
+    const binaryC = await makeBinary('2.3.7', 'aabbccddeeff');
+    const binaryD = await makeBinary('2.3.6', 'aabbccddeeff');
     const packageA = bundle(key, file, binaryA, VERSION_A, COMMIT_A);
     const packageB = bundle(key, file, binaryB, VERSION_B, COMMIT_B);
     let active: Package = packageA;
@@ -234,6 +311,35 @@ void test(
         const outcome = await result;
         assert.notEqual(outcome.code, 0, label + ': unexpectedly succeeded');
         assert.deepEqual(fs.readFileSync(installed), expected, label + ': replaced runtime');
+        const expectedVersion = expected.equals(binaryA)
+          ? VERSION_A
+          : expected.equals(binaryB)
+            ? VERSION_B
+            : '2.3.7';
+        const expectedCommit = expected.equals(binaryA)
+          ? COMMIT_A
+          : expected.equals(binaryB)
+            ? COMMIT_B
+            : 'aabbccddeeff';
+        const expectedFingerprint = expected.equals(binaryC) ? wrong.fingerprint : key.fingerprint;
+        assert.equal(
+          fs.readFileSync(path.join(stateRoot, 'release-version'), 'utf8').trim(),
+          expectedVersion,
+          label,
+        );
+        assert.equal(
+          fs.readFileSync(path.join(stateRoot, 'release-commit'), 'utf8').trim(),
+          expectedCommit,
+          label,
+        );
+        // The deliberately corrupted trust record has its own negative test.
+        if (label !== 'corrupt local root') {
+          assert.equal(
+            fs.readFileSync(path.join(stateRoot, 'release-key-sha256'), 'utf8').trim(),
+            expectedFingerprint,
+            label,
+          );
+        }
         assert.deepEqual(fs.readFileSync(path.join(stateRoot, 'state.json')), identity);
         assert.deepEqual(fs.readFileSync(path.join(stateRoot, 'config.json')), config);
       }
@@ -259,6 +365,53 @@ void test(
       await t.test('valid signed same-version reinstall', async () => {
         assert.equal((await install()).code, 0);
       });
+      await t.test('leading-zero semantic version is rejected', async () => {
+        await unchanged(
+          'noncanonical version',
+          install({
+            version: '02.3.4',
+            commit: COMMIT_A,
+            publicKeyBase64: key.publicKeyBase64,
+          }),
+        );
+      });
+      await t.test('invalid pinned commit length is rejected', async () => {
+        await unchanged(
+          'short commit',
+          install({
+            version: VERSION_A,
+            commit: 'deadbeef',
+            publicKeyBase64: key.publicKeyBase64,
+          }),
+        );
+      });
+      await t.test('binary identity must match signed version and commit', async () => {
+        active = bundle(key, file, binaryA, VERSION_B, COMMIT_B);
+        await unchanged(
+          'signed metadata with wrong binary identity',
+          install({
+            version: VERSION_B,
+            commit: COMMIT_B,
+            publicKeyBase64: key.publicKeyBase64,
+          }),
+        );
+        active = packageA;
+      });
+      await t.test(
+        'signed binary with correct version but wrong embedded commit is rejected',
+        async () => {
+          active = bundle(key, file, binaryWrongCommit, VERSION_B, COMMIT_B);
+          await unchanged(
+            'signed binary with wrong commit',
+            install({
+              version: VERSION_B,
+              commit: COMMIT_B,
+              publicKeyBase64: key.publicKeyBase64,
+            }),
+          );
+          active = packageA;
+        },
+      );
       await t.test('modified binary', async () => {
         active = { ...packageA, binary: Buffer.concat([binaryA, Buffer.from('tamper')]) };
         await unchanged('modified binary', install());
@@ -331,7 +484,7 @@ void test(
         await unchanged('signed downgrade', install(), binaryB);
       });
       await t.test('failed signed upgrade restores previously installed binary', async () => {
-        active = bundle(key, file, binaryA, '2.3.6', 'aabbccddeeff');
+        active = bundle(key, file, binaryD, '2.3.6', 'aabbccddeeff');
         await unchanged(
           'start failure rollback',
           install(
@@ -362,7 +515,6 @@ void test(
           binaryB,
         );
       });
-      const binaryC = Buffer.concat([binaryB, Buffer.from('\nSIGNED_TEST_ROTATION_ONLY\n')]);
       const rotated = {
         version: '2.3.7',
         commit: 'aabbccddeeff',
@@ -418,6 +570,19 @@ void test(
           binaryC,
         );
       });
+      await t.test('rotation from an unlisted previous root fails closed', async () => {
+        active = bundle(key, file, binaryA, '2.3.8', 'aabbccddeeff');
+        await unchanged(
+          'wrong rotation predecessor',
+          install({
+            version: '2.3.8',
+            commit: 'aabbccddeeff',
+            publicKeyBase64: key.publicKeyBase64,
+            previousPublicKeySha256: '0'.repeat(64),
+          }),
+          binaryC,
+        );
+      });
       await t.test('corrupted installed trust record fails closed', async () => {
         fs.writeFileSync(path.join(stateRoot, 'release-key-sha256'), 'corrupt\n');
         active = bundle(wrong, file, binaryC, rotated.version, rotated.commit);
@@ -446,6 +611,26 @@ void test(
       fs.mkdirSync(bin, { recursive: true });
       const script = path.join(scripts, 'sign-worker-manifest.sh');
       fs.copyFileSync(path.join(__dirname, '../scripts/sign-worker-manifest.sh'), script);
+      fs.writeFileSync(path.join(root, '.gitignore'), 'worker/bin/\n');
+      for (const args of [
+        ['init', '-q'],
+        ['add', '.gitignore', 'scripts/sign-worker-manifest.sh'],
+        [
+          '-c',
+          'user.name=Local Signed Fixture',
+          '-c',
+          'user.email=fixture@example.invalid',
+          'commit',
+          '-qm',
+          'local-test-source',
+        ],
+      ]) {
+        const git = await execute('git', args, process.env, root);
+        assert.equal(git.code, 0, git.output);
+      }
+      const head = await execute('git', ['rev-parse', 'HEAD'], process.env, root);
+      assert.equal(head.code, 0, head.output);
+      const approvedCommit = head.output.trim();
       const names = [
         'bot-report-worker-darwin-amd64',
         'bot-report-worker-darwin-arm64',
@@ -460,7 +645,9 @@ void test(
       for (const name of names) {
         fs.writeFileSync(
           path.join(bin, name),
-          name === 'WORKER_RELEASE' ? 'version=' + VERSION_A + '\ncommit=' + COMMIT_A + '\n' : name,
+          name === 'WORKER_RELEASE'
+            ? 'version=' + VERSION_A + '\ncommit=' + approvedCommit + '\n'
+            : name,
         );
       }
       function sums() {
@@ -474,7 +661,7 @@ void test(
       fs.writeFileSync(privatePath, key.privateKey.export({ type: 'pkcs8', format: 'pem' }), {
         mode: 0o600,
       });
-      function sign(expectedVersion: string, privateFile = privatePath, commit = COMMIT_A) {
+      function sign(expectedVersion: string, privateFile = privatePath, commit = approvedCommit) {
         return execute(
           'sh',
           [script, privateFile],
@@ -492,6 +679,25 @@ void test(
         0,
         'short commit accepted',
       );
+      assert.notEqual((await sign('02.3.4')).code, 0, 'leading-zero version accepted');
+      fs.writeFileSync(path.join(root, 'unexpected-source-file'), 'dirty');
+      assert.notEqual((await sign(VERSION_A)).code, 0, 'dirty source tree signed');
+      fs.rmSync(path.join(root, 'unexpected-source-file'));
+      fs.writeFileSync(
+        path.join(bin, 'WORKER_RELEASE'),
+        'version=' + VERSION_A + '\ncommit=' + 'f'.repeat(40) + '\n',
+      );
+      fs.writeFileSync(path.join(bin, 'SHA256SUMS'), sums());
+      assert.notEqual(
+        (await sign(VERSION_A, privatePath, 'f'.repeat(40))).code,
+        0,
+        'unreviewed source commit signed',
+      );
+      fs.writeFileSync(
+        path.join(bin, 'WORKER_RELEASE'),
+        'version=' + VERSION_A + '\ncommit=' + approvedCommit + '\n',
+      );
+      fs.writeFileSync(path.join(bin, 'SHA256SUMS'), sums());
       const insideKey = path.join(root, 'private-in-source.pem');
       fs.copyFileSync(privatePath, insideKey);
       assert.notEqual(
@@ -499,10 +705,20 @@ void test(
         0,
         'signing key inside source accepted',
       );
+      fs.rmSync(insideKey);
       fs.chmodSync(privatePath, 0o644);
       assert.notEqual((await sign(VERSION_A)).code, 0, 'world-readable key accepted');
       fs.chmodSync(privatePath, 0o600);
       assert.equal(fs.existsSync(path.join(bin, 'SHA256SUMS.sig')), false);
+      const sumsPath = path.join(bin, 'SHA256SUMS');
+      fs.renameSync(sumsPath, sumsPath + '.fixture');
+      try {
+        fs.symlinkSync('SHA256SUMS.fixture', sumsPath);
+        assert.notEqual((await sign(VERSION_A)).code, 0, 'symlink manifest accepted');
+      } finally {
+        fs.rmSync(sumsPath);
+        fs.renameSync(sumsPath + '.fixture', sumsPath);
+      }
       fs.writeFileSync(
         path.join(bin, 'SHA256SUMS'),
         sums().replace(/^[0-9a-f]{64}/, '0'.repeat(64)),

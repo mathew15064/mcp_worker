@@ -1,4 +1,4 @@
-# Signed Go Worker — release candidate and trust-root policy (W3-T02)
+# Signed Go Worker — local-only release candidate and trust-root policy (T2)
 
 **Status: NO-GO.** No production signing key, approved version/commit, or approved
 release artifacts exist. Railway routes `/worker/install*` and `/worker/dist/*`
@@ -15,12 +15,16 @@ public tag, GitHub Release, installer, binary, deployment or key creation.
 - The reviewed pin supplies **all** of: strict `x.y.z` version, 12–40 lowercase
   hex commit prefix, base64-encoded PEM RSA public key, and (only for an explicit
   rotation) `previousPublicKeySha256`. None is configurable by an environment
-  trust-key override. Missing pins fail closed. Git review must verify the
-  commit prefix resolves unambiguously to the approved immutable source.
+  trust-key override. Missing pins fail closed. Each semantic version component
+  has no leading zero except `0`. Git review must verify the commit prefix
+  resolves unambiguously to the approved immutable source.
 - The detached RSA/SHA-256 signature authenticates the **exact bytes** of
   `SHA256SUMS`. That manifest authenticates `WORKER_RELEASE` (exact
   `version=...\ncommit=...\n`) and every platform binary. Installers verify
-  signature, checksum, metadata and chosen binary before installation.
+  signature, checksum, metadata and chosen binary before installation. The
+  **executed downloaded binary** must print a single-line identity with
+  `systemtd x.y.z commit=<sha> runtime=...`, matching signed metadata before
+  replacement; merely exiting successfully on `version` is insufficient.
   The release signer requires a canonical manifest containing exactly eight
   binaries and `WORKER_RELEASE` (nine entries), with no duplicate, extra or
   symbolic-link artifacts. No signing workflow is permitted in public CI.
@@ -72,8 +76,10 @@ HTTP header, user input or self-signed manifest as authority to change roots.
 1. Check out exactly the owner-reviewed immutable 40-character commit in an
    isolated, clean workspace; confirm `git rev-parse HEAD`,
    `git status --porcelain` (empty), commit ancestry and review of source
-   dependencies. Pick a unique never-reused semver, and independently record
-   the first 12 or more characters of the commit. Do **not** create a tag.
+   dependencies. Pick a unique never-reused semver without leading zeros,
+   and independently record the first 12 or more characters of the commit.
+   The signer checks the approved commit prefix against `git rev-parse HEAD`,
+   refuses dirty sources and symlink manifest/metadata. Do **not** create a tag.
 2. Build locally using the approved exact values, e.g.
    `VERSION=X.Y.Z COMMIT=123456789abc ./scripts/build-worker-go.sh`
    (replace examples with approved real values). Check
@@ -82,11 +88,17 @@ HTTP header, user input or self-signed manifest as authority to change roots.
    manifest entries. Execute `worker/bin/bot-report-worker-linux-amd64 version`
    and compare **both** embedded version/commit to metadata. Independently
    verify macOS/Windows binary version output in native environments.
-3. Run `npm ci && npm run typecheck && npm run build`, full Node CI, signed
-   negative tests and native installer lifecycle tests on Linux, macOS and
-   Windows. Require release verification workflow to succeed **without
-   publishing**. Capture immutable run links and reviewed SHA. Resolve all
-   actionable findings before any signature.
+3. Run `npm ci --prefer-offline --no-audit --no-fund` **on the PC**,
+   then `./scripts/test-signed-worker-local.sh`. This runs Node typecheck,
+   build, loopback signed-fixture/negative tests, Go tests with a Go >=1.24
+   toolchain, and a temporary local Linux/amd64 Go build with an embedded
+   test-only identity. Optionally set `SIGNED_WORKER_CROSS_BUILD=1` to
+   cross-compile macOS and Windows binaries **only into a deleted temporary
+   directory**. A cross-build is not a native installer execution. Run all
+   other required Node/integration and native installer tests on each real
+   target OS **locally** before release; otherwise mark each unavailable
+   target **NOT_TESTED**, never PASS. Store private local test logs and hashes;
+   do not execute, rely on or upload anything via GitHub Actions/CI.
 4. In the owner-only signing environment, obtain the private key securely
    **outside** the repository, verify permission `0600` or `0400`, and run
    `WORKER_RELEASE_EXPECTED_VERSION=X.Y.Z WORKER_RELEASE_EXPECTED_COMMIT=123456789abc ./scripts/sign-worker-manifest.sh /absolute/outside-source/private.pem`.
@@ -100,8 +112,9 @@ HTTP header, user input or self-signed manifest as authority to change roots.
    binaries while release approval is pending.
 6. Present the owner a review packet: exact source SHA, release version,
    public-key SPKI SHA-256, nine artifact hashes, manifest signature digest,
-   native tests/CI run URLs, supply-chain attestation, distribution HTTPS
-   address, rotation record (if any), and maintenance/restore procedure.
+   local test command/log digests, explicit Linux/macOS/Windows native results
+   (including NOT_TESTED), supply-chain provenance, distribution HTTPS address,
+   rotation record (if any), and maintenance/restore procedure.
    The owner explicitly approves the exact tuple and pinned installer code,
    then separately approves a narrowly scoped publication/deployment change.
    The existing unconditional Railway HTTP 503 must **not** be removed by
@@ -109,21 +122,31 @@ HTTP header, user input or self-signed manifest as authority to change roots.
 
 ## Verification and separation of duties
 
-The `worker-artifact-build.yml` manual build runs Go tests, creates all
-platform binaries and checks hashes, but **does not upload** the outputs.
-The PR job tests signed fixtures with disposable sandbox keys on Linux,
-macOS and Windows; those keys/signatures are neither public trust roots nor
-release artifacts. **Existing, separately owned `release-verify.yml` uploads
-`reports/release/`, which includes unsigned Worker binaries.** Do not trigger
-that GitHub workflow for this candidate without a separately authorized change
-to remove binary collection/upload. Instead run the local disposable
-`./scripts/release-verify.sh` in a controlled sandbox and keep evidence
-private. This task has no ownership over that workflow. Review CI logs for
-accidental `BEGIN PRIVATE KEY` or PEM paths; inspect `git ls-files`, Docker
-build contexts and artifact inventories for private keys. Automated absence
-checks cannot prove an uninspected external image or private signing host is
-clean: retain an explicit manual evidence gate. Public repository Actions
-artifacts are **not private storage**.
+For this T2, **all verification is performed on the local PC**. GitHub
+Actions/CI is excluded: do not trigger jobs, use hosted runners, collect
+Actions artifacts or use Actions as approval evidence. The dedicated
+`./scripts/test-signed-worker-local.sh` operates without production secrets,
+uses disposable in-process cryptographic fixtures on loopback, and deletes
+all temporary Go test binaries. It refuses to run if a signature already
+exists in `worker/bin` and never publishes a release.
+
+On the present **Linux/amd64 PC**, the shell installer lifecycle with a
+**test-only signed stub** and a separate temporary real Go binary identity
+check can be marked PASS after successful runs. Actual systemd service-mode
+installation and recovery require a privileged disposable Linux host before
+release; these are **NOT_TESTED** in this verifier.
+Cross-compiling macOS and Windows variants (when enabled) establishes only
+compilation, not native execution. Until actually exercised on those operating
+systems with local test evidence, macOS/Windows native installer and service
+lifecycle results are **NOT_TESTED**, not PASS; production authorization remains
+blocked. The signer currently uses GNU `stat` and `sha256sum` on Linux; do
+not assume it is portable to a macOS signing host without separate validation.
+
+Review local logs, `git ls-files`, build contexts and artifact inventories for
+private keys or unapproved binaries. Automated absence checks cannot prove a
+signing host is clean; require manual owner review and out-of-band trust-root
+approval before any release. Never store signing material or test artifacts in
+public repositories or artifact services.
 
 ### Owner approval record (currently all pending)
 
@@ -133,7 +156,7 @@ artifacts are **not private storage**.
 | Key custody | Owner-held external RSA key, SPKI fingerprint independently verified | PENDING |
 | Root policy | Old/new fingerprint and separate rotation approval if applicable | PENDING |
 | Signed package | Nine hashes, detached signature, independent verification | PENDING |
-| Security | Full Node CI, three-OS offline negative/lifecycle tests, failure recovery | PENDING |
+| Security | Local Node and Go verification, three-OS native negative/lifecycle tests, failure recovery | PENDING |
 | Distribution & ops | HTTPS origin, isolation, owner recovery runbook and explicit release decision | PENDING |
 | Publish authorization | Separate explicit owner approval; no automatic release or deployment | PENDING |
 

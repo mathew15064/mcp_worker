@@ -6,10 +6,21 @@ umask 077
 [ -n "${WORKER_RELEASE_EXPECTED_VERSION:-}" ] && [ -n "${WORKER_RELEASE_EXPECTED_COMMIT:-}" ] || { echo 'Release approval version/commit required' >&2; exit 2; }
 case "$WORKER_RELEASE_EXPECTED_VERSION" in *[!0-9.]*|'') echo 'Invalid expected version' >&2; exit 2;; esac
 case "$WORKER_RELEASE_EXPECTED_COMMIT" in *[!0-9a-f]*|'') echo 'Invalid expected commit' >&2; exit 2;; esac
-printf '%s' "$WORKER_RELEASE_EXPECTED_VERSION" | grep -Eq '^[0-9]+[.][0-9]+[.][0-9]+$' || { echo 'Invalid semantic version' >&2; exit 2; }
+printf '%s' "$WORKER_RELEASE_EXPECTED_VERSION" | grep -Eq '^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$' || { echo 'Invalid semantic version' >&2; exit 2; }
 printf '%s' "$WORKER_RELEASE_EXPECTED_COMMIT" | grep -Eq '^[0-9a-f]{12,40}$' || { echo 'Expected commit must be 12-40 hex characters' >&2; exit 2; }
 KEY="$1"
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+# Sign only a clean, reviewed Git source and its exact approved commit prefix.
+SOURCE_COMMIT="$(git -C "$ROOT" rev-parse --verify HEAD 2>/dev/null)" || {
+  echo 'Cannot verify immutable Git source commit' >&2; exit 2;
+}
+case "$SOURCE_COMMIT" in
+  "$WORKER_RELEASE_EXPECTED_COMMIT"*) ;;
+  *) echo 'Approved release commit does not match source HEAD' >&2; exit 2;;
+esac
+[ -z "$(git -C "$ROOT" status --porcelain --untracked-files=normal)" ] || {
+  echo 'Refusing to sign from a dirty source tree' >&2; exit 2;
+}
 case "$KEY" in /*) ;; *) echo 'Signing key must use an absolute path' >&2; exit 2;; esac
 [ -f "$KEY" ] && [ ! -L "$KEY" ] || { echo 'Signing key must be a regular, non-symlink file' >&2; exit 2; }
 KEY_DIR="$(CDPATH= cd -- "$(dirname -- "$KEY")" && pwd -P)"
@@ -17,7 +28,9 @@ case "$KEY_DIR/" in "$ROOT/"|"$ROOT/"*) echo 'Signing key must remain outside th
 KEY_MODE="$(stat -c %a "$KEY")"
 case "$KEY_MODE" in 400|600) ;; *) echo 'Signing key requires mode 0400 or 0600' >&2; exit 2;; esac
 cd "$ROOT/worker/bin"
-test -f SHA256SUMS && test -f WORKER_RELEASE
+test -f SHA256SUMS && test ! -L SHA256SUMS && test -f WORKER_RELEASE && test ! -L WORKER_RELEASE || {
+  echo 'Manifest and release metadata must be regular non-symlink files' >&2; exit 1;
+}
 [ "$(wc -l < WORKER_RELEASE | tr -d ' ')" = 2 ] || { echo 'Invalid metadata length' >&2; exit 1; }
 [ "$(sed -n '1p' WORKER_RELEASE)" = "version=$WORKER_RELEASE_EXPECTED_VERSION" ] || { echo 'Release version mismatch' >&2; exit 1; }
 [ "$(sed -n '2p' WORKER_RELEASE)" = "commit=$WORKER_RELEASE_EXPECTED_COMMIT" ] || { echo 'Release commit mismatch' >&2; exit 1; }

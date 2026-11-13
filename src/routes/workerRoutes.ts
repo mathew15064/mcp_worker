@@ -124,7 +124,7 @@ case "$PINNED_COMMIT" in *[!0-9a-f]*|'') echo "[systemtd] invalid release commit
 if [ -n "$PINNED_PREVIOUS_KEY_SHA256" ]; then
   printf '%s' "$PINNED_PREVIOUS_KEY_SHA256" | grep -Eq '^[0-9a-f]{64}$' || { echo "[systemtd] invalid prior trust root" >&2; exit 1; }
 fi
-printf '%s\n' "$PINNED_VERSION" | grep -Eq '^[0-9]+[.][0-9]+[.][0-9]+$' ||
+printf '%s\n' "$PINNED_VERSION" | grep -Eq '^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$' ||
   { echo "[systemtd] invalid semantic version" >&2; exit 1; }
 COMMIT_LEN="$(printf '%s' "$PINNED_COMMIT" | wc -c | tr -d ' ')"
 [ "$COMMIT_LEN" -ge 12 ] && [ "$COMMIT_LEN" -le 40 ] || { echo "[systemtd] invalid release commit length" >&2; exit 1; }
@@ -212,7 +212,7 @@ if [ -e "$RECORDED_VERSION" ] || [ -e "$RECORDED_COMMIT" ] || [ -e "$RECORDED_KE
     }
   fi
   awk -v old="$OLD_VERSION" -v new="$PINNED_VERSION" 'BEGIN {
-    if (old !~ /^[0-9]+\\.[0-9]+\\.[0-9]+$/ || new !~ /^[0-9]+\\.[0-9]+\\.[0-9]+$/) exit 1
+    if (old !~ /^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$/ || new !~ /^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$/) exit 1
     split(old,a,"."); split(new,b,".")
     for (i=1;i<=3;i++) {
       if (b[i]+0<a[i]+0) exit 1
@@ -244,7 +244,15 @@ if [ "$ACTUAL" != "$EXPECTED" ]; then
   exit 1
 fi
 chmod 0755 "$TMP/systemtd"
-"$TMP/systemtd" version >/dev/null
+# Match the executed binary identity to signed release metadata before replacing anything.
+VERSION_OUTPUT="$("$TMP/systemtd" version)" || { echo "[systemtd] binary version command failed" >&2; exit 1; }
+case "$VERSION_OUTPUT" in
+  "systemtd $PINNED_VERSION commit=$PINNED_COMMIT runtime="*) ;;
+  *) echo "[systemtd] binary version/commit mismatch" >&2; exit 1;;
+esac
+[ "$(printf '%s\n' "$VERSION_OUTPUT" | wc -l | tr -d ' ')" = 1 ] || {
+  echo "[systemtd] unexpected binary version output" >&2; exit 1;
+}
 
 SERVICE_ACTIVE=0
 if [ "$OS" = linux ] && [ "$SERVICE" = 1 ]; then
@@ -451,7 +459,7 @@ $PinnedCommit = ${pinnedCommit}
 $PinnedPublicKeyB64 = ${pinnedKey}
 $PinnedPreviousKeySha256 = ${previousKey}
 if (-not $PinnedVersion -or -not $PinnedCommit -or -not $PinnedPublicKeyB64) { throw 'Signed release not approved' }
-if ($PinnedVersion -cnotmatch '^[0-9]+\\.[0-9]+\\.[0-9]+$' -or $PinnedCommit -cnotmatch '^[0-9a-f]{12,40}$') { throw 'Invalid release pin' }
+if ($PinnedVersion -cnotmatch '^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$' -or $PinnedCommit -cnotmatch '^[0-9a-f]{12,40}$') { throw 'Invalid release pin' }
 if ($PinnedPreviousKeySha256 -and $PinnedPreviousKeySha256 -cnotmatch '^[0-9a-f]{64}$') { throw 'Invalid prior trust root' }
 Get-Command openssl -ErrorAction Stop | Out-Null
 $InstallRoot = if ($env:BOT_REPORT_WORKER_INSTALL_ROOT) { $env:BOT_REPORT_WORKER_INSTALL_ROOT } else { Join-Path $env:LOCALAPPDATA 'BotReportWorker' }
@@ -533,7 +541,7 @@ try {
     if ($OldKeySha256 -cne $PinnedKeySha256 -and ($PinnedPreviousKeySha256 -cne $OldKeySha256 -or $PinnedVersion -ceq $OldVersion)) {
       throw 'Unapproved signing trust-root replacement'
     }
-    if ($OldVersion -notmatch '^[0-9]+\\.[0-9]+\\.[0-9]+$') { throw 'Malformed release record' }
+    if ($OldVersion -notmatch '^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$') { throw 'Malformed release record' }
     if ([version]$PinnedVersion -lt [version]$OldVersion) { throw 'Signed release rollback rejected' }
     if ($OldVersion -ceq $PinnedVersion -and $OldCommit -cne $PinnedCommit) { throw 'Release version reused for another commit' }
   }
@@ -542,8 +550,11 @@ try {
   $Actual = (Get-FileHash -Algorithm SHA256 $Downloaded).Hash.ToLowerInvariant()
   if ($Actual -ne $Expected.ToLowerInvariant()) { throw "Checksum verification failed for $File" }
 
-  & $Downloaded version | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw 'Downloaded runtime failed version check' }
+  $BinaryVersionOutput = @(& $Downloaded version)
+  if ($LASTEXITCODE -ne 0 -or $BinaryVersionOutput.Count -ne 1 -or
+      $BinaryVersionOutput[0] -cnotlike "systemtd $PinnedVersion commit=$PinnedCommit runtime=*") {
+    throw 'Downloaded runtime version/commit mismatch'
+  }
   $Existing = Join-Path $Target 'bot-report-worker.exe'
   $Old = Join-Path $Tmp 'old.exe'
   $Next = Join-Path $Target ('.next-' + [guid]::NewGuid().ToString('N') + '.exe')
