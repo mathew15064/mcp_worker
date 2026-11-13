@@ -2,6 +2,9 @@ name: Worker cross-platform artifacts (manual, no release)
 
 on:
   workflow_dispatch:
+  # Task-scoped verification without modifying PR topology or publishing artifacts.
+  push:
+    branches: [feat/railway-p15-w3-t02-release-security]
   pull_request:
     paths:
       - 'src/routes/workerRoutes.ts'
@@ -9,6 +12,7 @@ on:
       - 'scripts/test-linux-installer-lifecycle.cjs'
       - 'tests/worker-signed-release*.test.ts'
       - 'worker/README.md'
+      - 'docs/WORKER_SIGNED_RELEASE_POLICY.md'
       - '.github/workflows/worker-artifact-build.yml'
 
 permissions:
@@ -45,16 +49,17 @@ jobs:
           sha256sum -c SHA256SUMS
           ./bot-report-worker-linux-amd64 version
 
-      - name: Upload private CI artifacts for release review
-        uses: actions/upload-artifact@v4
-        with:
-          name: worker-cross-platform-${{ github.sha }}
-          path: |
-            worker/bin/bot-report-worker-*
-            worker/bin/WORKER_RELEASE
-            worker/bin/SHA256SUMS
-          retention-days: 7
-          if-no-files-found: error
+      - name: Enforce non-publishing candidate boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e worker/bin/SHA256SUMS.sig
+          test "$(find worker/bin -maxdepth 1 -type f -name '*.pem' | wc -l)" -eq 0
+          test "$(find worker/bin -maxdepth 1 -type f -name '*.key' | wc -l)" -eq 0
+          echo 'Local unsigned build verified; binaries and signing material are not uploaded.'
+
+      # Never upload worker/bin. A public-repository Actions artifact is not
+      # a private RC channel; signing happens only outside CI after approval.
 
   installer-verification:
     # An ephemeral signer is created only inside a disposable runner. No
@@ -82,6 +87,6 @@ jobs:
         run: npm ci
       - name: Strict typecheck and compile test harness
         run: npm run typecheck && npm run build
-      - name: Offline signature/checksum/version/rollback tests
+      - name: Offline signature/checksum/version/rotation/rollback tests
         run: node --test dist/tests/worker-signed-release*.test.js
 
