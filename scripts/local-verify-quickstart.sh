@@ -5,12 +5,16 @@ umask 077
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 PINNED_SHA="9a817baabdaeb6a019083252dac6ca5077257474"
-REQUIRED_BRANCH="work/quickstart-local-t01"
+CURRENT_BRANCH="$(git -C "$ROOT" branch --show-current)"
 
 die() { printf 'LOCAL_VERIFY_REFUSED: %s\n' "$1" >&2; exit 2; }
 command -v git >/dev/null 2>&1 || die "git is required"
-[[ "$(git -C "$ROOT" branch --show-current)" == "$REQUIRED_BRANCH" ]] ||
-  die "must run from the isolated $REQUIRED_BRANCH branch"
+# Only explicitly reviewed PC branches may run this harness. Never run in
+# an existing production/staging checkout, or allow arbitrary branch names.
+case "$CURRENT_BRANCH" in
+  work/quickstart-local-t01|work/quickstart-local-integration-20261113) ;;
+  *) die "requires the isolated T1 branch or approved PC integration branch" ;;
+esac
 git -C "$ROOT" cat-file -e "${PINNED_SHA}^{commit}" 2>/dev/null ||
   die "pinned commit is missing"
 git -C "$ROOT" merge-base --is-ancestor "$PINNED_SHA" HEAD ||
@@ -46,13 +50,28 @@ safe_version() {
 NODE_VERSION="$(safe_version node node --version)"
 NPM_VERSION="$(safe_version npm npm --version)"
 GO_VERSION="$(safe_version go go version)"
+# Resolve the module-pinned Go toolchain from the PC's existing local cache.
+# GOPROXY=off forbids any toolchain download during resolution or test.
+LOCAL_GO_DIR=''
+if command -v go >/dev/null 2>&1; then
+  module_goroot="$(cd "$ROOT/worker-go" && GOTOOLCHAIN=auto GOPROXY=off go env GOROOT 2>/dev/null || true)"
+  if [[ -x "$module_goroot/bin/go" ]]; then
+    LOCAL_GO_DIR="$module_goroot/bin"
+    GO_VERSION="$("$LOCAL_GO_DIR/go" version)"
+  fi
+fi
+# npm lifecycle scripts must use the same Node 22 executable as the harness.
+# Some minimal subprocess environments otherwise fall back to /usr/bin/node 18.
+NODE_BIN_REAL="$(readlink -f "$(command -v node)")"
+[[ -x "$NODE_BIN_REAL" ]] || die 'a verified Node executable is required'
+TEST_PATH="$(dirname "$NODE_BIN_REAL"):${LOCAL_GO_DIR:+$LOCAL_GO_DIR:}$PATH"
 DOCKER_VERSION="$(safe_version docker docker --version)"
 OPENSSL_VERSION="$(safe_version openssl openssl version)"
 {
   printf 'task=T1\n'
   printf 'source_sha=%s\n' "$HEAD_SHA"
   printf 'pinned_base_sha=%s\n' "$PINNED_SHA"
-  printf 'branch=%s\n' "$REQUIRED_BRANCH"
+  printf 'branch=%s\n' "$CURRENT_BRANCH"
   printf 'started_utc=%s\n' "$(date -u +%FT%TZ)"
   printf 'os=%s\n' "$(uname -s -m)"
   printf 'node=%s\nnpm=%s\ngo=%s\ndocker=%s\nopenssl=%s\n' \
@@ -99,7 +118,7 @@ run() {
   (
     cd -- "$ROOT" || exit 1
     # Allow only minimal, non-secret host context to enter test processes.
-    env -i PATH="$PATH" HOME="$HOME" USER="${USER:-local}" \
+    env -i PATH="$TEST_PATH" NODE="$NODE_BIN_REAL" HOME="$HOME" USER="${USER:-local}" \
       LANG=C.UTF-8 LC_ALL=C.UTF-8 CI=false GOTOOLCHAIN=local GOPROXY=off \
       npm_config_audit=false npm_config_fund=false \
       npm_config_update_notifier=false \
@@ -121,7 +140,7 @@ run() {
 has_go() {
   command -v go >/dev/null 2>&1 || return 1
   local v major minor
-  v="$(go version | sed -nE 's/.* go([0-9]+)\.([0-9]+)(\.[0-9]+)?.*/\1 \2/p')"
+  v="$(printf '%s\n' "$GO_VERSION" | sed -nE 's/.* go([0-9]+)\.([0-9]+)(\.[0-9]+)?.*/\1 \2/p')"
   [[ "$v" =~ ^[0-9]+\ [0-9]+$ ]] || return 1
   read -r major minor <<< "$v"
   (( major > 1 || (major == 1 && minor >= 24) ))
@@ -231,17 +250,25 @@ else
   omit railway_go_isolation SKIP 'requires Go >=1.24, OpenSSL, npm ci and build'
 fi
 
-IMAGE="mcp-worker-t01-offline:$SHORT_SHA"
+IMAGE="mcp-worker-local:$SHORT_SHA"
+# Builds always execute on this PC. Offline mode forbids network; an explicit
+# online mode only permits Docker to fetch build dependencies, never deploy.
+DOCKER_MODE="${LOCAL_VERIFY_DOCKER_MODE:-offline}"
+case "$DOCKER_MODE" in offline|online) ;; *) die 'LOCAL_VERIFY_DOCKER_MODE must be offline or online' ;; esac
 if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
-  omit docker_offline_build SKIP 'Docker CLI/daemon unavailable'
+  omit docker_local_build SKIP 'Docker CLI/daemon unavailable'
   docker_ok=0
-elif ! docker image inspect 'node:26.13.0-alpine@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216' >/dev/null 2>&1 ||
-     ! docker image inspect 'golang:1.26.10-alpine@sha256:87c65a688975c0b1d4585d204874c45ca78354670e3a5f11368c5a492303d696' >/dev/null 2>&1; then
-  omit docker_offline_build SKIP 'pinned Docker base images not cached; offline build cannot pull'
+elif [[ "$DOCKER_MODE" == offline ]] && (
+  ! docker image inspect 'node:26.13.0-alpine@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216' >/dev/null 2>&1 ||
+  ! docker image inspect 'golang:1.26.10-alpine@sha256:87c65a688975c0b1d4585d204874c45ca78354670e3a5f11368c5a492303d696' >/dev/null 2>&1
+); then
+  omit docker_local_build SKIP 'pinned Docker images not cached; use explicitly authorized online mode if appropriate'
   docker_ok=0
 else
-  if run docker_offline_build 1200 'Docker build --network=none --pull=false; never deploy' \
-    docker build --network=none --pull=false -f Dockerfile.railway -t "$IMAGE" .; then
+  build_args=(--pull=false)
+  if [[ "$DOCKER_MODE" == offline ]]; then build_args+=(--network=none); fi
+  if run docker_local_build 1200 "Local Docker build ($DOCKER_MODE); never deploy" \
+    docker build "${build_args[@]}" -f Dockerfile.railway -t "$IMAGE" .; then
     docker_ok=1
   else
     docker_ok=0

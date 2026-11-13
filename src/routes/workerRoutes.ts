@@ -6,6 +6,7 @@ import databaseManager from '../db/databaseManager';
 import workerAuthService from '../services/workerAuthService';
 import workerRepository from '../repositories/workerRepository';
 import { canonicalRailwayOrigin } from '../config/railwayOrigin';
+import { railwayWorkerDistributionBlocked } from '../services/workerReleaseGate';
 
 // No approved signing key/release exists. Populate only by reviewed code change.
 type ApprovedWorkerRelease = Readonly<{
@@ -662,12 +663,12 @@ async function createEnrollmentProfile(
   });
 }
 
-// CI builds are unsigned private artifacts. A fresh Railway clone must not
-// advertise curl-to-shell execution until a pinned signing-key distribution
-// and mandatory cross-platform verification have passed release review.
+// Local build artifacts are unsigned. Railway distribution remains blocked
+// until an owner-approved, independently verified signed release exists.
+// This gate is shared with the Admin onboarding readiness display.
 router.use((req, res, next) => {
   if (
-    process.env.MCP_PLATFORM === 'railway' &&
+    railwayWorkerDistributionBlocked() &&
     (req.path.startsWith('/worker/install') || req.path.startsWith('/worker/dist/'))
   ) {
     return res.status(503).set('Cache-Control', 'no-store').json({

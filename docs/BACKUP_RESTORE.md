@@ -1,5 +1,35 @@
 # Backup, restore and upgrade
 
+## Railway SQLite — explicit off-volume export (review candidate)
+
+The Railway SQLite mode is different from the legacy MySQL/Compose procedure
+below. The `npm run backup-db` command now **refuses** an implicit default:
+set `DATABASE_PATH` and `BACKUP_EXPORT_DIR` explicitly. The export directory
+must already exist, must be a real non-symlink directory on a **different mount**
+from the live SQLite volume and must not contain/overlap the database path.
+Never write backups under `/app/data/backups` and never `cp` a live WAL database.
+
+For an **approved, isolated test environment only**, prepare a separate
+mounted export directory and then run:
+
+```sh
+DATABASE_PATH=/app/data/bot_report.sqlite \
+RAILWAY_VOLUME_MOUNT_PATH=/app/data \
+BACKUP_EXPORT_DIR=/mnt/separate-export \
+  npm run backup-db
+```
+
+The SQLite online backup emits a completed `.sqlite` snapshot and `.manifest.json`
+with SHA-256, size and schema version. The snapshot and manifest are **not**
+automatically encrypted or uploaded to remote durable storage. Copy them only
+through an owner-approved encrypted and authenticated off-host procedure, retain
+the matching `MCP_SETUP_SECRET` separately and verify restore to a new isolated
+volume. The restore preflight in
+`docs/RAILWAY_RECOVERY_ISOLATION.md` is **sandbox-only**, never a production
+restore command. Local Docker recovery tests do not prove Railway disaster
+recovery or external backup durability. No Railway data has been backed up or
+restored as part of the integration review.
+
 Back up the installer env, application data, and MySQL data as one matched
 set. The env includes the encryption key that decrypts the bootstrap; losing
 it can make a healthy database unusable. Worker identity/config on each

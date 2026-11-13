@@ -87,7 +87,10 @@ if (hasSourceFixtures) {
       (service.config.source as { commitSha: string }).commitSha,
       '9a817baabdaeb6a019083252dac6ca5077257474',
     );
-    assert.equal((service.config.source as { branch?: string }).branch, 'main');
+    assert.equal(
+      (service.config.source as { branch?: string }).branch,
+      'review/railway-p15-w3-t05-integration',
+    );
     assert.equal(service.config.domains, undefined, 'do not pretend a public HTTPS domain exists');
     assert.doesNotMatch(body, /\b(?:postgres|mysql|redis|mongo|upstash|neon)\s*\(/i);
     // Evaluate the actual IaC body with an apply context: refusal must occur

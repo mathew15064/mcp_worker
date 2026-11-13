@@ -19,9 +19,10 @@ export default defineRailway((ctx) => {
   const data = volume('sqlite-data', { region: 'us-west2', sizeMB: 512 });
   const app = service('mcp-worker', {
     source: github('mathew15064/mcp_worker', {
-      // The SDK resolves a GitHub branch; the exact SHA MUST remain pinned.
-      // Reachability from 'main' is UNVERIFIED and live apply is blocked.
-      branch: 'main',
+      // Pinned to the source PR #30 review branch at the verified original SHA.
+      // This is NOT the final integration SHA or an approved production release.
+      // Apply/deploy are intentionally forbidden until final owner approval.
+      branch: 'review/railway-p15-w3-t05-integration',
       commitSha: '9a817baabdaeb6a019083252dac6ca5077257474',
     }),
     replicas: 1,

@@ -48,7 +48,11 @@ for (const [name, value] of Object.entries({
 assert.equal(app.source?.type, 'github');
 assert.equal(app.source?.repo, 'mathew15064/mcp_worker');
 assert.equal(app.source?.commitSha, '9a817baabdaeb6a019083252dac6ca5077257474');
-assert.equal(app.source?.branch, 'main', 'exact SHA is required regardless of mutable branch');
+assert.equal(
+  app.source?.branch,
+  'review/railway-p15-w3-t05-integration',
+  'review source must match the original pinned PR branch, not main',
+);
 assert.deepEqual(app.variables?.MCP_SETUP_SECRET, { type: 'preserve' });
 // No fabricated public domain: after owner approval the owner must enable
 // HTTPS Public Networking on the real service, and check the generated domain.

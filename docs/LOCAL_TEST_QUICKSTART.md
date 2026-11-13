@@ -1,16 +1,18 @@
 # T1 — Railway One-Click Quickstart: kiểm thử thủ công trên PC
 
-**Phạm vi:** chỉ task T1, commit gốc `9a817baabdaeb6a019083252dac6ca5077257474` (PR tích hợp #30). **Không phải bằng chứng nghiệm thu từ CI.** Mọi thao tác xác minh, build và log phải đến từ Bot Report 2, profile **PC**, Linux x86_64; không dùng VPS staging, Railway production hay GitHub Actions.
+**Phạm vi:** T1 và nhánh tích hợp local T1–T5, xuất phát từ `9a817baabdaeb6a019083252dac6ca5077257474` (PR #30). **Không sử dụng CI/CD làm bằng chứng nghiệm thu.** Mọi build/test và log phải đến từ Bot Report 2, profile **PC**, Linux x86_64; không dùng VPS staging, Railway production hay GitHub Actions.
 
 ## Chạy lại bằng một lệnh
 
-Tại worktree của nhánh `work/quickstart-local-t01`:
+Tại worktree riêng `work/quickstart-local-t01` hoặc `work/quickstart-local-integration-20261113`:
 
 ```bash
 bash scripts/local-verify-quickstart.sh
+# Khi cho phép Docker tải dependencies để build trên chính Local PC:
+LOCAL_VERIFY_DOCKER_MODE=online bash scripts/local-verify-quickstart.sh
 ```
 
-Script từ chối chạy trên branch khác hoặc khi HEAD không xuất phát từ pinned SHA. Script chỉ dùng kho nguồn hiện có, không fetch/push/merge/deploy/publish, không cài toolchain hoặc phần mềm toàn cục. Các bước kiểm tra chạy **tuần tự nhưng độc lập về trạng thái**, thất bại được ghi lại mà không giả vờ rằng các gate sau đã chạy.
+Mặc định Docker dùng chế độ offline. Script từ chối các branch khác hoặc HEAD không xuất phát từ pinned SHA. Script chỉ dùng kho nguồn hiện có, không fetch/push/merge/deploy/publish, không cài toolchain hoặc phần mềm toàn cục. Các bước kiểm tra chạy **tuần tự nhưng độc lập về trạng thái**, thất bại được ghi lại mà không giả vờ rằng các gate sau đã chạy.
 
 Lựa chọn cho môi trường **không có Internet** (cần cache npm đã được chuẩn bị trước):
 
@@ -23,11 +25,22 @@ Mặc định, `npm ci` và `npm ci --prefix .railway --ignore-scripts` **có th
 ## Preconditions / quyền hạn
 
 - Node.js **22.x** (theo `package.json`), npm và git; `timeout` từ coreutils. Version các công cụ được ghi trước khi chạy.
-- Go **>= 1.24** cho `go test`, `go test -race`, `go vet`, Go build và WSS/Go isolation E2E. Đặt `GOTOOLCHAIN=local`, `GOPROXY=off` để không tự tải toolchain/module. Go 1.22.2 trên PC tại thời điểm kiểm kê **không đạt**; các gate phụ thuộc Go sẽ SKIP nếu không có toolchain hợp lệ. Không tự sửa host, không cài Go globally.
-- Docker CLI + daemon chạy được. Offline Docker build sử dụng `--network=none --pull=false` và chỉ thử khi đã cache đủ hai pinned base image của `Dockerfile.railway`. Dockerfile còn có bước `apk`/`npm pack` cần dependency cache; nếu không chạy được offline, ghi FAIL và các Docker runtime gates SKIP. Không build image trên VPS.
+- Go **>= 1.24** cho `go test`, `go test -race`, `go vet`, Go build và WSS/Go isolation E2E. Host `go` mặc định là 1.22.2, nhưng module `worker-go` đã có Go 1.24.0 trong cache toolchain trên PC. Script chọn binary trong Go module cache với `GOPROXY=off`, rồi chạy `GOTOOLCHAIN=local` và đường dẫn binary đã chọn; không tải toolchain hoặc cài tool global. Nếu cache thiếu, các gate Go SKIP và phải báo rõ.
+- Docker CLI + daemon chạy được. Chế độ Docker mặc định `LOCAL_VERIFY_DOCKER_MODE=offline` dùng `--network=none --pull=false` và yêu cầu đã cache image + build dependencies; nếu thiếu, Docker gates được ghi SKIP/FAIL. Chế độ `online` **chỉ build image trên PC** nhưng cho phép lấy dependency qua mạng, không gọi Railway hay deploy. Không build image trên VPS.
 - OpenSSL cho E2E WSS và ký số thử nghiệm; Chromium Playwright phải có sẵn đúng revision, không tự chạy `playwright install`.
 - Script có thể tạo `node_modules`, `.railway/node_modules`, `dist` và fixture tạm trong **worktree riêng**; Docker gates (nếu đủ điều kiện) dùng image, container và volume thử nghiệm trên PC. Không sử dụng tài nguyên production.
 - Không cung cấp secrets, private keys thật, tokens hoặc cấu hình production. Script truyền môi trường tối giản qua `env -i`, không ghi `env`. Signing tests tạo RSA key thử nghiệm trong memory/fixture; **không gọi** `scripts/sign-worker-manifest.sh` để ký bản phát hành.
+
+## Chất lượng toàn kho và nợ kỹ thuật còn tồn tại
+
+Tại lần kiểm tra tích hợp 13/11/2026, `npm run lint:typed` còn **680** lỗi
+ở toàn kho và `npm run format:check` còn **26** file cần format; các lệnh này
+vẫn **FAIL** và phải được ghi đúng trong kết quả, không đổi sang PASS. So với
+báo cáo T1 trước tích hợp (683 lỗi và 27 file), T4 đã giảm nợ; file
+`quality/baseline.json` được ghi lại sau khi kiểm tra thay đổi. `npm run
+quality:check` PASS xác nhận không tăng nợ so với baseline đã duyệt, nhưng
+**không thay thế** yêu cầu xử lý full typed lint/format trong một công việc
+riêng. Không bật autofix cho toàn kho như một bước ngầm của Quickstart.
 
 ## Bằng chứng nghiệm thu PC
 

@@ -1,4 +1,5 @@
 /* Typed HTML rendering contract. Every dynamic value is escaped at the output boundary. */
+import { railwayWorkerDistributionBlocked } from '../services/workerReleaseGate';
 type HtmlValue = unknown;
 interface PageUser {
   id?: string;
@@ -367,9 +368,9 @@ function onboardingPage({
     }
   } catch (_) {}
   const endpointReady = ready && enabled && mode !== 'unsafe';
-  // The pinned Railway Worker installer is deliberately gated with HTTP 503 until
-  // a signed release is approved. Never infer installability from a live Worker.
-  const signedReleasePending = process.env.MCP_PLATFORM === 'railway';
+  // Same fail-closed distribution gate as the HTTP installer routes.
+  // Neither an online Worker nor a read-only MCP call can approve a release.
+  const signedReleasePending = railwayWorkerDistributionBlocked();
   const verifiedWorker = workerReady && !signedReleasePending;
   const next = !ready
     ? 2

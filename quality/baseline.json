@@ -1,9 +1,5 @@
 {
   "lint": {
-    "scripts/backup-db.ts": {
-      "@typescript-eslint/no-require-imports": 2,
-      "@typescript-eslint/no-unsafe-member-access": 1
-    },
     "scripts/first-mcp-call.ts": {
       "@typescript-eslint/no-unsafe-argument": 1,
       "@typescript-eslint/no-unsafe-assignment": 1,
@@ -293,7 +289,6 @@
     }
   },
   "format": {
-    "scripts/backup-db.ts": "34586c7269dc53f50e6c9674aac201129590f1e30f845d2bc59117c9af241b0d",
     "scripts/init-bundled-db.ts": "e5ed670a0c7b2dd02426a557a1bb1f71666ee2fc883557e26137af7f54147a19",
     "scripts/mcp-client.ts": "f87d59bf7102ebe7fb2eb02403e98323eecbafccb459dd9fb4d2a643755cdf9c",
     "scripts/migrate.ts": "e337b00d8db5f6af70922ebaa93a6e67611cf66c66a0c93c7d25db5240c1c578",
