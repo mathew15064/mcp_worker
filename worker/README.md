@@ -63,6 +63,9 @@ macOS/Windows use manual mode; OS-native lifecycle tests remain a release gate.
 
 ## Signed release artifacts — approval required
 
+The normative owner-operated RC checklist, key custody and root-rotation
+policy are in [Signed Worker release and trust policy](../docs/WORKER_SIGNED_RELEASE_POLICY.md).
+
 **Current state: no production Worker release is approved.** Railway returns
 `503 WORKER_SIGNED_RELEASE_PENDING` for every installer and binary endpoint.
 Non-Railway installer templates also fail closed without a review-pinned signing
@@ -78,7 +81,7 @@ All eight Linux/macOS/Windows Go binaries and `WORKER_RELEASE` are listed in
 contains an independently reviewed, pinned RSA public verification key
 (in base64 PEM form) and expected release version/commit. It verifies the
 manifest signature **before** trusting any checksum; then checks metadata,
-binary SHA-256, release identity and monotonic installed version. An
+binary SHA-256, release identity, stored SPKI public-key fingerprint and monotonic installed version. An
 unsigned, altered, wrong-key, wrong-version or older signed release is rejected
 without replacing the running binary. `BOT_REPORT_WORKER_TRUSTED_KEY` is no
 longer an override. All platforms require OpenSSL; Windows also requires
@@ -93,7 +96,9 @@ Release candidate procedure (offline, only after human approval):
    `(cd worker/bin && sha256sum -c SHA256SUMS)`.
 2. In an authorized offline signer environment, provide the **private**
    RSA key from a separate secure channel, not source, Actions secrets printed
-   to logs, or the Docker image. Run
+   to logs, or the Docker image. The key must be a non-symlink regular file at
+   an absolute path outside the checkout, with mode 0400 or 0600. CI never signs
+   or uploads candidate binaries. Run
    `WORKER_RELEASE_EXPECTED_VERSION=x.y.z WORKER_RELEASE_EXPECTED_COMMIT=<commit> ./scripts/sign-worker-manifest.sh /absolute/private.pem`.
    This tool refuses noncanonical or incomplete manifests and verifies its
    detached signature locally. It does **not** publish or approve a release.
@@ -116,8 +121,13 @@ automated start-failure recovery may restore the *previously running* binary
 during a failed replacement; this is not permission to install an older
 release. A deliberate downgrade requires separate owner approval and a
 reviewed signed release policy change. Installer records
-`release-version`/`release-commit` beside the local identity and denies
+`release-version`/`release-commit` plus `release-key-sha256` beside the local
+identity and denies
 older signed packages and same-version/different-commit substitution.
+A different signing public key is **not** an ordinary upgrade. One-way root
+rotation is permitted only with an explicitly reviewed old SPKI SHA-256 pin
+(`previousPublicKeySha256`) and a strictly greater version; arbitrary key
+replacement, missing trust records, and key regression fail closed.
 Legacy untracked binaries require an explicit migration rather than an
 unverified in-place upgrade. Protect the installer source itself: its
 download-channel authenticity is a separate bootstrap trust requirement,
