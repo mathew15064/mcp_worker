@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - feat/railway-p15-w2-t02-template
+      - review/railway-p15-w2-t05-integration
   workflow_dispatch:
 
 permissions:
@@ -16,7 +17,9 @@ jobs:
       github.head_ref == 'feature/railway-sqlite-oneclick-20261112' ||
       github.ref_name == 'feature/railway-sqlite-oneclick-20261112' ||
       github.head_ref == 'feat/railway-p15-w2-t02-template' ||
-      github.ref_name == 'feat/railway-p15-w2-t02-template'
+      github.ref_name == 'feat/railway-p15-w2-t02-template' ||
+      github.head_ref == 'review/railway-p15-w2-t05-integration' ||
+      github.ref_name == 'review/railway-p15-w2-t05-integration'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
