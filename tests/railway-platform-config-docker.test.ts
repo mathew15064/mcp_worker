@@ -63,6 +63,55 @@ void test(
       );
       assert.notEqual(missingSecret.status, 0, 'missing setup secret must fail closed');
       assert.match(missingSecret.stderr, /MCP_SETUP_SECRET/);
+      for (const invalid of ['weak', 'A'.repeat(43), 'z'.repeat(43)]) {
+        const weak = docker(
+          'run',
+          '--rm',
+          '-v',
+          volume + ':/app/data',
+          ...shared,
+          '-e',
+          'RAILWAY_VOLUME_NAME=' + volume,
+          '-e',
+          'MCP_SETUP_SECRET=' + invalid,
+          image,
+        );
+        assert.notEqual(weak.status, 0, 'weak/noncanonical secret must fail closed');
+        assert.match(weak.stderr, /MCP_SETUP_SECRET/);
+      }
+      for (const wrong of [
+        ['DATABASE_PATH=/tmp/ephemeral.sqlite', 'Database must be stored'],
+        ['RAILWAY_VOLUME_MOUNT_PATH=/app/other', 'persistent /app/data'],
+      ]) {
+        const rejected = docker(
+          'run',
+          '--rm',
+          '-v',
+          volume + ':/app/data',
+          ...shared,
+          '-e',
+          'RAILWAY_VOLUME_NAME=' + volume,
+          '-e',
+          wrong[0],
+          image,
+        );
+        assert.notEqual(rejected.status, 0, 'invalid storage path must fail closed');
+        assert.match(rejected.stderr, new RegExp(wrong[1]));
+      }
+      const wrongUid = docker(
+        'run',
+        '--rm',
+        '--user',
+        '1000:1000',
+        '-v',
+        volume + ':/app/data',
+        ...shared,
+        '-e',
+        'RAILWAY_VOLUME_NAME=' + volume,
+        image,
+      );
+      assert.notEqual(wrongUid.status, 0, 'nonroot initializer must fail closed');
+      assert.match(wrongUid.stderr, /Volume initializer must start as root/);
       const readonly = docker(
         'run',
         '--rm',

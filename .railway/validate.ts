@@ -4,6 +4,7 @@
  * Run: .railway/node_modules/.bin/tsx .railway/validate.ts
  */
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   RAILWAY_GRAPH_VERSION,
   createRailwayContext,
@@ -47,12 +48,42 @@ for (const [name, value] of Object.entries({
 }
 assert.equal(app.source?.type, 'github');
 assert.equal(app.source?.repo, 'mathew15064/mcp_worker');
-assert.equal(app.source?.commitSha, '9a817baabdaeb6a019083252dac6ca5077257474');
-assert.equal(
-  app.source?.branch,
-  'review/railway-p15-w3-t05-integration',
-  'review source must match the original pinned PR branch, not main',
+// A candidate must never silently reuse a review/local SHA as its release.
+assert.equal(app.source?.commitSha, '0000000000000000000000000000000000000000');
+assert.equal(app.source?.branch, 'release/OWNER_APPROVAL_REQUIRED');
+assert.notEqual(app.source?.commitSha, '9a817baabdaeb6a019083252dac6ca5077257474');
+const template = JSON.parse(
+  readFileSync(new URL('./template-candidate.json', import.meta.url), 'utf8'),
 );
+assert.equal(template.schemaVersion, 1);
+assert.equal(template.status, 'REVIEW_ONLY_NOT_PUBLISHED');
+assert.equal(template.templateUrl, null);
+assert.equal(template.templateCode, null);
+assert.equal(template.source.ownerApprovedCommitSha, null);
+assert.equal(template.source.ownerApprovedReleaseBranch, null);
+assert.equal(template.source.immutablePinRequired, true);
+assert.equal(template.services.length, 1);
+assert.equal(template.volumes.length, 1);
+assert.deepEqual(template.externalDatabases, []);
+assert.equal(template.automaticCloudActions, false);
+assert.equal(template.automaticGitHubActions, false);
+assert.equal(template.services[0].name, app.name);
+assert.equal(template.services[0].replicas, app.deploy?.numReplicas);
+assert.equal(template.services[0].dockerfilePath, 'Dockerfile.railway');
+assert.equal(template.services[0].healthcheckPath, app.deploy?.healthcheckPath);
+assert.equal(template.services[0].healthcheckTimeoutSeconds, app.deploy?.healthcheckTimeout);
+assert.equal(template.services[0].requiredOwnerVariables.length, 1);
+assert.equal(template.services[0].requiredOwnerVariables[0].key, 'MCP_SETUP_SECRET');
+assert.equal(template.services[0].requiredOwnerVariables[0].defaultValue, null);
+assert.equal(template.services[0].publicNetworking.domain, null);
+assert.equal(template.volumes[0].name, data.name);
+assert.equal(template.volumes[0].mountPath, '/app/data');
+assert.equal(template.volumes[0].attachedService, app.name);
+assert.equal(template.volumes[0].sizeMB, 512);
+for (const [name, value] of Object.entries(template.services[0].variables)) {
+  assert.deepEqual(app.variables?.[name], { type: 'literal', value }, `template variable ${name}`);
+}
+assert.equal(Object.keys(template.services[0].variables).length, 9);
 assert.deepEqual(app.variables?.MCP_SETUP_SECRET, { type: 'preserve' });
 // No fabricated public domain: after owner approval the owner must enable
 // HTTPS Public Networking on the real service, and check the generated domain.
@@ -72,5 +103,9 @@ const graph: RailwayGraph = {
   edges: [{ from: app.address, to: data.address, type: 'mount', key: '/app/data' }],
 };
 assert.deepEqual(validateGraph(graph), [], 'real SDK graph diagnostics');
-console.log('RAILWAY_SDK_GRAPH_PASS: 1 service, 1 volume, 1 replica, /app/data, pinned review SHA');
-console.log('RAILWAY_REVIEW_ONLY_PASS: apply/deploy/template denied; HTTPS domain NOT_TESTED');
+console.log(
+  'RAILWAY_SDK_GRAPH_PASS: 1 service, 1 volume, 1 replica, /app/data; template blueprint matches SDK',
+);
+console.log(
+  'RAILWAY_REVIEW_ONLY_PASS: no release SHA, no template URL, apply/deploy/template denied; HTTPS domain NOT_TESTED',
+);

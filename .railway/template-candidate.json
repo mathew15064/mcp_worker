@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "status": "REVIEW_ONLY_NOT_PUBLISHED",
+  "templateUrl": null,
+  "templateCode": null,
+  "description": "Railway template composer blueprint; this JSON is an auditable checklist, NOT a Railway API import or published template.",
+  "source": {
+    "provider": "github",
+    "repository": "mathew15064/mcp_worker",
+    "ownerApprovedReleaseBranch": null,
+    "ownerApprovedCommitSha": null,
+    "immutablePinRequired": true,
+    "notes": "Composer uses an approved release branch URL; verify the deployed commit equals the separately approved immutable SHA."
+  },
+  "services": [
+    {
+      "name": "mcp-worker",
+      "kind": "node-application",
+      "replicas": 1,
+      "source": "github",
+      "dockerfilePath": "Dockerfile.railway",
+      "healthcheckPath": "/healthz",
+      "healthcheckTimeoutSeconds": 120,
+      "restartPolicy": "ON_FAILURE",
+      "restartPolicyMaxRetries": 10,
+      "variables": {
+        "NODE_ENV": "production",
+        "MCP_PLATFORM": "railway",
+        "DATABASE_PATH": "/app/data/bot_report.sqlite",
+        "HOST": "0.0.0.0",
+        "PORT": "80",
+        "ADMIN_USERNAME": "admin",
+        "RAILWAY_DOCKERFILE_PATH": "Dockerfile.railway",
+        "RAILWAY_RUN_UID": "0",
+        "RAILWAY_DEPLOYMENT_OVERLAP_SECONDS": "0"
+      },
+      "requiredOwnerVariables": [
+        {
+          "key": "MCP_SETUP_SECRET",
+          "defaultValue": null,
+          "secret": true,
+          "description": "Generate and retain a fresh unique 32-byte base64url value (43 characters); never paste into a template default."
+        }
+      ],
+      "publicNetworking": {
+        "protocol": "HTTP",
+        "domain": null,
+        "requiresOwnerDomainGeneration": true
+      }
+    }
+  ],
+  "volumes": [
+    {
+      "name": "sqlite-data",
+      "region": "us-west2",
+      "sizeMB": 512,
+      "mountPath": "/app/data",
+      "attachedService": "mcp-worker"
+    }
+  ],
+  "externalDatabases": [],
+  "automaticCloudActions": false,
+  "automaticGitHubActions": false,
+  "publicationBlockers": [
+    "owner-approved immutable release commit and reachable protected branch",
+    "owner confirms GitHub Actions disabled before any push",
+    "owner approves Railway billing and real deploy",
+    "owner publishes template separately",
+    "public HTTPS domain generation and TLS validation",
+    "live OAuth/Worker/WSS/SQLite and backup acceptance"
+  ]
+}

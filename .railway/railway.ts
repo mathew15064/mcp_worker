@@ -1,11 +1,9 @@
 /**
- * REVIEW ONLY. One service, one SQLite volume, one replica.
- *
- * This exact commit is a LOCAL review baseline, NOT a production release.
- * No approved release source exists. Intentionally reject ALL evaluation
- * commands except the offline SDK "plan" context; even "apply" is blocked.
- * A future approval must replace this guard and pin in a separately reviewed
- * change, verify GitHub reachability, and pass live acceptance independently.
+ * REVIEW ONLY: offline SDK topology for a future owner-approved release.
+ * A zero-SHA and nonexistent release branch are deliberate non-deployable
+ * placeholders, NOT a production source, and this module rejects apply/deploy.
+ * Owner approval, exact reachable release pin and a separately reviewed guard
+ * change are required before any live action or template publication.
  */
 import { defineRailway, github, preserve, project, service, volume } from 'railway/iac';
 
@@ -19,11 +17,10 @@ export default defineRailway((ctx) => {
   const data = volume('sqlite-data', { region: 'us-west2', sizeMB: 512 });
   const app = service('mcp-worker', {
     source: github('mathew15064/mcp_worker', {
-      // Pinned to the source PR #30 review branch at the verified original SHA.
-      // This is NOT the final integration SHA or an approved production release.
-      // Apply/deploy are intentionally forbidden until final owner approval.
-      branch: 'review/railway-p15-w3-t05-integration',
-      commitSha: '9a817baabdaeb6a019083252dac6ca5077257474',
+      // Intentionally impossible source until the owner approves an immutable
+      // release commit + reachable branch. Do not auto-fill from a local HEAD.
+      branch: 'release/OWNER_APPROVAL_REQUIRED',
+      commitSha: '0000000000000000000000000000000000000000',
     }),
     replicas: 1,
     healthcheck: '/healthz',

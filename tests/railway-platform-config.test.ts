@@ -85,11 +85,11 @@ if (hasSourceFixtures) {
     assert.equal((env.MCP_SETUP_SECRET as { preserved: boolean }).preserved, true);
     assert.equal(
       (service.config.source as { commitSha: string }).commitSha,
-      '9a817baabdaeb6a019083252dac6ca5077257474',
+      '0000000000000000000000000000000000000000',
     );
     assert.equal(
       (service.config.source as { branch?: string }).branch,
-      'review/railway-p15-w3-t05-integration',
+      'release/OWNER_APPROVAL_REQUIRED',
     );
     assert.equal(service.config.domains, undefined, 'do not pretend a public HTTPS domain exists');
     assert.doesNotMatch(body, /\b(?:postgres|mysql|redis|mongo|upstash|neon)\s*\(/i);
@@ -124,6 +124,9 @@ if (hasSourceFixtures) {
     assert.match(script, /\.sqlite-wal/);
     assert.match(script, /\.sqlite-shm/);
     assert.match(script, /su-exec node sh -c/);
+    assert.match(script, /decoded\.toString\("base64url"\) !== value/);
+    assert.match(script, /new Set\(value\)\.size < 12/);
+    assert.match(script, /umask 077/);
     assert.match(script, /exec su-exec node "\$@"/);
     const noVolume = spawnSync('sh', [path.join(root, 'docker-entrypoint-railway.sh')], {
       encoding: 'utf8',
@@ -150,9 +153,8 @@ if (hasSourceFixtures) {
     assert.doesNotMatch(dockerfile, /COPY --from=builder \/app\/dist\/api/);
   });
 } else {
-  // The release harness runs compiled tests inside its minimal runtime image.
-  // IaC authoring inputs are deliberately not shipped; source checks run in
-  // the checkout CI job, while this mode asserts production packaging instead.
+  // The standalone runtime image excludes source-only IaC fixtures.
+  // This mode checks production packaging only; PC checkout performs SDK tests.
   void test('production image excludes Railway IaC source fixtures', () => {
     assert.equal(fs.existsSync(path.join(root, '.railway/railway.ts')), false);
     assert.equal(fs.existsSync(path.join(root, 'Dockerfile.railway')), false);

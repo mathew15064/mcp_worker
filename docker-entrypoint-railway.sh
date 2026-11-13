@@ -11,17 +11,20 @@ fi
 if [ "${DATABASE_PATH:-}" != /app/data/bot_report.sqlite ]; then
   echo '[RAILWAY_BOOT] Database must be stored on /app/data volume.' >&2; exit 1
 fi
-# Never fall back to a predictable/session-breaking ephemeral owner secret.
-# Match the application contract, and never print the secret or its value.
-setup_secret="${MCP_SETUP_SECRET:-}"
-if [ "${#setup_secret}" -lt 43 ]; then
-  echo '[RAILWAY_BOOT] A saved 43+ character base64url MCP_SETUP_SECRET is required.' >&2; exit 1
+# Require the canonical encoding of exactly 32 random-looking bytes.
+# Length/character checks alone mistakenly accept 43 identical characters.
+# This detects obvious weak values, not cryptographic proof of randomness.
+# The value is read from the environment (never CLI arguments or logs).
+if ! node -e '
+  const value = process.env.MCP_SETUP_SECRET || "";
+  const decoded = Buffer.from(value, "base64url");
+  if (!/^[A-Za-z0-9_-]{43}$/.test(value) || decoded.length !== 32 ||
+      decoded.toString("base64url") !== value || new Set(value).size < 12 ||
+      /(password|secret|changeme|example|railway|test)/i.test(value)) process.exit(1);
+'; then
+  echo '[RAILWAY_BOOT] Invalid or weak MCP_SETUP_SECRET: use 32 random bytes encoded as base64url.' >&2
+  exit 1
 fi
-case "$setup_secret" in
-  *[!A-Za-z0-9_-]*)
-    echo '[RAILWAY_BOOT] MCP_SETUP_SECRET must be base64url.' >&2; exit 1 ;;
-esac
-unset setup_secret
 if [ "$(id -u)" -ne 0 ]; then
   echo '[RAILWAY_BOOT] Volume initializer must start as root.' >&2; exit 1
 fi
@@ -64,4 +67,5 @@ for file in /app/data/bot_report.sqlite /app/data/bot_report.sqlite-wal /app/dat
   fi
 done
 
+umask 077
 exec su-exec node "$@"

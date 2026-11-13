@@ -50,6 +50,16 @@ expect_failure forged-volume-vars "${common[@]}" -e MCP_SETUP_SECRET="$secret" "
 docker volume create --label io.mcp-worker.t3.disposable=true "$volume" >/dev/null
 expect_failure missing-setup-secret -v "$volume:/app/data" "${common[@]}" "$image"
 expect_failure weak-setup-secret -v "$volume:/app/data" "${common[@]}" -e MCP_SETUP_SECRET=weak "$image"
+expect_failure repeated-setup-secret -v "$volume:/app/data" "${common[@]}" \
+  -e MCP_SETUP_SECRET="$(printf 'A%.0s' {1..43})" "$image"
+expect_failure noncanonical-setup-secret -v "$volume:/app/data" "${common[@]}" \
+  -e MCP_SETUP_SECRET="$(printf 'z%.0s' {1..43})" "$image"
+expect_failure wrong-database-path -v "$volume:/app/data" "${common[@]}" \
+  -e DATABASE_PATH=/tmp/ephemeral.sqlite -e MCP_SETUP_SECRET="$secret" "$image"
+expect_failure wrong-volume-path -v "$volume:/app/data" "${common[@]}" \
+  -e RAILWAY_VOLUME_MOUNT_PATH=/app/other -e MCP_SETUP_SECRET="$secret" "$image"
+expect_failure nonroot-initializer --user 1000:1000 -v "$volume:/app/data" "${common[@]}" \
+  -e MCP_SETUP_SECRET="$secret" "$image"
 expect_failure readonly-volume -v "$volume:/app/data:ro" "${common[@]}" -e MCP_SETUP_SECRET="$secret" "$image"
 for dbfile in bot_report.sqlite bot_report.sqlite-wal bot_report.sqlite-shm; do
   docker run --rm --entrypoint sh -v "$volume:/app/data" "$image" \
