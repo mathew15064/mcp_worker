@@ -67,6 +67,10 @@ if (hasSourceFixtures) {
     assert.equal(service.config.replicas, 1);
     assert.equal(service.config.healthcheck, '/healthz');
     assert.equal(service.config.healthcheckTimeout, 120);
+    assert.deepEqual(JSON.parse(JSON.stringify(service.config.deploy)), {
+      restartPolicyType: 'ON_FAILURE',
+      restartPolicyMaxRetries: 10,
+    });
     const mounts = service.config.volumeMounts as Record<string, Resource>;
     assert.equal(Object.keys(mounts).length, 1);
     assert.equal(mounts['/app/data'], volumes[0]);
@@ -80,7 +84,11 @@ if (hasSourceFixtures) {
     assert.equal((env.MCP_SETUP_SECRET as { preserved: boolean }).preserved, true);
     assert.equal(
       (service.config.source as { commitSha: string }).commitSha,
-      'e7de57a28f4894d302a6dfb24a577ea7b38b9a08',
+      '1d617c9abfaaea8b9feae32da269124d5e3d8fd2',
+    );
+    assert.equal(
+      (service.config.source as { branch: string }).branch,
+      'review/railway-p15-w2-t05-integration',
     );
     assert.doesNotMatch(body, /\b(?:postgres|mysql|redis|mongo|upstash|neon)\s*\(/i);
   });
@@ -167,5 +175,19 @@ void test('canonical HTTPS origin rejects forged hosts and accepts owner custom 
   assert.throws(
     () => canonicalRailwayOrigin({ MCP_PUBLIC_BASE_URL: 'https://u:p@example.org' }),
     /Invalid/,
+  );
+  for (const bad of [
+    'my-worker.example.org',
+    'https://my-worker.example.org:3000',
+    'https://my-worker.example.org/redirect',
+    'https://my-worker.example.org?token=123',
+    'https://my-worker.example.org ',
+    'https://my-worker.example.org\n',
+  ]) {
+    assert.throws(() => canonicalRailwayOrigin({ MCP_PUBLIC_BASE_URL: bad }), /Invalid/);
+  }
+  assert.throws(
+    () => canonicalRailwayOrigin({ RAILWAY_PUBLIC_DOMAIN: 'owner.up.railway.app.attacker.test' }),
+    /Railway/,
   );
 });
