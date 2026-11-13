@@ -9,11 +9,14 @@ CURRENT_BRANCH="$(git -C "$ROOT" branch --show-current)"
 
 die() { printf 'LOCAL_VERIFY_REFUSED: %s\n' "$1" >&2; exit 2; }
 command -v git >/dev/null 2>&1 || die "git is required"
-# Only explicitly reviewed PC branches may run this harness. Never run in
-# an existing production/staging checkout, or allow arbitrary branch names.
-case "$CURRENT_BRANCH" in
-  work/railway-final-t1|work/quickstart-local-integration-20261113) ;;
-  *) die "requires work/railway-final-t1 or the approved clean PC integration branch" ;;
+# Branch AND canonical worktree path are a fixed allowlist, not a user-supplied
+# wildcard or environment override. The original/shared base, staging, and
+# production checkouts are never accepted as verification targets.
+case "$CURRENT_BRANCH:$ROOT" in
+  work/railway-final-t1:/root/mcp_worker_railway_final_t1_20261113|\
+  work/oneclick-unblock-t1:/root/mcp_worker_oneclick_unblock_t1_20261113|\
+  work/railway-oneclick-final-integration-20261113:/root/mcp_worker_railway_oneclick_final_integration_20261113) ;;
+  *) die "not an explicitly authorized PC branch AND worktree (T1 or final integration)" ;;
 esac
 git -C "$ROOT" cat-file -e "${PINNED_SHA}^{commit}" 2>/dev/null ||
   die "pinned commit is missing"
@@ -21,6 +24,10 @@ git -C "$ROOT" merge-base --is-ancestor "$PINNED_SHA" HEAD ||
   die "current HEAD does not descend from the pinned commit"
 [[ "$(git -C "$ROOT" rev-parse --show-toplevel)" == "$ROOT" ]] ||
   die "cannot verify worktree root"
+# Refuse changes including staged files and untracked source, before npm ci.
+# Runtime artifacts are deliberately written outside the repository.
+[[ -z "$(git -C "$ROOT" status --porcelain --untracked-files=normal)" ]] ||
+  die "worktree must be clean (tracked, staged, and untracked files)"
 
 HEAD_SHA="$(git -C "$ROOT" rev-parse HEAD)"
 SHORT_SHA="${HEAD_SHA:0:12}"
@@ -37,7 +44,7 @@ mkdir -m 700 -- "$REPORT/logs"
 SCRATCH="$(mktemp -d "$REPORT/.private-run.XXXXXXXX")" || die "cannot create private scratch"
 trap 'rm -rf -- "$SCRATCH"' EXIT
 RESULTS="$REPORT/results.tsv"
-printf 'gate\tstatus\texit_code\tduration_seconds\ttest_skips\tnote\n' > "$RESULTS"
+printf 'gate\tstatus\texit_code\tstarted_utc\tended_utc\tduration_seconds\ttest_skips\tnote\n' > "$RESULTS"
 
 safe_version() {
   local name="$1"; shift
@@ -99,8 +106,10 @@ sanitize() {
 }
 record() {
   local gate="$1" status="$2" code="$3" seconds="$4" skips="$5" note="$6"
+  local started="${7:-$(date -u +%FT%TZ)}" ended="${8:-$(date -u +%FT%TZ)}"
   note="${note//$'\t'/ }"; note="${note//$'\n'/ }"
-  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$gate" "$status" "$code" "$seconds" "$skips" "$note" >> "$RESULTS"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$gate" "$status" "$code" "$started" "$ended" "$seconds" "$skips" "$note" >> "$RESULTS"
   printf '%-30s %-10s %ss %s\n' "$gate" "$status" "$seconds" "$note"
 }
 omit() {
@@ -112,8 +121,9 @@ omit() {
 run() {
   local gate="$1" budget="$2" note="$3"
   shift 3
-  local raw start elapsed code status skips
+  local raw start elapsed code status skips started_utc ended_utc
   raw="$(mktemp "$SCRATCH/$gate.XXXXXXXX")" || die "scratch unavailable"
+  started_utc="$(date -u +%FT%TZ)"
   start="$(date +%s)"
   (
     cd -- "$ROOT" || exit 1
@@ -121,11 +131,13 @@ run() {
     env -i PATH="$TEST_PATH" NODE="$NODE_BIN_REAL" HOME="$HOME" USER="${USER:-local}" \
       LANG=C.UTF-8 LC_ALL=C.UTF-8 CI=false GOTOOLCHAIN=local GOPROXY=off \
       npm_config_audit=false npm_config_fund=false \
-      npm_config_update_notifier=false \
+      npm_config_update_notifier=false NO_PROXY=127.0.0.1,localhost,::1 \
+      no_proxy=127.0.0.1,localhost,::1 \
       npm_config_offline="${LOCAL_VERIFY_NPM_OFFLINE:-false}" \
       timeout --signal=TERM --kill-after=10s "$budget" "$@"
   ) > "$raw" 2>&1
   code=$?
+  ended_utc="$(date -u +%FT%TZ)"
   elapsed=$(( $(date +%s) - start ))
   skips="$(grep -E '^[[:space:]]*# skipped [0-9]+' "$raw" | tail -n 1 | awk '{print $3}' || true)"
   skips="${skips:-0}"
@@ -134,8 +146,45 @@ run() {
   if [[ "$skips" != 0 ]]; then note="$note; internal TAP skips=$skips"; fi
   sanitize "$raw" "$REPORT/logs/$gate.log"
   rm -f -- "$raw"
-  record "$gate" "$status" "$code" "$elapsed" "$skips" "$note"
+  record "$gate" "$status" "$code" "$elapsed" "$skips" "$note" "$started_utc" "$ended_utc"
   [[ "$code" -eq 0 ]]
+}
+# Return success only if the fixed Playwright fixture port has no listener.
+# Playwright's webServer then performs its own /login HTTP readiness check.
+LOOPBACK_PORT_PROBE_JS='
+  const net = require("node:net");
+  const socket = net.connect({host:"127.0.0.1",port:3399});
+  socket.setTimeout(2000);
+  socket.on("connect",()=>{ console.error("Port 3399 is already listening; refusing to reuse an unknown server"); socket.destroy(); process.exitCode=1; });
+  socket.on("timeout",()=>{ console.error("Port 3399 readiness probe timed out"); socket.destroy(); process.exitCode=1; });
+  socket.on("error",(err)=>{ if (err.code!=="ECONNREFUSED") { console.error("Loopback probe failed:",err.code); process.exitCode=1; } });
+'
+loopback_port_free() {
+  "$NODE_BIN_REAL" -e "$LOOPBACK_PORT_PROBE_JS"
+}
+# Never kill an unrelated service. Only a listening process in this exact
+# worktree whose argv is the Playwright test fixture is eligible for cleanup.
+cleanup_own_e2e_listener() {
+  command -v fuser >/dev/null 2>&1 || return 0
+  local pid cmd cwd attempt
+  for pid in $(fuser -n tcp 3399 2>/dev/null || true); do
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
+    cwd="$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)"
+    cmd="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+    if [[ "$cwd" == "$ROOT" && "$cmd" == *"tests/e2e/fixtures/start-test-server.js"* ]]; then
+      kill -TERM "$pid" 2>/dev/null || true
+      printf 'Stopped owned leftover Playwright fixture PID %s\n' "$pid"
+    else
+      printf 'Refusing to kill non-fixture port-3399 process %s\n' "$pid" >&2
+      return 1
+    fi
+  done
+  for (( attempt=0; attempt<10; attempt++ )); do
+    if loopback_port_free >/dev/null 2>&1; then return 0; fi
+    sleep 1
+  done
+  printf 'Port 3399 did not clear after owned fixture cleanup\n' >&2
+  return 1
 }
 has_go() {
   command -v go >/dev/null 2>&1 || return 1
@@ -185,9 +234,33 @@ else
   omit npm_test NOT_TESTED 'requires successful npm ci'
 fi
 if (( npm_ok )) && (( build_ok )); then
-  run npm_test_e2e 900 'Playwright starts a local-only fixture server' npm run test:e2e || true
+  if run playwright_port_preflight 15 '127.0.0.1:3399 must be unoccupied before Playwright webServer readiness' "$NODE_BIN_REAL" -e "$LOOPBACK_PORT_PROBE_JS"; then
+    if run npm_test_e2e 900 'Playwright fixture at 127.0.0.1:3399; first attempt is permanent evidence' npm run test:e2e; then
+      # Normally Playwright tears the fixture down; check for leaked processes.
+      cleanup_own_e2e_listener || record playwright_cleanup FAIL 1 0 0 'owned fixture cleanup failed or foreign port owner detected'
+    else
+      # Only the well-defined transient qualifies for one fresh attempt.
+      # The original FAIL and its redacted log are NEVER overwritten.
+      if grep -q 'ERR_NETWORK_CHANGED' "$REPORT/logs/npm_test_e2e.log"; then
+        if cleanup_own_e2e_listener && loopback_port_free; then
+          run npm_test_e2e_retry 900 'one bounded retry after preserved ERR_NETWORK_CHANGED failure; overall result remains FAIL' npm run test:e2e || true
+          cleanup_own_e2e_listener || record playwright_cleanup FAIL 1 0 0 'post-retry fixture cleanup failed'
+        else
+          omit npm_test_e2e_retry NOT_TESTED 'transient detected but fixture port could not be safely recovered'
+        fi
+      else
+        cleanup_own_e2e_listener || record playwright_cleanup FAIL 1 0 0 'post-failure fixture cleanup failed'
+        omit npm_test_e2e_retry NOT_TESTED 'initial browser failure was not ERR_NETWORK_CHANGED; no retry'
+      fi
+    fi
+  else
+    omit npm_test_e2e NOT_TESTED 'port 3399 occupied or loopback probe failed; foreign listeners are never killed'
+    omit npm_test_e2e_retry NOT_TESTED 'initial browser attempt not started'
+  fi
 else
+  omit playwright_port_preflight NOT_TESTED 'requires successful npm ci and build'
   omit npm_test_e2e NOT_TESTED 'requires successful npm ci and build'
+  omit npm_test_e2e_retry NOT_TESTED 'initial browser attempt not started'
 fi
 
 if (( npm_ok )) && (( build_ok )); then

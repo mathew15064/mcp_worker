@@ -4,7 +4,7 @@
 
 ## Chạy lại bằng một lệnh
 
-Tại worktree riêng `work/railway-final-t1` hoặc `work/quickstart-local-integration-20261113`:
+Tại worktree riêng `work/oneclick-unblock-t1` (hoặc worktree T1 cũ `work/railway-final-t1`) hoặc **worktree tích hợp cuối được định danh cố định** `work/railway-oneclick-final-integration-20261113`:
 
 ```bash
 bash scripts/local-verify-quickstart.sh
@@ -12,7 +12,7 @@ bash scripts/local-verify-quickstart.sh
 LOCAL_VERIFY_DOCKER_MODE=online bash scripts/local-verify-quickstart.sh
 ```
 
-Mặc định Docker dùng chế độ offline. Script từ chối các branch khác hoặc HEAD không xuất phát từ pinned SHA. Script chỉ dùng kho nguồn hiện có, không fetch/push/merge/deploy/publish, không cài toolchain hoặc phần mềm toàn cục. Các bước kiểm tra chạy **tuần tự nhưng độc lập về trạng thái**, thất bại được ghi lại mà không giả vờ rằng các gate sau đã chạy.
+Mặc định Docker dùng chế độ offline. Script chỉ chấp nhận **cặp tên branch + đường dẫn worktree tuyệt đối đã liệt kê cố định**: `work/oneclick-unblock-t1:/root/mcp_worker_oneclick_unblock_t1_20261113`, `work/railway-final-t1:/root/mcp_worker_railway_final_t1_20261113`, hoặc `work/railway-oneclick-final-integration-20261113:/root/mcp_worker_railway_oneclick_final_integration_20261113`. Không thể cho phép branch tùy ý bằng biến môi trường. Worktree gốc/shared, production, staging hoặc HEAD không thuộc ancestry pinned SHA bị từ chối. Phải **sạch cả tracked, staged và untracked** trước khi chạy. Việc chấp nhận tên branch không phải phê duyệt triển khai. Script chỉ dùng kho nguồn hiện có, không fetch/push/merge/deploy/publish, không cài toolchain hoặc phần mềm toàn cục. Các bước kiểm tra chạy **tuần tự nhưng độc lập về trạng thái**, thất bại được ghi lại mà không giả vờ rằng các gate sau đã chạy.
 
 Lựa chọn cho môi trường **không có Internet** (cần cache npm đã được chuẩn bị trước):
 
@@ -44,7 +44,7 @@ Mỗi lần chạy tạo thư mục private (quyền `0700`) nằm **ngoài sour
 ```text
 ../mcp_worker_t01_evidence/<UTC>-<HEAD-short>-<PID>/
   metadata.txt           # task, pinned/base SHA, HEAD, nhánh, tool versions, timestamps
-  results.tsv            # gate, PASS/FAIL/SKIP/NOT_TESTED, exit code, duration, TAP skip count
+  results.tsv            # gate, status, exit code, UTC start/end, duration, TAP skips
   logs/<gate>.log        # tối đa 500 dòng cuối, đã lọc những dòng giống thông tin nhạy cảm
 ```
 
@@ -54,12 +54,18 @@ Raw log tạm bị xóa sau từng gate; không thu thập môi trường, trace
 
 | Trạng thái | Ý nghĩa |
 |---|---|
-| **PASS** | Gate thực sự chạy trên PC và exit 0. Nếu TAP có test skipped, `test_skips` ghi rõ; không xem đó là full coverage. |
+| **PASS** | Gate thực sự chạy trên PC và exit 0. Mỗi dòng có `started_utc` và `ended_utc`. Nếu TAP có test skipped, `test_skips` ghi rõ; không xem đó là full coverage. |
 | **FAIL** | Gate thực sự được gọi nhưng exit khác 0 (kể cả timeout, build thiếu dependency, assertion). |
 | **SKIP** | Gate có prerequisite rõ ràng chưa đáp ứng (Go, OpenSSL, Docker image), nên không chạy. |
 | **NOT_TESTED** | Chưa chạy do gate nền tảng fail, hoặc ngoài phạm vi offline/PC; không được diễn giải thành PASS. |
 
 Script exit **0** chỉ khi tất cả gate PASS, **1** nếu có FAIL, **3** nếu không FAIL nhưng có SKIP/NOT_TESTED, **2** cho điều kiện bảo vệ không đáp ứng. Tập trạng thái đầy đủ xem `results.tsv`.
+
+## Playwright: readiness, dọn port và bằng chứng retry
+
+Harness kiểm tra TCP `127.0.0.1:3399` còn trống **trước** khi Playwright khởi chạy; Playwright webServer tiếp tục tự đợi HTTP `http://127.0.0.1:3399/login` báo sẵn sàng. `NO_PROXY` và `no_proxy` đặt cố định cho loopback. Nếu port có listener khác, ghi FAIL preflight và NOT_TESTED E2E thay vì dùng lại server hoặc kill tùy tiện. Sau E2E, nếu server test còn giữ port, chỉ gửi TERM tới tiến trình được xác minh đồng thời bằng `/proc/PID/cwd` trùng worktree và cmdline chứa `tests/e2e/fixtures/start-test-server.js`; không kill ứng dụng của người khác. Port có thể cần được xử lý thủ công nếu không có `fuser` hoặc fixture không thoát.
+
+Mặc định không retry lỗi ứng dụng/assertion. **Chỉ** khi lần E2E đầu trả nonzero **và** log đã sanitize chứa `ERR_NETWORK_CHANGED`, harness thử dọn server của chính worktree và kiểm tra port trước khi cho phép đúng **một** lần `npm_test_e2e_retry`. Hai lần có dòng trạng thái và log **riêng**; FAIL đầu vẫn là FAIL tổng, kể cả retry PASS, và script exit 1. Đây là chẩn đoán, không thay đổi kết quả nghiệm thu. Nếu cần chỉnh `playwright.config.ts` hoặc fixture T5, đưa patch đề xuất tới T5/main reviewer, không sửa cross-owner.
 
 ## Các gate tương ứng
 
