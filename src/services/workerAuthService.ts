@@ -1,3 +1,4 @@
+import { stringifyUnknown } from '../utils/stringifyUnknown';
 import crypto from 'node:crypto';
 import type { IncomingHttpHeaders } from 'node:http';
 import type { WorkerConnectRequest } from './workerProtocol';
@@ -68,7 +69,7 @@ class WorkerAuthService {
       const key = crypto.createPublicKey(publicKey);
       if (key.asymmetricKeyType !== 'ed25519') throw new Error('not ed25519');
       return key.export({ type: 'spki', format: 'pem' }).toString();
-    } catch (_) {
+    } catch {
       throw workerError(
         'WORKER_PUBLIC_KEY_INVALID',
         'Worker public key must be a valid Ed25519 public key.',
@@ -77,7 +78,7 @@ class WorkerAuthService {
   }
 
   validateName(name: unknown) {
-    const normalized = String(name || '').trim();
+    const normalized = stringifyUnknown(name || '').trim();
     if (!WORKER_NAME_RE.test(normalized)) {
       throw workerError('WORKER_NAME_INVALID', 'Worker name must be 1-100 safe characters.');
     }
@@ -144,7 +145,7 @@ class WorkerAuthService {
     let signature;
     try {
       signature = Buffer.from(signatureText, 'base64');
-    } catch (_) {
+    } catch {
       signature = null;
     }
     if (!signature?.length)

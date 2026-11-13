@@ -1,7 +1,7 @@
 import type { SchemaBuilder } from '../schemaBuilder';
 const migration = {
   async up(schema: SchemaBuilder) {
-    await schema.createTable('mcp_oauth_authorization_codes', table => {
+    await schema.createTable('mcp_oauth_authorization_codes', (table) => {
       table.string('id', 96).primary();
       table.string('code_hash', 128).unique();
       table.string('client_id', 128);
@@ -18,7 +18,7 @@ const migration = {
       table.index('client_id', 'idx_mcp_auth_codes_client');
     });
 
-    await schema.createTable('mcp_oauth_access_tokens', table => {
+    await schema.createTable('mcp_oauth_access_tokens', (table) => {
       table.string('id', 96).primary();
       table.string('token_hash', 128).unique();
       table.string('client_id', 128);
@@ -32,7 +32,7 @@ const migration = {
       table.index('client_id', 'idx_mcp_access_tokens_client');
     });
 
-    await schema.createTable('mcp_oauth_refresh_tokens', table => {
+    await schema.createTable('mcp_oauth_refresh_tokens', (table) => {
       table.string('id', 96).primary();
       table.string('token_hash', 128).unique();
       table.string('token_family_id', 128);
@@ -53,6 +53,6 @@ const migration = {
     await schema.dropTable('mcp_oauth_refresh_tokens');
     await schema.dropTable('mcp_oauth_access_tokens');
     await schema.dropTable('mcp_oauth_authorization_codes');
-  }
+  },
 };
 export = migration;

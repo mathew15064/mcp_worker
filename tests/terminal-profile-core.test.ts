@@ -21,7 +21,7 @@ void test('terminal_list exposes only Worker execution aliases and no SSH creden
   await workerRepo.createProfile({
     name: 'DevTest',
     description: 'worker-backed target',
-    worker_id: adminWorker!.id,
+    worker_id: adminWorker.id,
     enabled: true,
   });
 
@@ -36,12 +36,13 @@ void test('terminal_list exposes only Worker execution aliases and no SSH creden
 
 void test('Worker-backed execution profile names are unique case-insensitively', async () => {
   if (!adminWorker) throw new Error('Fixture Worker missing');
+  const adminWorkerId = adminWorker.id;
   await assert.rejects(
     () =>
       workerRepo.createProfile({
         name: 'devtest',
         description: '',
-        worker_id: adminWorker!.id,
+        worker_id: adminWorkerId,
         enabled: true,
       }),
     (error: unknown) =>

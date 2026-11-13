@@ -1,8 +1,9 @@
+import { stringifyUnknown } from '../utils/stringifyUnknown';
 import settingsRepo from '../repositories/settingsRepository';
 import telegramSecrets from './telegramSecretService';
 
 function assertUserId(userId: unknown) {
-  const value = String(userId || '').trim();
+  const value = stringifyUnknown(userId || '').trim();
   if (!/^usr_[0-9a-f-]{36}$/i.test(value)) throw new Error('Invalid user identity.');
   return value;
 }
@@ -18,7 +19,7 @@ function keys(userId: string) {
 }
 
 function normalizeChatId(value: unknown) {
-  const chatId = String(value || '').trim();
+  const chatId = stringifyUnknown(value || '').trim();
   if (chatId.length > 128 || /[\x00-\x1f\x7f]/.test(chatId))
     throw new Error('Telegram Chat ID is invalid.');
   return chatId;

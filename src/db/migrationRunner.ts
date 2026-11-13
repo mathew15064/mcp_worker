@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { SchemaBuilder } from './schemaBuilder';
 import type { DatabaseAdapter } from './contracts';
 interface Migration {
@@ -28,7 +29,7 @@ export function migrationName(file: string) {
 function loadMigration(file: string): Migration {
   const full = path.join(MIGRATIONS_DIR, file);
   delete require.cache[require.resolve(full)];
-  const migration: Migration = require(full);
+  const migration = createRequire(__filename)(full) as Migration;
   if (!migration || typeof migration.up !== 'function' || typeof migration.down !== 'function') {
     throw new Error(`Migration '${file}' must export async up(schema) and down(schema).`);
   }

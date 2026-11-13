@@ -1,3 +1,4 @@
+import { stringifyUnknown } from '../utils/stringifyUnknown';
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import Database from 'better-sqlite3';
@@ -42,8 +43,8 @@ function envAuthenticate(username: unknown, password: unknown) {
     throw error;
   }
   return (
-    timingSafeStringEqual(String(username || ''), config.ADMIN_USERNAME) &&
-    timingSafeStringEqual(String(password || ''), configuredPassword)
+    timingSafeStringEqual(stringifyUnknown(username || ''), config.ADMIN_USERNAME) &&
+    timingSafeStringEqual(stringifyUnknown(password || ''), configuredPassword)
   );
 }
 
@@ -58,15 +59,21 @@ function legacyAuthenticate(username: unknown, password: unknown) {
         "SELECT username, password_hash FROM users WHERE role = 'admin' ORDER BY created_at ASC LIMIT 1",
       )
       .get();
-    if (!row || !timingSafeStringEqual(String(username || ''), String(row.username || '')))
+    if (
+      !row ||
+      !timingSafeStringEqual(stringifyUnknown(username || ''), stringifyUnknown(row.username || ''))
+    )
       return false;
-    return bcrypt.compareSync(String(password || ''), String(row.password_hash || ''));
-  } catch (_) {
+    return bcrypt.compareSync(
+      stringifyUnknown(password || ''),
+      stringifyUnknown(row.password_hash || ''),
+    );
+  } catch {
     return false;
   } finally {
     try {
       db?.close();
-    } catch (_) {}
+    } catch {}
   }
 }
 

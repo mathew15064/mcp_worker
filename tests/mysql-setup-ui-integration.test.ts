@@ -40,7 +40,7 @@ void test(
         const admin = await adminConnection(process.env.MYSQL_TEST_DATABASE || 'bot_report_test');
         await admin.query(`DROP DATABASE IF EXISTS \`${database}\``);
         await admin.end();
-      } catch (_) {}
+      } catch {}
     });
 
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-report-mysql-ui-'));
@@ -121,7 +121,7 @@ void test(
       body: new URLSearchParams(form).toString(),
     });
     assert.equal(tested.status, 200);
-    assert.equal((await tested.json()).ok, true);
+    assert.equal(((await tested.json()) as { ok: boolean }).ok, true);
     assert.equal(databaseManager.status().state, 'UNCONFIGURED');
 
     const save = await fetch(`${base}/admin/settings/database/save`, {
@@ -166,7 +166,7 @@ void test(
     assert.equal(blockedClients.status, 503);
     const notReady = await fetch(`${base}/readyz`);
     assert.equal(notReady.status, 503);
-    assert.equal((await notReady.json()).database, 'CONFIGURED');
+    assert.equal(((await notReady.json()) as { database: string }).database, 'CONFIGURED');
 
     const initialize = await fetch(`${base}/admin/settings/database/initialize`, {
       method: 'POST',
@@ -273,6 +273,6 @@ void test(
     assert.equal(clients.status, 200);
     const ready = await fetch(`${base}/readyz`);
     assert.equal(ready.status, 200);
-    assert.equal((await ready.json()).database, 'READY');
+    assert.equal(((await ready.json()) as { database: string }).database, 'READY');
   },
 );

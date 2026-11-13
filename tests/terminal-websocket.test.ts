@@ -1,3 +1,4 @@
+import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -29,11 +30,19 @@ void test('retired browser terminal WebSocket is denied while Worker auth remain
   const server = http.createServer((_req, res) => res.end('ok'));
   const broker = new WorkerConnectionBroker({
     authService: {
-      async authenticateConnect() {
-        throw Object.assign(new Error('Worker identity required'), {
-          code: 'WORKER_AUTH_INVALID',
-          status: 401,
-        });
+      authenticateConnect() {
+        try {
+          return Promise.resolve(
+            (() => {
+              throw Object.assign(new Error('Worker identity required'), {
+                code: 'WORKER_AUTH_INVALID',
+                status: 401,
+              });
+            })(),
+          );
+        } catch (error) {
+          return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+        }
       },
       normalizeCapabilities() {
         return [];
@@ -48,7 +57,7 @@ void test('retired browser terminal WebSocket is denied while Worker auth remain
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address() as import('node:net').AddressInfo;
+  const address = server.address() as AddressInfo;
   const wsRoot = 'ws://127.0.0.1:' + address.port;
   assert.equal(await upgradeStatus(wsRoot + '/terminal/ws'), 404);
   assert.equal(await upgradeStatus(wsRoot + '/admin/terminal/ws'), 404);

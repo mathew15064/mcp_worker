@@ -1,9 +1,17 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type Database from 'better-sqlite3';
 import type { DatabaseAdapter, SqlRow, SqlValue } from '../contracts';
-interface Queue { tail: Promise<unknown> }
-interface TxContext { active: boolean }
-interface SqliteOptions { direct?: boolean; queue?: Queue; txStorage?: AsyncLocalStorage<TxContext> }
+interface Queue {
+  tail: Promise<unknown>;
+}
+interface TxContext {
+  active: boolean;
+}
+interface SqliteOptions {
+  direct?: boolean;
+  queue?: Queue;
+  txStorage?: AsyncLocalStorage<TxContext>;
+}
 import { getDb } from '../connection';
 
 export class SqliteAdapter implements DatabaseAdapter {
@@ -26,7 +34,10 @@ export class SqliteAdapter implements DatabaseAdapter {
     return next;
   }
 
-  async queryOne<T extends object = SqlRow>(sql: string, params: SqlValue[] = []): Promise<T | null> {
+  async queryOne<T extends object = SqlRow>(
+    sql: string,
+    params: SqlValue[] = [],
+  ): Promise<T | null> {
     return this._runExclusive(() => this._db.prepare<SqlValue[], T>(sql).get(...params) || null);
   }
 
@@ -56,14 +67,16 @@ export class SqliteAdapter implements DatabaseAdapter {
       const tx = new SqliteAdapter(this._db, {
         direct: true,
         queue: this._queue,
-        txStorage: this._txStorage
+        txStorage: this._txStorage,
       });
       try {
         const result = await this._txStorage.run({ active: true }, () => callback(tx));
         this._db.exec('COMMIT');
         return result;
       } catch (error) {
-        try { this._db.exec('ROLLBACK'); } catch (_) {}
+        try {
+          this._db.exec('ROLLBACK');
+        } catch {}
         throw error;
       }
     });

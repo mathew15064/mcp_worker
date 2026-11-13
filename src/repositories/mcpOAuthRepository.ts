@@ -106,8 +106,13 @@ function hydrateScopes<T extends { scopes_json: string }>(row: T | null) {
   if (!row) return null;
   let scopes: string[] = [];
   try {
-    scopes = JSON.parse(row.scopes_json || '[]');
-  } catch (_) {}
+    {
+      const parsed: unknown = JSON.parse(row.scopes_json || '[]');
+      scopes = Array.isArray(parsed)
+        ? parsed.filter((value): value is string => typeof value === 'string')
+        : [];
+    }
+  } catch {}
   return { ...row, scopes };
 }
 
@@ -125,11 +130,21 @@ class McpOAuthRepository {
     let redirectUris: string[] = [];
     let allowedScopes: string[] = [];
     try {
-      redirectUris = JSON.parse(row.redirect_uris_json || '[]');
-    } catch (_) {}
+      {
+        const parsed: unknown = JSON.parse(row.redirect_uris_json || '[]');
+        redirectUris = Array.isArray(parsed)
+          ? parsed.filter((value): value is string => typeof value === 'string')
+          : [];
+      }
+    } catch {}
     try {
-      allowedScopes = JSON.parse(row.allowed_scopes_json || '[]');
-    } catch (_) {}
+      {
+        const parsed: unknown = JSON.parse(row.allowed_scopes_json || '[]');
+        allowedScopes = Array.isArray(parsed)
+          ? parsed.filter((value): value is string => typeof value === 'string')
+          : [];
+      }
+    } catch {}
     return { ...row, redirect_uris: redirectUris, allowed_scopes: allowedScopes };
   }
 

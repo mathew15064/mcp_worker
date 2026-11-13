@@ -10,7 +10,13 @@ void test('broker exposes only the fixed worker lifecycle control operation', as
   const workerRecord = { id: workerId, capabilities: ['workspace.exec'], enabled: true };
   const broker = new WorkerConnectionBroker({
     repository: {
-      findWorkerById: async (id: string) => (id === workerId ? workerRecord : null),
+      findWorkerById: (id: string) => {
+        try {
+          return Promise.resolve((() => (id === workerId ? workerRecord : null))());
+        } catch (error) {
+          return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+        }
+      },
     } as unknown as ConstructorParameters<typeof WorkerConnectionBroker>[0] extends infer O
       ? O extends { repository?: infer R }
         ? R
@@ -31,7 +37,7 @@ void test('broker exposes only the fixed worker lifecycle control operation', as
     worker: workerRecord,
     readyState: WebSocket.OPEN,
     send(text: string) {
-      messages.outbound = JSON.parse(text);
+      messages.outbound = JSON.parse(text) as typeof messages.outbound;
     },
   };
   broker.connections.set(workerId, ws as unknown as Parameters<typeof broker.handleDisconnect>[0]);

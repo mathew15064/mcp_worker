@@ -44,7 +44,7 @@ void test('audit payload serializer bounds oversized request data and marks it t
     REQUEST_LIMIT_BYTES,
   );
   assert.equal(result.truncated, true);
-  const decoded = JSON.parse(result.payload);
+  const decoded = JSON.parse(result.payload) as { _audit_truncated: boolean; preview: string };
   assert.equal(decoded._audit_truncated, true);
   assert.ok(decoded.preview.length > 1000);
 });

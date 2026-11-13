@@ -1,3 +1,4 @@
+import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http, { type Server } from 'node:http';
@@ -49,7 +50,7 @@ test.before(async () => {
   await runtimeSettings.load(null);
   server = http.createServer(app);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  baseUrl = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
+  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 
 test.after(async () => {
@@ -60,8 +61,8 @@ test.after(async () => {
 void test('fresh install stays administrable without a database and blocks data surfaces until MySQL is configured', async () => {
   const health = await fetch(`${baseUrl}/healthz`);
   assert.equal(health.status, 200);
-  const healthBody = await health.json();
-  assert.equal((healthBody as { database: string }).database, 'UNCONFIGURED');
+  const healthBody = (await health.json()) as { database: string };
+  assert.equal(healthBody.database, 'UNCONFIGURED');
 
   const ready = await fetch(`${baseUrl}/readyz`);
   assert.equal(ready.status, 503);

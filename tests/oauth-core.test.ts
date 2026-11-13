@@ -4,12 +4,8 @@ import oauthResourceServer from '../src/auth/oauthResourceServer';
 import { AuthenticatedPrincipal } from '../src/auth/principal';
 import oauthService from '../src/services/mcpOAuthService';
 import type { OAuthConfig } from '../src/services/contracts/oauthContracts';
-const { setupEnv, cleanup, initDb, issueToken } = require('./helper') as {
-  setupEnv(name: string): { dir: string };
-  cleanup(dir: string): void;
-  initDb(): void;
-  issueToken(): Promise<{ token: { access_token: string; refresh_token: string } }>;
-};
+import helper from './helper';
+const { setupEnv, cleanup, initDb, issueToken } = helper;
 
 const env = setupEnv('oauth');
 test.after(() => cleanup(env.dir));
@@ -18,6 +14,7 @@ initDb();
 void test('local OAuth issues terminal-scoped token without control-plane bindings', async () => {
   const issued = await issueToken();
   assert.match(issued.token.access_token, /^br_at_/);
+  assert.ok(issued.token.refresh_token, 'Fixture must issue an offline refresh token');
   assert.match(issued.token.refresh_token, /^br_rt_/);
   const principal = await oauthResourceServer.verifyToken(issued.token.access_token);
   assert.equal(principal.principal_id, 'principal:gpt_client');

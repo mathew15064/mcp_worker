@@ -170,7 +170,7 @@ export class MysqlAdapter implements DatabaseAdapter {
     } catch (error) {
       try {
         await connection.rollback();
-      } catch (_) {}
+      } catch {}
       throw normalizeMysqlError(error);
     } finally {
       connection.release();

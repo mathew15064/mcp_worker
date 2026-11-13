@@ -1,10 +1,10 @@
 # T1 — Railway One-Click Quickstart: kiểm thử thủ công trên PC
 
-**Phạm vi:** T1 và nhánh tích hợp local T1–T5, xuất phát từ `9a817baabdaeb6a019083252dac6ca5077257474` (PR #30). **Không sử dụng CI/CD làm bằng chứng nghiệm thu.** Mọi build/test và log phải đến từ Bot Report 2, profile **PC**, Linux x86_64; không dùng VPS staging, Railway production hay GitHub Actions.
+**Phạm vi:** T1 và nhánh tích hợp local T1–T5, xuất phát từ base bất biến `ae588a1a56f2561ca2323457463e5b9e203de509` (từ PR #30). **Không sử dụng CI/CD làm bằng chứng nghiệm thu.** Mọi build/test và log phải đến từ Bot Report 2, profile **PC**, Linux x86_64; không dùng VPS staging, Railway production hay GitHub Actions.
 
 ## Chạy lại bằng một lệnh
 
-Tại worktree riêng `work/quickstart-local-t01` hoặc `work/quickstart-local-integration-20261113`:
+Tại worktree riêng `work/railway-final-t1` hoặc `work/quickstart-local-integration-20261113`:
 
 ```bash
 bash scripts/local-verify-quickstart.sh
@@ -33,14 +33,9 @@ Mặc định, `npm ci` và `npm ci --prefix .railway --ignore-scripts` **có th
 
 ## Chất lượng toàn kho và nợ kỹ thuật còn tồn tại
 
-Tại lần kiểm tra tích hợp 13/11/2026, `npm run lint:typed` còn **680** lỗi
-ở toàn kho và `npm run format:check` còn **26** file cần format; các lệnh này
-vẫn **FAIL** và phải được ghi đúng trong kết quả, không đổi sang PASS. So với
-báo cáo T1 trước tích hợp (683 lỗi và 27 file), T4 đã giảm nợ; file
-`quality/baseline.json` được ghi lại sau khi kiểm tra thay đổi. `npm run
-quality:check` PASS xác nhận không tăng nợ so với baseline đã duyệt, nhưng
-**không thay thế** yêu cầu xử lý full typed lint/format trong một công việc
-riêng. Không bật autofix cho toàn kho như một bước ngầm của Quickstart.
+Tại snapshot 13/11/2026 trước T1: **680** typed-ESLint findings và **26** file Prettier lỗi. Sau khi T1 chỉ sửa file thuộc quyền T1: **0** typed-ESLint findings trong T1-owned paths, **31** findings toàn kho còn lại tại **4 file T2/T5-owned**, và **0** file formatting lỗi. Các file không được T1 đụng tới: `src/routes/workerRoutes.ts` (12), `src/http/pages.ts` (3), `src/public/admin.ts` (5), `tests/e2e/admin-ux.spec.ts` (11).
+
+Do đó `npm run lint:typed` vẫn **FAIL** vì 31 lỗi ở phần việc khác; **không tự nhận PASS**. `npm run format:check` **PASS**; `npm run quality:check` **PASS** với `quality/baseline.json` cập nhật đúng từ ESLint/Prettier thật và `QUALITY_BASE_REF=ae588a1a56f2561ca2323457463e5b9e203de509` (không tăng allowance). Mọi kết quả cuối được đo lại qua `results.tsv` trên PC, không được suy diễn từ tài liệu này. Không hạ rule, tắt checker hoặc sửa baseline gian lận.
 
 ## Bằng chứng nghiệm thu PC
 
@@ -88,7 +83,7 @@ Trên pinned base có đúng **7** workflow dưới `.github/workflows/`, tất 
 | `worker-artifact-build.yml` | push, pull_request, workflow_dispatch | Go cross-platform binaries, installer/signing tests |
 | `release-verify.yml` | push, pull_request, workflow_dispatch | release verify, SBOM/image scan, artifact upload |
 
-Không có `dependabot.yml` hay cấu hình GitHub automation khác trong `.github/` tại pinned base (chỉ còn issue templates sau khi xóa workflows). Lệnh kiểm kê read-only tại base: `git ls-tree -r --name-only 9a817baabdaeb6a019083252dac6ca5077257474 .github/workflows`. Kiểm chứng tại nhánh T1: `git ls-files .github/workflows` sau commit và `find .github/workflows -type f` (nếu folder đã bị xóa, không có file).
+Không có `dependabot.yml` hay cấu hình GitHub automation khác trong `.github/` tại pinned base (chỉ còn issue templates sau khi xóa workflows). Lệnh kiểm kê read-only tại base: `git ls-tree -r --name-only ae588a1a56f2561ca2323457463e5b9e203de509 .github/workflows`. Kiểm chứng tại nhánh T1: `git ls-files .github/workflows` sau commit và `find .github/workflows -type f` (nếu folder đã bị xóa, không có file).
 
 **Ranh giới thay đổi:** thao tác xóa workflow trên branch local không làm dừng GitHub Actions đã/đang cấu hình trên remote base và **không phải bằng chứng chúng đã tắt ở GitHub**. Không push hay tạo/merge PR để tránh tự kích hoạt lại workflow. Trước mọi quyết định tích hợp, chủ dự án cần review cách tắt Actions ở GitHub repository settings bằng quyền phù hợp, ngoài phạm vi T1.
 

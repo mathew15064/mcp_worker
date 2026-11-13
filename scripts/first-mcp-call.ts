@@ -31,7 +31,8 @@ async function main() {
     );
     const output = new Writable({
       write(chunk, _encoding, done) {
-        if (!output.muted) process.stdout.write(chunk);
+        if (!output.muted && (typeof chunk === 'string' || Buffer.isBuffer(chunk)))
+          process.stdout.write(chunk);
         done();
       },
     }) as Writable & { muted: boolean };
@@ -150,8 +151,11 @@ async function main() {
         .split('\n')
         .find((x) => x.startsWith('data: '))
         ?.slice(6) || body;
-    const result = JSON.parse(payload);
-    assert.ok(!result.error && !result.result?.isError, 'runtime_info failed.');
+    const result = JSON.parse(payload) as {
+      error?: unknown;
+      result?: { isError?: boolean; structuredContent?: { tool_count?: number } };
+    };
+    assert.ok(!result.error && result.result && !result.result.isError, 'runtime_info failed.');
     assert.equal(
       result.result.structuredContent?.tool_count,
       15,
@@ -175,7 +179,7 @@ async function main() {
           console.error(
             'Token revocation failed; revoke the client in Admin or allow the short-lived token to expire.',
           );
-      } catch (_) {
+      } catch {
         console.error(
           'Token revocation failed; revoke the client in Admin or allow the short-lived token to expire.',
         );

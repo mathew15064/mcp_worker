@@ -1,3 +1,4 @@
+import { stringifyUnknown } from '../src/utils/stringifyUnknown';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import settingsService from '../src/services/userTelegramSettingsService';
@@ -8,12 +9,28 @@ class MemorySettings {
   constructor() {
     this.values = new Map<string, string>();
   }
-  async get<T = null>(key: string, fallback: T | null = null): Promise<string | T | null> {
-    return this.values.get(key) ?? fallback;
+  get<T = null>(key: string, fallback: T | null = null): Promise<string | T | null> {
+    try {
+      return Promise.resolve(
+        (() => {
+          return this.values.get(key) ?? fallback;
+        })(),
+      );
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+    }
   }
-  async set(key: string, value: unknown) {
-    this.values.set(key, String(value ?? ''));
-    return { changes: 1, insertId: null };
+  set(key: string, value: unknown) {
+    try {
+      return Promise.resolve(
+        (() => {
+          this.values.set(key, stringifyUnknown(value ?? ''));
+          return { changes: 1, insertId: null };
+        })(),
+      );
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+    }
   }
 }
 

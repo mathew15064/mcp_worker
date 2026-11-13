@@ -1,8 +1,10 @@
+import { stringifyUnknown } from '../utils/stringifyUnknown';
+import { createRequire } from 'node:module';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { routeError } from '../http/domainErrors';
 import { formString, formFlag, formList } from '../http/requestContracts';
 import pages from '../http/pages';
-const packageJson = require('../../package.json');
+const packageJson = createRequire(__filename)('../../package.json') as { version: string };
 import authRoutes from './authRoutes';
 const { currentAdmin } = authRoutes;
 import oauthRepo from '../repositories/mcpOAuthRepository';
@@ -309,7 +311,7 @@ router.post('/admin/settings/database/test', async (req, res) => {
     setFlash(
       req,
       'success',
-      `MySQL connection successful (${result.version || 'unknown version'}, ${result.duration_ms} ms).`,
+      `MySQL connection successful (${stringifyUnknown(result.version || 'unknown version')}, ${stringifyUnknown(result.duration_ms)} ms).`,
     );
   } catch (error) {
     if (String(req.get('accept') || '').includes('application/json'))
@@ -393,7 +395,7 @@ router.post('/admin/settings/database/initialize', async (req, res) => {
     if (prepared?.adapter)
       try {
         await prepared.adapter.close();
-      } catch (_) {}
+      } catch {}
     setFlash(req, 'error', `Source initialization failed: ${routeError(error).message}`);
   }
   return res.redirect('/admin/settings/database');
@@ -483,7 +485,7 @@ router.get('/admin/workers/connection-status', requireDataStore, async (req, res
     const workers = (await workerRepo.listWorkers()).filter(
       (v): v is NonNullable<typeof v> => v !== null,
     );
-    const checkId = String(req.query.check || '');
+    const checkId = stringifyUnknown(req.query.check || '');
     const target = workers.find((worker) => worker.id === checkId);
     const probe =
       target?.enabled && workerBroker.isOnline(checkId)
@@ -528,7 +530,7 @@ router.get('/admin/workers', requireDataStore, async (req, res, next) => {
       workersPage({
         workers,
         profiles: profiles.filter((p): p is NonNullable<typeof p> => p !== null),
-        checkingWorkerId: String(req.query.check || ''),
+        checkingWorkerId: stringifyUnknown(req.query.check || ''),
         enrollment: consumeWorkerEnrollment(req),
         workerInstallUrl: `${mcpConfig.publicBaseUrl}/worker/install.sh`,
         csrfToken: csrf(req),
@@ -639,8 +641,8 @@ router.get('/admin/clients', requireDataStore, async (req, res, next) => {
         mcpUrl: mcpConfig.resourceUrl,
         csrfToken: csrf(req),
         secret: consumeOneTimeSecret(req),
-        firstCall: ['local', '1'].includes(String(req.query.first_call || ''))
-          ? String(req.query.first_call || '')
+        firstCall: ['local', '1'].includes(stringifyUnknown(req.query.first_call || ''))
+          ? stringifyUnknown(req.query.first_call || '')
           : '',
         ...consumeFlash(req),
       }),
@@ -653,27 +655,27 @@ router.get('/admin/clients', requireDataStore, async (req, res, next) => {
 router.get('/admin/audit', requireDataStore, async (req, res, next) => {
   try {
     const filters = {
-      query: String(req.query.q || '')
+      query: stringifyUnknown(req.query.q || '')
         .trim()
         .slice(0, 160),
-      clientId: String(req.query.client_id || '')
+      clientId: stringifyUnknown(req.query.client_id || '')
         .trim()
         .slice(0, 200),
-      toolName: String(req.query.tool_name || '')
+      toolName: stringifyUnknown(req.query.tool_name || '')
         .trim()
         .slice(0, 160),
-      result: String(req.query.result || '')
+      result: stringifyUnknown(req.query.result || '')
         .trim()
         .toUpperCase(),
     };
     if (!['', 'SUCCESS', 'DENIED', 'ERROR'].includes(filters.result)) filters.result = '';
     const allowedPageSizes = [20, 50, 100];
-    const requestedPageSize = Number.parseInt(String(req.query.per_page || ''), 10);
+    const requestedPageSize = Number.parseInt(stringifyUnknown(req.query.per_page || ''), 10);
     const perPage = allowedPageSizes.includes(requestedPageSize) ? requestedPageSize : 20;
     const total = await oauthRepo.countAuditLogs(filters);
     const totalPages = Math.max(1, Math.ceil(total / perPage));
     const page = Math.min(
-      Math.max(1, Number.parseInt(String(req.query.page || ''), 10) || 1),
+      Math.max(1, Number.parseInt(stringifyUnknown(req.query.page || ''), 10) || 1),
       totalPages,
     );
     const [logs, clients, toolNames] = await Promise.all([

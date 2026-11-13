@@ -1,3 +1,4 @@
+import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -62,7 +63,7 @@ void test(
         const admin = await adminConnection(rootDatabase);
         await admin.query(`DROP DATABASE IF EXISTS \`${database}\``);
         await admin.end();
-      } catch (_) {}
+      } catch {}
     });
 
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-report-user-integration-'));
@@ -115,7 +116,7 @@ void test(
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await databaseManager.close();
     });
-    const base = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
     const adminLogin = await login(base, 'admin', 'UserAdmin2026!', '/admin');
     assert.equal(adminLogin.response.status, 302);
@@ -229,7 +230,16 @@ void test(
       }),
     });
     assert.equal(enrollWorker.status, 201);
-    const enrolled = await enrollWorker.json();
+    const enrolled: unknown = await enrollWorker.json();
+    assert.ok(
+      enrolled &&
+        typeof enrolled === 'object' &&
+        'profile' in enrolled &&
+        typeof enrolled.profile === 'object' &&
+        enrolled.profile !== null &&
+        'name' in enrolled.profile &&
+        typeof enrolled.profile.name === 'string',
+    );
     assert.equal((await workerRepo.listWorkersByOwner(alice.id)).length, 1);
     assert.equal((await workerRepo.listWorkersByOwner(bob.id)).length, 0);
     const aliceProfile = (await workerRepo.listProfilesByOwner(alice.id))[0];

@@ -17,8 +17,16 @@ void test('Owner notification distinguishes rejected and stopped Worker tasks', 
   const sent: Delivery[] = [];
   const service = new OwnerNotificationService({
     settings: {
-      async get(key: string, fallback: string | null = null) {
-        return values.has(key) ? values.get(key) : fallback;
+      get(key: string, fallback: string | null = null) {
+        try {
+          return Promise.resolve(
+            (() => {
+              return values.has(key) ? values.get(key) : fallback;
+            })(),
+          );
+        } catch (error) {
+          return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+        }
       },
     },
     secrets: {
@@ -28,9 +36,17 @@ void test('Owner notification distinguishes rejected and stopped Worker tasks', 
       },
     },
     telegram: {
-      async sendMessage(token: string, chatId: string, text: string) {
-        sent.push({ token, chatId, text });
-        return { message_id: sent.length };
+      sendMessage(token: string, chatId: string, text: string) {
+        try {
+          return Promise.resolve(
+            (() => {
+              sent.push({ token, chatId, text });
+              return { message_id: sent.length };
+            })(),
+          );
+        } catch (error) {
+          return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+        }
       },
     },
     database: {
@@ -86,8 +102,16 @@ void test('Owner notification distinguishes rejected and stopped Worker tasks', 
 void test('Owner notification does not send when Admin Telegram is disabled', async () => {
   const service = new OwnerNotificationService({
     settings: {
-      async get(key: string, fallback: string | null = null) {
-        return key === 'telegram.enabled' ? 'false' : fallback;
+      get(key: string, fallback: string | null = null) {
+        try {
+          return Promise.resolve(
+            (() => {
+              return key === 'telegram.enabled' ? 'false' : fallback;
+            })(),
+          );
+        } catch (error) {
+          return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+        }
       },
     },
     secrets: {
@@ -96,8 +120,16 @@ void test('Owner notification does not send when Admin Telegram is disabled', as
       },
     },
     telegram: {
-      async sendMessage() {
-        throw new Error('must not send');
+      sendMessage() {
+        try {
+          return Promise.resolve(
+            (() => {
+              throw new Error('must not send');
+            })(),
+          );
+        } catch (error) {
+          return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+        }
       },
     },
     database: {

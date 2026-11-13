@@ -156,7 +156,7 @@ class LegacySqliteImportService {
     try {
       const stat = fs.statSync(config.DATABASE_PATH);
       return stat.isFile() && stat.size > 0;
-    } catch (_) {
+    } catch {
       return false;
     }
   }

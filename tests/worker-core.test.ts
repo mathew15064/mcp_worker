@@ -6,32 +6,103 @@ import os from 'node:os';
 import path from 'node:path';
 import { WebSocket } from 'ws';
 
-const { WorkerAuthService, canonicalConnectMessage } = require('../src/services/workerAuthService');
-const { WorkerConnectionBroker } = require('../src/services/workerConnectionBroker');
-const { WorkerExecutionService } = require('../src/services/workerExecutionService');
-const { TerminalMcpService } = require('../src/services/terminalMcpService');
+import workerAuthService from '../src/services/workerAuthService';
+import type { ExecutionTransport } from '../src/services/executionContracts';
+const { WorkerAuthService, canonicalConnectMessage } = workerAuthService;
+import workerConnectionBroker from '../src/services/workerConnectionBroker';
+const { WorkerConnectionBroker } = workerConnectionBroker;
+import workerExecutionService from '../src/services/workerExecutionService';
+const { WorkerExecutionService } = workerExecutionService;
+import terminalMcpService from '../src/services/terminalMcpService';
+const { TerminalMcpService } = terminalMcpService;
 import lifecycle from '../worker/lifecycle';
+import { stringifyUnknown as appStringifyUnknown } from '../src/utils/stringifyUnknown';
 const { buildCleanupPlan, applyCleanupPlan } = lifecycle;
+
+// These fixtures retain the production row and port shapes; only the WebSocket
+// transport itself is intentionally partial, because no network is opened.
+import type workerRepository from '../src/repositories/workerRepository';
+type WorkerRow = NonNullable<Awaited<ReturnType<typeof workerRepository.findWorkerById>>>;
+type BrokerOptions = NonNullable<ConstructorParameters<typeof WorkerConnectionBroker>[0]>;
+type BrokerRepository = NonNullable<BrokerOptions['repository']>;
+type WorkerSocket = Parameters<typeof workerConnectionBroker.handleMessage>[0];
+type WorkerRequest = Parameters<typeof workerConnectionBroker.handleConnection>[1];
+function requestDouble(worker: WorkerRow): WorkerRequest {
+  return { workerAuth: { worker } } as WorkerRequest;
+}
+
+function fixtureWorker(
+  input: Pick<WorkerRow, 'id' | 'capabilities' | 'enabled'> & Partial<WorkerRow>,
+): WorkerRow {
+  return {
+    name: 'Fixture Worker',
+    public_key: '',
+    capabilities_json: null,
+    status: 'online',
+    owner_user_id: null,
+    last_seen_at: null,
+    ...input,
+  };
+}
+function createBroker(
+  options: Omit<BrokerOptions, 'repository'> & { repository?: Partial<BrokerRepository> } = {},
+) {
+  const repository: BrokerRepository = {
+    findWorkerById: () => Promise.resolve(null),
+    updateWorkerPresence: () => Promise.resolve(),
+    touchWorker: () => Promise.resolve(),
+    updateWorkerCapabilities: () => Promise.resolve(),
+    ...options.repository,
+  };
+  return new WorkerConnectionBroker({ ...options, repository });
+}
+function parseDispatchedJob(raw: string): { type: string; job_id: string; operation: string } {
+  const parsed: unknown = JSON.parse(raw);
+  if (
+    typeof parsed !== 'object' ||
+    parsed === null ||
+    !('type' in parsed) ||
+    typeof parsed.type !== 'string' ||
+    !('job_id' in parsed) ||
+    typeof parsed.job_id !== 'string'
+  ) {
+    throw new Error('Invalid fake worker dispatch message');
+  }
+  return {
+    type: parsed.type,
+    job_id: parsed.job_id,
+    operation:
+      'operation' in parsed && typeof parsed.operation === 'string' ? parsed.operation : '',
+  };
+}
+function socketDouble<T extends { workerId: string; readyState: number }>(
+  value: T,
+): T & WorkerSocket {
+  // TypeScript's full ws interface cannot be structurally implemented by a
+  // deliberately minimal no-I/O fake. Its exercised members remain checked.
+  return value as T & WorkerSocket;
+}
 
 void test('worker enrollment normalizes capabilities and signed handshake rejects replay', async () => {
   const pair = crypto.generateKeyPairSync('ed25519');
   const publicKey = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString();
-  let storedWorker: {
-    id: string;
-    name: string;
-    public_key: string;
-    capabilities: string[];
-    enabled: boolean;
-  } | null = null;
+  let storedWorker: WorkerRow | null = null;
   let consumed = false;
   const repository = {
-    async consumeEnrollmentToken(token: string) {
+    consumeEnrollmentToken(token: string) {
       assert.equal(token, 'br_enroll_fixture');
       if (consumed)
-        throw Object.assign(new Error('used'), { code: 'WORKER_ENROLLMENT_INVALID', status: 401 });
+        return Promise.reject(
+          Object.assign(new Error('used'), { code: 'WORKER_ENROLLMENT_INVALID', status: 401 }),
+        );
       consumed = true;
+      return Promise.resolve({
+        id: 'fixture-enrollment',
+        owner_user_id: null,
+        used_at: new Date().toISOString(),
+      });
     },
-    async createWorker({
+    createWorker({
       name,
       publicKey: normalized,
       capabilities,
@@ -40,17 +111,17 @@ void test('worker enrollment normalizes capabilities and signed handshake reject
       publicKey: string;
       capabilities: string[];
     }) {
-      storedWorker = {
+      storedWorker = fixtureWorker({
         id: crypto.randomUUID(),
         name,
         public_key: normalized,
         capabilities,
         enabled: true,
-      };
-      return storedWorker;
+      });
+      return Promise.resolve(storedWorker);
     },
-    async findWorkerById(id: string) {
-      return storedWorker?.id === id ? storedWorker : null;
+    findWorkerById(id: string) {
+      return Promise.resolve(storedWorker?.id === id ? storedWorker : null);
     },
   };
   const now = 1_800_000_000_000;
@@ -61,6 +132,7 @@ void test('worker enrollment normalizes capabilities and signed handshake reject
     publicKey,
     capabilities: ['workspace.exec', 'tmux.inspect', 'workspace.exec', 'unknown'],
   });
+  assert.ok(worker);
   assert.deepEqual(worker.capabilities, ['tmux.inspect', 'workspace.exec']);
 
   const timestamp = String(now);
@@ -113,22 +185,28 @@ void test('worker enrollment normalizes capabilities and signed handshake reject
 
 void test('worker broker dispatch correlates typed result and fails closed on missing capability', async () => {
   const workerId = crypto.randomUUID();
-  const workerRecord = { id: workerId, capabilities: ['workspace.exec'], enabled: true };
-  const broker = new WorkerConnectionBroker({
-    repository: { findWorkerById: async (id: string) => (id === workerId ? workerRecord : null) },
+  const workerRecord = fixtureWorker({
+    id: workerId,
+    capabilities: ['workspace.exec'],
+    enabled: true,
+  });
+  const broker = createBroker({
+    repository: {
+      findWorkerById: (id: string) => Promise.resolve(id === workerId ? workerRecord : null),
+    },
     defaultTimeoutMs: 1000,
   });
   const dispatched: { value: { type: string; operation: string; job_id: string } | null } = {
     value: null,
   };
-  const ws = {
+  const ws = socketDouble({
     workerId,
     worker: { id: workerId, capabilities: ['workspace.exec'] },
     readyState: WebSocket.OPEN,
     send(text: string) {
-      dispatched.value = JSON.parse(text);
+      dispatched.value = parseDispatchedJob(text);
     },
-  };
+  });
   broker.connections.set(workerId, ws);
   const pending = broker.dispatch(
     workerId,
@@ -163,24 +241,29 @@ void test('worker heartbeat skips redundant capabilities writes but preserves pr
   const workerId = crypto.randomUUID();
   const writes: Array<{ id: string; capabilities: string[] }> = [];
   let presenceTouches = 0;
-  const broker = new WorkerConnectionBroker({
+  const broker = createBroker({
     repository: {
-      async updateWorkerCapabilities(id: string, capabilities: string[]) {
-        writes.push({ id, capabilities });
+      updateWorkerCapabilities(id: string, capabilities: unknown[]) {
+        writes.push({
+          id,
+          capabilities: capabilities.filter((x): x is string => typeof x === 'string'),
+        });
+        return Promise.resolve();
       },
-      async touchWorker(id: string) {
+      touchWorker(id: string) {
         assert.equal(id, workerId);
         presenceTouches += 1;
+        return Promise.resolve();
       },
     },
   });
-  const ws = {
+  const ws = socketDouble({
     workerId,
     worker: { id: workerId, capabilities: ['workspace.exec'] },
     readyState: WebSocket.OPEN,
     send() {},
     close() {},
-  };
+  });
   broker.connections.set(workerId, ws);
   broker.handleMessage(ws, JSON.stringify({ type: 'heartbeat', capabilities: ['workspace.exec'] }));
   broker.handleMessage(ws, JSON.stringify({ type: 'heartbeat', capabilities: ['workspace.exec'] }));
@@ -200,31 +283,32 @@ void test('worker heartbeat skips redundant capabilities writes but preserves pr
 
 void test('late close and result from a replaced Worker socket cannot affect the current connection', async () => {
   const workerId = crypto.randomUUID();
-  const worker = { id: workerId, enabled: true, capabilities: ['workspace.exec'] };
+  const worker = fixtureWorker({ id: workerId, enabled: true, capabilities: ['workspace.exec'] });
   const presence: string[] = [];
-  const broker = new WorkerConnectionBroker({
+  const broker = createBroker({
     repository: {
-      async findWorkerById() {
-        return worker;
+      findWorkerById() {
+        return Promise.resolve(worker);
       },
-      async updateWorkerPresence(_id: string, status: string) {
+      updateWorkerPresence(_id: string, status: string) {
         presence.push(status);
+        return Promise.resolve();
       },
     },
     defaultTimeoutMs: 1_000,
   });
   const socket = () => {
     const listeners: Record<string, (() => void) | undefined> = {};
-    return {
+    return socketDouble({
       workerId,
       worker: { ...worker },
-      readyState: WebSocket.OPEN as number,
+      readyState: Number(WebSocket.OPEN),
       sent: [] as Array<{ type: string; job_id: string }>,
       on(name: string, callback: () => void) {
         listeners[name] = callback;
       },
       send(text: string) {
-        this.sent.push(JSON.parse(text));
+        this.sent.push(parseDispatchedJob(text));
       },
       close() {
         this.readyState = WebSocket.CLOSED;
@@ -233,17 +317,17 @@ void test('late close and result from a replaced Worker socket cannot affect the
       triggerClose() {
         listeners.close?.();
       },
-    };
+    });
   };
   const first = socket();
-  broker.handleConnection(first, { workerAuth: { worker } });
+  broker.handleConnection(first, requestDouble(worker));
   const abandoned = broker.dispatch(workerId, 'workspace.exec', {}, { timeoutMs: 1_000 });
   await new Promise((resolve) => setImmediate(resolve));
   const firstJob = first.sent.find((message) => message.type === 'job');
   assert.ok(firstJob);
 
   const second = socket();
-  broker.handleConnection(second, { workerAuth: { worker } });
+  broker.handleConnection(second, requestDouble(worker));
   await assert.rejects(
     abandoned,
     (error: unknown) =>
@@ -285,9 +369,9 @@ void test('late close and result from a replaced Worker socket cannot affect the
 
 void test('Worker broker limits regular jobs but reserves slots for lifecycle control', async () => {
   const workerId = crypto.randomUUID();
-  const worker = { id: workerId, capabilities: ['workspace.exec'], enabled: true };
-  const broker = new WorkerConnectionBroker({
-    repository: { findWorkerById: async () => worker },
+  const worker = fixtureWorker({ id: workerId, capabilities: ['workspace.exec'], enabled: true });
+  const broker = createBroker({
+    repository: { findWorkerById: () => Promise.resolve(worker) },
     maxPendingGlobal: 1,
     maxPendingPerWorker: 1,
     maxControlGlobal: 1,
@@ -295,16 +379,16 @@ void test('Worker broker limits regular jobs but reserves slots for lifecycle co
     maxBufferedBytes: 32,
   });
   const sent: Array<{ type: string; job_id: string }> = [];
-  const ws = {
+  const ws = socketDouble({
     workerId,
     worker,
     readyState: WebSocket.OPEN,
     bufferedAmount: 0,
     send(raw: string) {
-      sent.push(JSON.parse(raw));
+      sent.push(parseDispatchedJob(raw));
     },
     close() {},
-  };
+  });
   broker.connections.set(workerId, ws);
   const job = broker.dispatch(workerId, 'workspace.exec', {}, { timeoutMs: 1000 });
   await new Promise((resolve) => setImmediate(resolve));
@@ -367,21 +451,21 @@ void test('Worker broker limits regular jobs but reserves slots for lifecycle co
 
 void test('Worker broker bounds streams and rejects input while transport buffer is saturated', async () => {
   const workerId = crypto.randomUUID();
-  const worker = { id: workerId, capabilities: ['shell.attach'], enabled: true };
-  const broker = new WorkerConnectionBroker({
-    repository: { findWorkerById: async () => worker },
+  const worker = fixtureWorker({ id: workerId, capabilities: ['shell.attach'], enabled: true });
+  const broker = createBroker({
+    repository: { findWorkerById: () => Promise.resolve(worker) },
     maxStreamsGlobal: 1,
     maxStreamsPerWorker: 1,
     maxBufferedBytes: 32,
   });
-  const ws = {
+  const ws = socketDouble({
     workerId,
     worker,
     readyState: WebSocket.OPEN,
     bufferedAmount: 0,
     send() {},
     close() {},
-  };
+  });
   broker.connections.set(workerId, ws);
   const stream = await broker.openStream(workerId, 'shell.attach', {});
   await assert.rejects(
@@ -420,32 +504,32 @@ void test('Worker broker bounds streams and rejects input while transport buffer
 void test('worker broker forwards authenticated memory emergency alerts to the Owner notifier', async () => {
   const workerId = crypto.randomUUID();
   const alerts: Array<{
-    workerId: string;
+    workerId?: string;
     workerName: string;
     memoryUsedPercent: number;
     phase: string;
     stopped: Record<string, number>;
   }> = [];
-  const broker = new WorkerConnectionBroker({
-    repository: { findWorkerById: async () => null },
+  const broker = createBroker({
+    repository: { findWorkerById: () => Promise.resolve(null) },
     notifier: {
-      async sendWorkerResourceAlert(alert: {
-        workerId: string;
+      sendWorkerResourceAlert(alert: {
+        workerId?: string;
         workerName: string;
         memoryUsedPercent: number;
         phase: string;
         stopped: Record<string, number>;
       }) {
         alerts.push(alert);
-        return { sent: true };
+        return Promise.resolve({ sent: true });
       },
     },
   });
-  const ws = {
+  const ws = socketDouble({
     workerId,
     worker: { id: workerId, name: 'VPS Worker', capabilities: [], enabled: true },
     readyState: WebSocket.OPEN,
-  };
+  });
   broker.handleMessage(
     ws,
     JSON.stringify({
@@ -483,7 +567,7 @@ void test('worker execution service maps the existing execution interface to typ
     options: unknown;
   }> = [];
   const broker = {
-    async dispatch(
+    dispatch<T>(
       workerId: string,
       operation: string,
       payload: Record<string, unknown>,
@@ -491,17 +575,21 @@ void test('worker execution service maps the existing execution interface to typ
     ) {
       calls.push({ workerId, operation, payload, options });
       if (operation === 'shell.inspect')
-        return { pane_count: 1, target_pane: 'shell', pane_current_command: 'bash' };
+        return Promise.resolve({
+          pane_count: 1,
+          target_pane: 'shell',
+          pane_current_command: 'bash',
+        } as T);
       if (operation === 'workspace.exec')
-        return {
+        return Promise.resolve({
           exit_code: 0,
           stdout: 'ok',
           stderr: '',
           duration_ms: 1,
           stdout_truncated: false,
           stderr_truncated: false,
-        };
-      return { code: 'OK' };
+        } as T);
+      return Promise.resolve({ code: 'OK' } as T);
     },
   };
   const service = new WorkerExecutionService({ broker });
@@ -561,36 +649,36 @@ void test('MCP execution profile routes worker profiles without decrypting an SS
     worker_status: 'online',
     tmux_session: 'main',
     enabled: true,
-    transport: 'worker',
+    transport: 'worker' as const,
   };
   const worker = {
-    async inspectProfile() {
-      return {
+    inspectProfile() {
+      return Promise.resolve({
         pane_count: 1,
         target_pane: '%1',
         pane_current_command: 'bash',
         panes: [{ id: '%1', current_command: 'bash' }],
-      };
+      });
     },
-    async execWorkspaceCommand(_profile: unknown, password: string | null, command: string) {
+    execWorkspaceCommand(_profile: unknown, password: string | null, command: string) {
       assert.equal(password, null);
       assert.equal(command, 'printf ok');
-      return {
+      return Promise.resolve({
         exit_code: 0,
         stdout: 'ok',
         stderr: '',
         duration_ms: 2,
         stdout_truncated: false,
         stderr_truncated: false,
-      };
+      });
     },
   };
   const service = new TerminalMcpService({
     profiles: {
-      findAll: async () => [profile],
+      findAll: () => Promise.resolve([profile]),
     },
-    worker,
-    audit: { log: async () => {} },
+    worker: worker as unknown as ExecutionTransport,
+    audit: { log: () => Promise.resolve({ changes: 0, insertId: null }) },
   });
   const status = await service.status('Worker Dev');
   assert.equal(status.status, 'READY');
@@ -600,19 +688,19 @@ void test('MCP execution profile routes worker profiles without decrypting an SS
 
 void test('dispatch rejects a socket replaced during asynchronous Worker lookup', async () => {
   const workerId = crypto.randomUUID();
-  const worker = { id: workerId, enabled: true, capabilities: ['workspace.exec'] };
-  let completeLookup: (value: unknown) => void = () => {};
-  const broker = new WorkerConnectionBroker({
+  const worker = fixtureWorker({ id: workerId, enabled: true, capabilities: ['workspace.exec'] });
+  let completeLookup: (value: WorkerRow | null) => void = () => {};
+  const broker = createBroker({
     repository: {
       findWorkerById: () =>
-        new Promise((resolve) => {
+        new Promise<WorkerRow | null>((resolve) => {
           completeLookup = resolve;
         }),
     },
     defaultTimeoutMs: 100,
   });
   let sent = 0;
-  const first = {
+  const first = socketDouble({
     workerId,
     worker,
     readyState: WebSocket.OPEN,
@@ -620,8 +708,14 @@ void test('dispatch rejects a socket replaced during asynchronous Worker lookup'
       sent++;
     },
     close() {},
-  };
-  const second = { workerId, worker, readyState: WebSocket.OPEN, send() {}, close() {} };
+  });
+  const second = socketDouble({
+    workerId,
+    worker,
+    readyState: WebSocket.OPEN,
+    send() {},
+    close() {},
+  });
   broker.connections.set(workerId, first);
   const job = broker.dispatch(workerId, 'workspace.exec', {}, { timeoutMs: 100 });
   broker.connections.set(workerId, second);
@@ -638,18 +732,18 @@ void test('dispatch rejects a socket replaced during asynchronous Worker lookup'
 
 void test('openStream rejects a socket replaced during asynchronous Worker lookup', async () => {
   const workerId = crypto.randomUUID();
-  const worker = { id: workerId, enabled: true, capabilities: ['shell.attach'] };
-  let finish: (value: unknown) => void = () => {};
-  const broker = new WorkerConnectionBroker({
+  const worker = fixtureWorker({ id: workerId, enabled: true, capabilities: ['shell.attach'] });
+  let finish: (value: WorkerRow | null) => void = () => {};
+  const broker = createBroker({
     repository: {
       findWorkerById: () =>
-        new Promise((resolve) => {
+        new Promise<WorkerRow | null>((resolve) => {
           finish = resolve;
         }),
     },
   });
   let sent = 0;
-  const first = {
+  const first = socketDouble({
     workerId,
     worker,
     readyState: WebSocket.OPEN,
@@ -657,8 +751,8 @@ void test('openStream rejects a socket replaced during asynchronous Worker looku
       sent++;
     },
     close() {},
-  };
-  const second = { ...first };
+  });
+  const second = socketDouble({ ...first });
   broker.connections.set(workerId, first);
   const opening = broker.openStream(workerId, 'shell.attach', {});
   broker.connections.set(workerId, second);
@@ -671,4 +765,19 @@ void test('openStream rejects a socket replaced during asynchronous Worker looku
   assert.equal(sent, 0);
   assert.equal(broker.streams.size, 0);
   broker.close();
+});
+
+void test('Worker and app scalar parsing reject hostile toString and bound circular arrays', () => {
+  const hostile = {
+    toString: () => {
+      throw new Error('Hostile object toString called');
+    },
+  };
+  const recursive: unknown[] = [];
+  recursive.push(recursive);
+  for (const convert of [appStringifyUnknown, lifecycle.stringifyUnknown]) {
+    assert.equal(convert(hostile), '[object Object]');
+    assert.equal(convert(recursive), '');
+    assert.equal(convert(['alpha', 1, null, false]), 'alpha,1,,false');
+  }
 });

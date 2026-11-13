@@ -1,3 +1,4 @@
+import { stringifyUnknown } from '../utils/stringifyUnknown';
 interface ProfileInput {
   name?: unknown;
   description?: unknown;
@@ -37,15 +38,15 @@ function workerError(code: string, message: string, status = 400) {
 
 function parseJsonArray(value: string | null): unknown[] {
   try {
-    const parsed = JSON.parse(value || '[]');
+    const parsed: unknown = JSON.parse(value || '[]');
     return Array.isArray(parsed) ? parsed : [];
-  } catch (_) {
+  } catch {
     return [];
   }
 }
 
 function normalizeWorkerName(name: unknown) {
-  const normalized = String(name || '').trim();
+  const normalized = stringifyUnknown(name || '').trim();
   if (!/^[A-Za-z0-9][A-Za-z0-9_. -]{0,99}$/.test(normalized)) {
     throw workerError('WORKER_NAME_INVALID', 'Worker name must be 1-100 safe characters.');
   }
@@ -54,9 +55,9 @@ function normalizeWorkerName(name: unknown) {
 
 function normalizeProfileInput(input: ProfileInput = {}) {
   const value = {
-    name: String(input.name || '').trim(),
-    description: String(input.description || '').trim(),
-    workerId: String(input.workerId || input.worker_id || '').trim(),
+    name: stringifyUnknown(input.name || '').trim(),
+    description: stringifyUnknown(input.description || '').trim(),
+    workerId: stringifyUnknown(input.workerId || input.worker_id || '').trim(),
     enabled:
       input.enabled === true ||
       input.enabled === 1 ||

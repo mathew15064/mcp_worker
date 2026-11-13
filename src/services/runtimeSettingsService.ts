@@ -1,3 +1,4 @@
+import { stringifyUnknown } from '../utils/stringifyUnknown';
 import databaseManager from '../db/databaseManager';
 import type { DatabaseAdapter } from '../db/contracts';
 
@@ -41,8 +42,9 @@ class RuntimeSettingsService {
     }
     try {
       const rows = await db.queryAll('SELECT `key`, `value` FROM system_settings');
-      for (const row of rows) this.values.set(String(row.key), String(row.value ?? ''));
-    } catch (_) {
+      for (const row of rows)
+        this.values.set(stringifyUnknown(row.key), stringifyUnknown(row.value ?? ''));
+    } catch {
       // Legacy DBs created before settings are initialized may not have the table yet.
     }
     this.loaded = true;
@@ -50,7 +52,7 @@ class RuntimeSettingsService {
   }
 
   get(key: string, fallback = '') {
-    return this.values.has(key) ? this.values.get(key)! : fallback;
+    return this.values.get(key) ?? fallback;
   }
 
   bool(key: string, fallback = false) {
@@ -71,17 +73,17 @@ class RuntimeSettingsService {
         `INSERT INTO system_settings (\`key\`, \`value\`, updated_at)
         VALUES (?, ?, ?)
         ON DUPLICATE KEY UPDATE \`value\` = VALUES(\`value\`), updated_at = VALUES(updated_at)`,
-        [key, String(value ?? ''), now],
+        [key, stringifyUnknown(value ?? ''), now],
       );
     } else {
       await db.execute(
         `INSERT INTO system_settings (key, value, updated_at)
         VALUES (?, ?, ?)
         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-        [key, String(value ?? ''), now],
+        [key, stringifyUnknown(value ?? ''), now],
       );
     }
-    this.values.set(key, String(value ?? ''));
+    this.values.set(key, stringifyUnknown(value ?? ''));
   }
 
   async setMany(entries: Record<string, unknown>, adapter: DatabaseAdapter | null = null) {
@@ -95,7 +97,7 @@ class RuntimeSettingsService {
     let rows: { key: string }[] = [];
     try {
       rows = await db.queryAll<{ key: string }>('SELECT `key` FROM system_settings');
-    } catch (_) {}
+    } catch {}
     const existing = new Set(rows.map((row) => String(row.key)));
     const currentBase = String(
       (process.env.MCP_PLATFORM === 'railway'

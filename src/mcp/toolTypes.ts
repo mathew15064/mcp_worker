@@ -1,5 +1,5 @@
 import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
-import { z } from 'zod';
+import type { z } from 'zod';
 import type { TerminalToolService } from './terminalServiceContract';
 
 export type ToolResponse = {
@@ -19,9 +19,14 @@ export interface ToolMetadata {
 export function defineTool<const Shape extends z.ZodRawShape>(
   tool: ToolMetadata & {
     schema: Shape;
-    handler(args: z.output<z.ZodObject<Shape>>, service?: TerminalToolService): Promise<ToolResponse>;
-  }
-) { return tool; }
+    handler(
+      args: z.output<z.ZodObject<Shape>>,
+      service?: TerminalToolService,
+    ): Promise<ToolResponse>;
+  },
+) {
+  return tool;
+}
 
 export type AnyTool = ToolMetadata & {
   schema: z.ZodRawShape;

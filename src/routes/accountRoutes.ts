@@ -1,3 +1,4 @@
+import { stringifyUnknown } from '../utils/stringifyUnknown';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { routeError } from '../http/domainErrors';
 import { formString, formFlag } from '../http/requestContracts';
@@ -61,7 +62,10 @@ function consumeWorkerEnrollment(req: Request) {
   return value;
 }
 function accountReturnTo(req: Request) {
-  const value = String(req.body?.return_to || '');
+  const body: unknown = req.body;
+  const requested =
+    typeof body === 'object' && body !== null && 'return_to' in body ? body.return_to : undefined;
+  const value = stringifyUnknown(requested || '');
   if (
     !value.startsWith('/account/') ||
     value.startsWith('//') ||
@@ -74,7 +78,7 @@ function accountReturnTo(req: Request) {
     return url.origin === 'http://localhost' && url.pathname.startsWith('/account/')
       ? `${url.pathname}${url.search}`
       : '/account/clients';
-  } catch (_) {
+  } catch {
     return '/account/clients';
   }
 }
@@ -193,7 +197,7 @@ router.get('/account/workers/connection-status', async (req, res, next) => {
     const workers = (await workerRepo.listWorkersByOwner(req.currentUser.id)).filter(
       (item): item is NonNullable<typeof item> => item !== null,
     );
-    const checkId = String(req.query.check || '');
+    const checkId = stringifyUnknown(req.query.check || '');
     const target = workers.find((worker) => worker.id === checkId);
     const probe =
       target?.enabled && workerBroker.isOnline(checkId)
@@ -233,7 +237,7 @@ router.get('/account/workers', async (req, res, next) => {
         profiles: (await workerRepo.listProfilesByOwner(req.currentUser.id)).filter(
           (profile): profile is NonNullable<typeof profile> => profile !== null,
         ),
-        checkingWorkerId: String(req.query.check || ''),
+        checkingWorkerId: stringifyUnknown(req.query.check || ''),
         enrollment: consumeWorkerEnrollment(req),
         workerInstallUrl: `${mcpConfig.publicBaseUrl}/worker/install.sh`,
         routeBase: '/account/workers',

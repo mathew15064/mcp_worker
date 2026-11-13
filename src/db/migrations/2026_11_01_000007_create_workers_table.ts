@@ -1,7 +1,7 @@
 import type { SchemaBuilder } from '../schemaBuilder';
 const migration = {
   async up(schema: SchemaBuilder) {
-    await schema.createTable('workers', table => {
+    await schema.createTable('workers', (table) => {
       table.uuid('id').primary();
       table.string('name', 100);
       table.longText('public_key');
@@ -16,6 +16,6 @@ const migration = {
   },
   async down(schema: SchemaBuilder) {
     await schema.dropTable('workers');
-  }
+  },
 };
 export = migration;

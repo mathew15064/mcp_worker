@@ -30,33 +30,41 @@ function service(ssh: Record<string, unknown>) {
 
 void test('repo_snapshot parses compact git state', async () => {
   const ssh = {
-    execWorkspaceCommand: async (
+    execWorkspaceCommand: (
       _p: unknown,
       _pw: unknown,
       command: string,
       options: { cwd?: string },
     ) => {
-      assert.equal(options.cwd, '/tmp/repo');
-      assert.match(command, /status --porcelain/);
-      return {
-        exit_code: 0,
-        stdout: [
-          'ROOT\t/tmp/repo',
-          'BRANCH\tfeature/demo',
-          'HEAD\tabc123',
-          'UPSTREAM\torigin/feature/demo',
-          'COUNTS\t2\t1',
-          'BASE\tbase123',
-          'MERGE_BASE\tmerge123',
-          '__BR_STATUS__',
-          ' M src/a.js',
-          '?? tests/new.test.js',
-          '',
-        ].join('\n'),
-        stderr: '',
-        stdout_truncated: false,
-        stderr_truncated: false,
-      };
+      try {
+        return Promise.resolve(
+          (() => {
+            assert.equal(options.cwd, '/tmp/repo');
+            assert.match(command, /status --porcelain/);
+            return {
+              exit_code: 0,
+              stdout: [
+                'ROOT\t/tmp/repo',
+                'BRANCH\tfeature/demo',
+                'HEAD\tabc123',
+                'UPSTREAM\torigin/feature/demo',
+                'COUNTS\t2\t1',
+                'BASE\tbase123',
+                'MERGE_BASE\tmerge123',
+                '__BR_STATUS__',
+                ' M src/a.js',
+                '?? tests/new.test.js',
+                '',
+              ].join('\n'),
+              stderr: '',
+              stdout_truncated: false,
+              stderr_truncated: false,
+            };
+          })(),
+        );
+      } catch (error) {
+        return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+      }
     },
   };
   const result = await service(ssh).repoSnapshot('Dev3', '/tmp/repo', {
@@ -77,24 +85,32 @@ void test('repo_snapshot parses compact git state', async () => {
 void test('git_diff combines status, numstat, and bounded diff', async () => {
   let call = 0;
   const ssh = {
-    execWorkspaceCommand: async () => {
-      call += 1;
-      if (call === 1)
-        return {
-          exit_code: 0,
-          stdout:
-            '__BR_NAME_STATUS__\nM\tsrc/a.js\nA\ttests/a.test.js\n__BR_NUMSTAT__\n3\t1\tsrc/a.js\n5\t0\ttests/a.test.js\n',
-          stderr: '',
-          stdout_truncated: false,
-          stderr_truncated: false,
-        };
-      return {
-        exit_code: 0,
-        stdout: 'diff --git a/src/a.js b/src/a.js\n+hello\n',
-        stderr: '',
-        stdout_truncated: true,
-        stderr_truncated: false,
-      };
+    execWorkspaceCommand: () => {
+      try {
+        return Promise.resolve(
+          (() => {
+            call += 1;
+            if (call === 1)
+              return {
+                exit_code: 0,
+                stdout:
+                  '__BR_NAME_STATUS__\nM\tsrc/a.js\nA\ttests/a.test.js\n__BR_NUMSTAT__\n3\t1\tsrc/a.js\n5\t0\ttests/a.test.js\n',
+                stderr: '',
+                stdout_truncated: false,
+                stderr_truncated: false,
+              };
+            return {
+              exit_code: 0,
+              stdout: 'diff --git a/src/a.js b/src/a.js\n+hello\n',
+              stderr: '',
+              stdout_truncated: true,
+              stderr_truncated: false,
+            };
+          })(),
+        );
+      } catch (error) {
+        return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+      }
     },
   };
   const result = await service(ssh).gitDiff('Dev3', '/tmp/repo', { base: 'origin/main' });
@@ -116,32 +132,40 @@ void test('code_search parses ripgrep JSON and check_run parses TAP summary', as
   });
   let call = 0;
   const ssh = {
-    execWorkspaceCommand: async () => {
-      call += 1;
-      if (call === 1)
-        return {
-          exit_code: 0,
-          stdout: match + '\n',
-          stderr: '',
-          stdout_truncated: false,
-          stderr_truncated: false,
-        };
-      return {
-        exit_code: 1,
-        stdout: [
-          'TAP version 13',
-          'ok 1 - alpha',
-          'not ok 2 - beta',
-          '# tests 2',
-          '# pass 1',
-          '# fail 1',
-          '# skipped 0',
-        ].join('\n'),
-        stderr: 'Error: beta failed\n',
-        duration_ms: 321,
-        stdout_truncated: false,
-        stderr_truncated: false,
-      };
+    execWorkspaceCommand: () => {
+      try {
+        return Promise.resolve(
+          (() => {
+            call += 1;
+            if (call === 1)
+              return {
+                exit_code: 0,
+                stdout: match + '\n',
+                stderr: '',
+                stdout_truncated: false,
+                stderr_truncated: false,
+              };
+            return {
+              exit_code: 1,
+              stdout: [
+                'TAP version 13',
+                'ok 1 - alpha',
+                'not ok 2 - beta',
+                '# tests 2',
+                '# pass 1',
+                '# fail 1',
+                '# skipped 0',
+              ].join('\n'),
+              stderr: 'Error: beta failed\n',
+              duration_ms: 321,
+              stdout_truncated: false,
+              stderr_truncated: false,
+            };
+          })(),
+        );
+      } catch (error) {
+        return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+      }
     },
   };
   const target = service(ssh);
@@ -167,35 +191,67 @@ void test('code_search parses ripgrep JSON and check_run parses TAP summary', as
 
 void test('process lifecycle and cursor logs delegate through one profile', async () => {
   const ssh = {
-    startManagedProcess: async () => ({
-      process_id: 'brproc-0123456789abcdef',
-      state: 'RUNNING',
-      pid: 123,
-      output: '',
-    }),
-    getManagedProcessStatus: async () => ({
-      process_id: 'brproc-0123456789abcdef',
-      state: 'RUNNING',
-      pid: 123,
-      output: 'ready',
-    }),
-    readManagedProcessLogs: async () => ({
-      process_id: 'brproc-0123456789abcdef',
-      cursor: 0,
-      next_cursor: 5,
-      log_size: 5,
-      bytes: 5,
-      eof: true,
-      text: 'ready',
-    }),
-    stopManagedProcess: async () => ({
-      process_id: 'brproc-0123456789abcdef',
-      state: 'STOPPED',
-      exit_code: 0,
-      pid: 123,
-      cleaned_up: true,
-      forced: false,
-    }),
+    startManagedProcess: () => {
+      try {
+        return Promise.resolve(
+          (() => ({
+            process_id: 'brproc-0123456789abcdef',
+            state: 'RUNNING',
+            pid: 123,
+            output: '',
+          }))(),
+        );
+      } catch (error) {
+        return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+      }
+    },
+    getManagedProcessStatus: () => {
+      try {
+        return Promise.resolve(
+          (() => ({
+            process_id: 'brproc-0123456789abcdef',
+            state: 'RUNNING',
+            pid: 123,
+            output: 'ready',
+          }))(),
+        );
+      } catch (error) {
+        return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+      }
+    },
+    readManagedProcessLogs: () => {
+      try {
+        return Promise.resolve(
+          (() => ({
+            process_id: 'brproc-0123456789abcdef',
+            cursor: 0,
+            next_cursor: 5,
+            log_size: 5,
+            bytes: 5,
+            eof: true,
+            text: 'ready',
+          }))(),
+        );
+      } catch (error) {
+        return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+      }
+    },
+    stopManagedProcess: () => {
+      try {
+        return Promise.resolve(
+          (() => ({
+            process_id: 'brproc-0123456789abcdef',
+            state: 'STOPPED',
+            exit_code: 0,
+            pid: 123,
+            cleaned_up: true,
+            forced: false,
+          }))(),
+        );
+      } catch (error) {
+        return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+      }
+    },
   };
   const target = service(ssh);
   const started = await target.processStart('Dev3', 'node server.js', { cwd: '/tmp' });
@@ -220,13 +276,21 @@ void test('terminal read removes trailing blank viewport rows before slicing', a
     lines: 3,
   });
   const ssh = {
-    readText: async (_p: unknown, _pw: unknown, lines: number) => {
-      assert.equal(lines, 10000);
-      return {
-        text: 'older\npwd\n/work\n$ \n\n\n',
-        target_pane: '%2',
-        pane_current_command: 'bash',
-      };
+    readText: (_p: unknown, _pw: unknown, lines: number) => {
+      try {
+        return Promise.resolve(
+          (() => {
+            assert.equal(lines, 10000);
+            return {
+              text: 'older\npwd\n/work\n$ \n\n\n',
+              target_pane: '%2',
+              pane_current_command: 'bash',
+            };
+          })(),
+        );
+      } catch (error) {
+        return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+      }
     },
   };
   const result = await service(ssh).read('Dev3', 3);

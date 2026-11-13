@@ -79,11 +79,27 @@ void test('MySQL queue overload reports a 503 instead of an unbounded wait', asy
     throw new Error('Queue limit reached.');
   };
   const connection = {
-    async execute() {
-      exhausted();
+    execute() {
+      try {
+        return Promise.resolve(
+          (() => {
+            exhausted();
+          })(),
+        );
+      } catch (error) {
+        return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+      }
     },
-    async getConnection() {
-      exhausted();
+    getConnection() {
+      try {
+        return Promise.resolve(
+          (() => {
+            exhausted();
+          })(),
+        );
+      } catch (error) {
+        return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+      }
     },
   };
   const adapter = new MysqlAdapter(

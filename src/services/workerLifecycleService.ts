@@ -40,7 +40,7 @@ class WorkerLifecycleService {
   async safeAudit(entry: AuditEntry) {
     try {
       await this.audit.log(entry);
-    } catch (_) {}
+    } catch {}
   }
 
   async decommission(

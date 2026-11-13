@@ -70,7 +70,7 @@ class McpConfig {
       ) {
         errors.push('MCP Public Base URL must use HTTPS in production.');
       }
-    } catch (_) {
+    } catch {
       errors.push(`Invalid MCP Public Base URL: '${this.publicBaseUrl}'.`);
     }
     return { valid: errors.length === 0, errors };

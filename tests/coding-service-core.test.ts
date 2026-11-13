@@ -25,14 +25,27 @@ function serviceWithArtifact(text: string) {
       profiles: { findAll: () => [profile] },
       audit: { log: () => {} },
       worker: {
-        collectArtifact: async () => artifact(),
-        writeTextFile: async (
-          _profile: unknown,
-          _password: unknown,
-          _path: unknown,
-          next: string,
-        ) => {
-          content = next;
+        collectArtifact: () => {
+          try {
+            return Promise.resolve((() => artifact())());
+          } catch (error) {
+            return Promise.reject(
+              error instanceof Error ? error : new Error('Mock action rejected'),
+            );
+          }
+        },
+        writeTextFile: (_profile: unknown, _password: unknown, _path: unknown, next: string) => {
+          try {
+            return Promise.resolve(
+              (() => {
+                content = next;
+              })(),
+            );
+          } catch (error) {
+            return Promise.reject(
+              error instanceof Error ? error : new Error('Mock action rejected'),
+            );
+          }
         },
       },
     } as unknown as ConstructorParameters<typeof TerminalMcpService>[0]),

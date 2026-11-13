@@ -2,11 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TOOLS } from '../src/mcp/toolRegistry';
 import { SERVER_INSTRUCTIONS } from '../src/mcp/instructions';
-const { setupEnv, cleanup, initDb } = require('./helper') as {
-  setupEnv(name: string): { dir: string };
-  cleanup(dir: string): void;
-  initDb(): void;
-};
+import helper from './helper';
+const { setupEnv, cleanup, initDb } = helper;
 
 const env = setupEnv('registry');
 test.after(() => cleanup(env.dir));

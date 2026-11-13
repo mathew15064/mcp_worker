@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { createRequire } from 'node:module';
+const deferredRequire = createRequire(__filename);
 import type DatabaseManager from '../src/db/databaseManager';
 import type RuntimeSettings from '../src/services/runtimeSettingsService';
 import type * as DbConnection from '../src/db/connection';
@@ -10,7 +12,8 @@ import type * as DbMigrations from '../src/db/migrations';
 function setupEnv(prefix: string = 'bot_report_mcp_test') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}_`));
   process.env.NODE_ENV = 'test';
-  process.env.DATABASE_PATH = path.join(dir, 'test.sqlite');
+  const dbPath = path.join(dir, 'test.sqlite');
+  process.env.DATABASE_PATH = dbPath;
   process.env.BOOTSTRAP_CONFIG_PATH = path.join(dir, 'bootstrap-config.json');
   process.env.SESSION_SECRET = 'test-session-secret-that-is-long-enough-123456';
   process.env.ADMIN_USERNAME = 'admin';
@@ -26,18 +29,20 @@ function setupEnv(prefix: string = 'bot_report_mcp_test') {
   process.env.MCP_PUBLIC_BASE_URL = 'http://127.0.0.1:3333';
   process.env.MCP_RESOURCE_URL = 'http://127.0.0.1:3333/mcp';
   process.env.MCP_ALLOW_TEST_FIXTURES = 'true';
-  return { dir, dbPath: process.env.DATABASE_PATH };
+  return { dir, dbPath };
 }
 
 function cleanup(dir: string) {
   try {
-    (require('../src/db/databaseManager') as typeof DatabaseManager).resetForTests();
+    (deferredRequire('../src/db/databaseManager') as typeof DatabaseManager).resetForTests();
   } catch {}
   try {
-    (require('../src/services/runtimeSettingsService') as typeof RuntimeSettings).resetForTests();
+    (
+      deferredRequire('../src/services/runtimeSettingsService') as typeof RuntimeSettings
+    ).resetForTests();
   } catch {}
   try {
-    (require('../src/db/connection') as typeof DbConnection).closeDb();
+    (deferredRequire('../src/db/connection') as typeof DbConnection).closeDb();
   } catch {}
   for (const name of ['BOOTSTRAP_CONFIG_PATH', 'APP_ENCRYPTION_KEY']) delete process.env[name];
   try {
@@ -46,9 +51,9 @@ function cleanup(dir: string) {
 }
 
 function initDb() {
-  const { runMigrations } = require('../src/db/migrations') as typeof DbMigrations;
-  const { getDb } = require('../src/db/connection') as typeof DbConnection;
-  const databaseManager = require('../src/db/databaseManager') as typeof DatabaseManager;
+  const { runMigrations } = deferredRequire('../src/db/migrations') as typeof DbMigrations;
+  const { getDb } = deferredRequire('../src/db/connection') as typeof DbConnection;
+  const databaseManager = deferredRequire('../src/db/databaseManager') as typeof DatabaseManager;
   runMigrations();
   databaseManager.useLegacyForTests(getDb());
 }
@@ -93,6 +98,20 @@ async function issueToken({
   return { ...registered, client: registered.client, token, verifier, redirectUri };
 }
 
+function parseReply(text: string): {
+  result?: {
+    tools?: Array<{ name: string }>;
+    structuredContent?: Record<string, unknown>;
+    isError?: boolean;
+  };
+  error?: unknown;
+} {
+  const parsed: unknown = JSON.parse(text);
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
+    throw new Error('Invalid MCP response');
+  return parsed;
+}
+
 async function parseMcpResponse(response: Response): Promise<{
   result?: {
     tools?: Array<{ name: string }>;
@@ -103,9 +122,9 @@ async function parseMcpResponse(response: Response): Promise<{
 }> {
   const text = await response.text();
   for (const line of text.split('\n')) {
-    if (line.startsWith('data:')) return JSON.parse(line.slice(5).trim());
+    if (line.startsWith('data:')) return parseReply(line.slice(5).trim());
   }
-  return JSON.parse(text);
+  return parseReply(text);
 }
 
 export = { setupEnv, cleanup, initDb, issueToken, pkce, parseMcpResponse };

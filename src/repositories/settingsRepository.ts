@@ -1,3 +1,4 @@
+import { stringifyUnknown } from '../utils/stringifyUnknown';
 import type { DatabaseAdapter } from '../db/contracts';
 import type Database from 'better-sqlite3';
 import databaseManager from '../db/databaseManager';
@@ -30,7 +31,7 @@ class SettingsRepository {
         VALUES (?, ?, ?)
         ON DUPLICATE KEY UPDATE \`value\` = VALUES(\`value\`), updated_at = VALUES(updated_at)
       `,
-        [key, String(value ?? ''), now],
+        [key, stringifyUnknown(value ?? ''), now],
       );
     }
     return this.db.execute(
@@ -39,7 +40,7 @@ class SettingsRepository {
       VALUES (?, ?, ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
     `,
-      [key, String(value ?? ''), now],
+      [key, stringifyUnknown(value ?? ''), now],
     );
   }
 

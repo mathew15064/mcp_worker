@@ -24,7 +24,8 @@ class BoundedMemorySessionStore extends session.Store {
   }
 
   _clone<T>(value: T): T {
-    return JSON.parse(JSON.stringify(value));
+    const parsed: unknown = JSON.parse(JSON.stringify(value));
+    return parsed as T;
   }
 
   clearExpired() {

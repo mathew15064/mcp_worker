@@ -32,7 +32,7 @@ export function getDb(customPath: string | null = null) {
   if (dbInstance) {
     try {
       dbInstance.close();
-    } catch (e) {
+    } catch {
       // ignore
     }
     dbInstance = null;
@@ -65,7 +65,7 @@ export function closeDb() {
   if (dbInstance) {
     try {
       dbInstance.close();
-    } catch (e) {
+    } catch {
       // ignore if already closed
     }
     dbInstance = null;

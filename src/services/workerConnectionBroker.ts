@@ -1,3 +1,4 @@
+import { stringifyUnknown } from '../utils/stringifyUnknown';
 import crypto from 'node:crypto';
 import type { Server as HttpServer, IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -187,9 +188,7 @@ class WorkerConnectionBroker {
       );
     };
     server.on('upgrade', this.upgradeHandler);
-    this.wss.on('connection', (ws, request) =>
-      this.handleConnection(ws as WorkerSocket, request as WorkerRequest),
-    );
+    this.wss.on('connection', (ws, request) => this.handleConnection(ws, request));
     return this;
   }
 
@@ -244,7 +243,7 @@ class WorkerConnectionBroker {
     )
       return;
     if (message.type === 'resource_alert') {
-      const code = String(message.code || '');
+      const code = stringifyUnknown(message.code || '');
       if (!['WORKER_MEMORY_EMERGENCY', 'WORKER_MEMORY_RECOVERED'].includes(code)) return;
       const stopped: Record<string, unknown> =
         message.stopped && typeof message.stopped === 'object' && !Array.isArray(message.stopped)
@@ -253,10 +252,10 @@ class WorkerConnectionBroker {
       Promise.resolve(
         this.notifier.sendWorkerResourceAlert({
           code,
-          severity: String(message.severity || ''),
-          phase: String(message.phase || ''),
+          severity: stringifyUnknown(message.severity || ''),
+          phase: stringifyUnknown(message.phase || ''),
           workerId: ws.workerId,
-          workerName: String(ws.worker?.name || message.worker_name || '').slice(0, 120),
+          workerName: stringifyUnknown(ws.worker?.name || message.worker_name || '').slice(0, 120),
           memoryUsedPercent: Number(message.memory_used_percent || 0),
           memoryTotalBytes: Number(message.memory_total_bytes || 0),
           memoryAvailableBytes: Number(message.memory_available_bytes || 0),
@@ -307,10 +306,10 @@ class WorkerConnectionBroker {
       const stream = this.streams.get(message.stream_id);
       if (!stream || stream.workerId !== ws.workerId || stream.ws !== ws) return;
       if (message.type === 'stream_state')
-        return stream.onState?.(String(message.state || 'UNKNOWN'), message);
+        return stream.onState?.(stringifyUnknown(message.state || 'UNKNOWN'), message);
       if (message.type === 'stream_output') {
         try {
-          return stream.onOutput?.(Buffer.from(String(message.data || ''), 'base64'));
+          return stream.onOutput?.(Buffer.from(stringifyUnknown(message.data || ''), 'base64'));
         } catch {
           return;
         }
@@ -388,7 +387,6 @@ class WorkerConnectionBroker {
     return new Promise<{ ok: boolean; reason: string | null; latency_ms: number | null }>(
       (resolve) => {
         let settled = false;
-        let timer: NodeJS.Timeout | undefined;
         const finish = (ok: boolean, reason: string | null) => {
           if (settled) return;
           settled = true;
@@ -410,7 +408,7 @@ class WorkerConnectionBroker {
         ws.on('pong', onPong);
         ws.on('close', onClose);
         ws.on('error', onClose);
-        timer = setTimeout(
+        const timer = setTimeout(
           () => finish(false, 'probe_timeout'),
           Math.max(250, Math.min(Number(timeoutMs) || 1500, 3000)),
         );

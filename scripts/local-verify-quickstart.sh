@@ -4,7 +4,7 @@ set -uo pipefail
 umask 077
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-PINNED_SHA="9a817baabdaeb6a019083252dac6ca5077257474"
+PINNED_SHA="ae588a1a56f2561ca2323457463e5b9e203de509"
 CURRENT_BRANCH="$(git -C "$ROOT" branch --show-current)"
 
 die() { printf 'LOCAL_VERIFY_REFUSED: %s\n' "$1" >&2; exit 2; }
@@ -12,8 +12,8 @@ command -v git >/dev/null 2>&1 || die "git is required"
 # Only explicitly reviewed PC branches may run this harness. Never run in
 # an existing production/staging checkout, or allow arbitrary branch names.
 case "$CURRENT_BRANCH" in
-  work/quickstart-local-t01|work/quickstart-local-integration-20261113) ;;
-  *) die "requires the isolated T1 branch or approved PC integration branch" ;;
+  work/railway-final-t1|work/quickstart-local-integration-20261113) ;;
+  *) die "requires work/railway-final-t1 or the approved clean PC integration branch" ;;
 esac
 git -C "$ROOT" cat-file -e "${PINNED_SHA}^{commit}" 2>/dev/null ||
   die "pinned commit is missing"

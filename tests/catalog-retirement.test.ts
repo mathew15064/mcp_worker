@@ -1,3 +1,4 @@
+import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http, { type Server } from 'node:http';
@@ -45,7 +46,7 @@ let id = 0;
 test.before(async () => {
   server = http.createServer(app);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  base = 'http://127.0.0.1:' + (server.address() as import('node:net').AddressInfo).port;
+  base = 'http://127.0.0.1:' + (server.address() as AddressInfo).port;
   token = (await issueToken()).token.access_token;
 });
 test.after(async () => {

@@ -1,3 +1,4 @@
+import { stringifyUnknown } from '../utils/stringifyUnknown';
 import path from 'node:path';
 import type { ExecutionProfile, ExecutionTransport } from './executionContracts';
 import { errorFields } from './workerProtocol';
@@ -102,7 +103,7 @@ function terminalServiceError(code: string, message: string) {
 }
 
 function normalizeCapturedText(text: unknown, lines: number) {
-  const rows = String(text || '').split('\n');
+  const rows = stringifyUnknown(text || '').split('\n');
   while (rows.length && rows.at(-1)?.trim() === '') rows.pop();
   return {
     text: rows.slice(-lines).join('\n'),
@@ -147,7 +148,7 @@ function canonicalizeGitRef(ref: unknown) {
 }
 
 function tailText(text: unknown, lines: number) {
-  const rows = String(text || '')
+  const rows = stringifyUnknown(text || '')
     .replace(/\r\n/g, '\n')
     .split('\n');
   if (rows.at(-1) === '') rows.pop();
@@ -155,7 +156,7 @@ function tailText(text: unknown, lines: number) {
 }
 
 function parseCheckSummary(text: unknown) {
-  const value = String(text || '');
+  const value = stringifyUnknown(text || '');
   const summary: CheckSummary = {
     tests: null,
     passed: null,
@@ -221,7 +222,7 @@ function parseCheckSummary(text: unknown) {
 
 function extractFailureLines(text: unknown, limit = 20) {
   const failures: string[] = [];
-  for (const raw of String(text || '')
+  for (const raw of stringifyUnknown(text || '')
     .replace(/\r\n/g, '\n')
     .split('\n')) {
     const line = raw.trim();
@@ -1044,7 +1045,7 @@ class TerminalMcpService {
         let item: RipgrepMessage;
         try {
           item = JSON.parse(line) as RipgrepMessage;
-        } catch (_) {
+        } catch {
           continue;
         }
         if (item.type !== 'match' || !item.data) continue;

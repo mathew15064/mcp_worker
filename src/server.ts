@@ -40,16 +40,16 @@ async function shutdown(signal: string): Promise<void> {
   console.log(`[SHUTDOWN] ${signal}`);
   try {
     workerBroker?.close();
-  } catch (_) {}
+  } catch {}
   try {
     sessionMiddleware.store?.close?.();
-  } catch (_) {}
+  } catch {}
   try {
     await databaseManager.close();
-  } catch (_) {}
+  } catch {}
   try {
     closeDb();
-  } catch (_) {}
+  } catch {}
   if (!server) return process.exit(0);
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 5000).unref();

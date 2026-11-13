@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,7 +12,7 @@ const enabled =
   Boolean(process.env.MYSQL_TEST_HOST) && process.env.BOT_REPORT_ISOLATED_WORKER_TEST === '1';
 
 async function mysqlAdmin(database: string) {
-  const mysql = require('mysql2/promise');
+  const mysql = await import('mysql2/promise');
   return mysql.createConnection({
     host: process.env.MYSQL_TEST_HOST,
     port: Number(process.env.MYSQL_TEST_PORT || 3306),
@@ -30,13 +31,16 @@ async function waitFor<T>(
   while (Date.now() - started < timeoutMs) {
     try {
       const value = await check();
-      if (value) return value as NonNullable<T>;
+      if (value) return value;
     } catch (error) {
       lastError = error;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  if (lastError) throw lastError;
+  if (lastError)
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(typeof lastError === 'string' ? lastError : 'Unknown worker integration failure');
   throw new Error('Timed out waiting for worker integration state.');
 }
 
@@ -45,10 +49,10 @@ function runCommand(command: string, args: string[], options: SpawnOptionsWithou
     const child = spawn(command, args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
-    child.stdout.on('data', (chunk) => {
+    child.stdout.on('data', (chunk: Buffer) => {
       stdout += chunk.toString('utf8');
     });
-    child.stderr.on('data', (chunk) => {
+    child.stderr.on('data', (chunk: Buffer) => {
       stderr += chunk.toString('utf8');
     });
     child.once('error', reject);
@@ -95,7 +99,7 @@ void test(
       LOGIN_RATE_LIMIT_MAX: '1000',
     });
 
-    const bootstrapStore = require('../src/db/bootstrapConfigStore');
+    const bootstrapStore = (await import('../src/db/bootstrapConfigStore.js')).default;
     bootstrapStore.save({
       host: process.env.MYSQL_TEST_HOST,
       port: Number(process.env.MYSQL_TEST_PORT || 3306),
@@ -104,8 +108,8 @@ void test(
       password: process.env.MYSQL_TEST_PASSWORD || '',
       ssl: false,
     });
-    const databaseManager = require('../src/db/databaseManager');
-    const runtimeSettings = require('../src/services/runtimeSettingsService');
+    const databaseManager = (await import('../src/db/databaseManager.js')).default;
+    const runtimeSettings = (await import('../src/services/runtimeSettingsService.js')).default;
     databaseManager.resetForTests();
     runtimeSettings.resetForTests();
     await databaseManager.initialize();
@@ -115,14 +119,14 @@ void test(
     await databaseManager.activatePrepared(preparedSource);
     assert.equal(databaseManager.status().state, 'READY');
 
-    const app = require('../src/app');
-    const workerRepo = require('../src/repositories/workerRepository');
-    const workerBroker = require('../src/services/workerConnectionBroker');
-    const terminalMcpService = require('../src/services/terminalMcpService');
+    const app = (await import('../src/app.js')).default;
+    const workerRepo = (await import('../src/repositories/workerRepository.js')).default;
+    const workerBroker = (await import('../src/services/workerConnectionBroker.js')).default;
+    const terminalMcpService = (await import('../src/services/terminalMcpService.js')).default;
     const server = http.createServer(app);
     workerBroker.attach(server);
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const baseUrl = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
+    const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
     const userHome = path.join(dir, 'worker-user');
     fs.mkdirSync(userHome, { recursive: true });
@@ -141,21 +145,21 @@ void test(
     t.after(async () => {
       try {
         spawnSync(cliPath, ['stop'], { cwd: workRoot, env: cliEnv, encoding: 'utf8' });
-      } catch (_) {}
+      } catch {}
       try {
         workerBroker.close();
-      } catch (_) {}
+      } catch {}
       try {
         await new Promise<void>((resolve) => server.close(() => resolve()));
-      } catch (_) {}
+      } catch {}
       try {
         await databaseManager.close();
-      } catch (_) {}
+      } catch {}
       try {
         const cleanup = await mysqlAdmin(rootDatabase);
         await cleanup.query(`DROP DATABASE IF EXISTS \`${database}\``);
         await cleanup.end();
-      } catch (_) {}
+      } catch {}
       fs.rmSync(dir, { recursive: true, force: true });
     });
 
@@ -280,8 +284,9 @@ void test(
     }
 
     const autoProfile = await workerRepo.findProfileByName('Live Worker Profile');
+    assert.ok(autoProfile);
     assert.equal(autoProfile.worker_id, worker.id);
-    assert.equal(autoProfile.tmux_session, '');
+    assert.equal('tmux_session' in autoProfile ? autoProfile.tmux_session : undefined, '');
 
     const exec = await terminalMcpService.workspaceExec('Live Worker Profile', 'printf worker-ok', {
       cwd: workRoot,
@@ -382,7 +387,7 @@ void test(
     );
 
     // Exercise the actual authenticated HTTP MCP transport against the live Worker.
-    const { issueToken, parseMcpResponse } = require('./helper');
+    const { issueToken, parseMcpResponse } = (await import('./helper.js')).default;
     const { token } = await issueToken();
     let requestId = 0;
     const called = new Set();
@@ -406,7 +411,7 @@ void test(
       assert.ok(!body.error, JSON.stringify(body.error));
       assert.ok(!body.result?.isError, JSON.stringify(body.result));
       if (!body.result) throw new Error('MCP response missing result');
-      return body.result as RpcResult;
+      return body.result;
     }
     const catalog = (await rpc('tools/list', {})).tools || [];
     assert.equal(catalog.length, 15);

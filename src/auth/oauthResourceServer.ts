@@ -113,7 +113,7 @@ class OAuthResourceServer {
 
     try {
       await this.repository().recordAccessTokenUsage(record.id);
-    } catch (_) {}
+    } catch {}
 
     const principal = new AuthenticatedPrincipal({
       principalId: record.principal_id,

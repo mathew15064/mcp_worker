@@ -28,9 +28,17 @@ void test('typed execution-profile discovery forwards the authenticated user own
   };
   const service = new terminalService.TerminalMcpService({
     profiles: {
-      async findAll({ ownerUserId = null } = {}) {
-        ownerValues.push(ownerUserId);
-        return [profile];
+      findAll({ ownerUserId = null } = {}) {
+        try {
+          return Promise.resolve(
+            (() => {
+              ownerValues.push(ownerUserId);
+              return [profile];
+            })(),
+          );
+        } catch (error) {
+          return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+        }
       },
     },
   });

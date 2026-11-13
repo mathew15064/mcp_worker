@@ -48,7 +48,7 @@ class SqliteSessionStore extends session.Store {
     try {
       const now = Date.now();
       this.db.prepare('DELETE FROM sessions WHERE expired < ?').run(now);
-    } catch (err) {
+    } catch {
       // ignore
     }
   }
@@ -68,8 +68,11 @@ class SqliteSessionStore extends session.Store {
         this.destroy(sid, () => {});
         return cb(null, null);
       }
-      const data = JSON.parse(row.sess);
-      const adminSession = data as SessionData;
+      const parsed: unknown = JSON.parse(row.sess);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+        throw new Error('Invalid session payload');
+      const data = parsed as SessionData;
+      const adminSession = data;
       if (isRailwayAdminSession(adminSession)) {
         const fingerprint = credentialFingerprint(this.db);
         if (!fingerprint || adminSession.adminCredentialFingerprint !== fingerprint) {

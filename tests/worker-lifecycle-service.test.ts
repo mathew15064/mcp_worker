@@ -14,21 +14,37 @@ type MockCall = {
 void test('worker decommission finalizes server state only after worker acknowledgement', async () => {
   const calls: MockCall[] = [];
   const repository = {
-    async deleteWorker(id: string, options?: { ownerUserId?: string }) {
-      calls.push({ type: 'delete', id, options });
-      return true;
+    deleteWorker(id: string, options?: { ownerUserId?: string }) {
+      try {
+        return Promise.resolve(
+          (() => {
+            calls.push({ type: 'delete', id, options });
+            return true;
+          })(),
+        );
+      } catch (error) {
+        return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+      }
     },
   };
   const broker = {
     isOnline: () => true,
-    async dispatchControl(
+    dispatchControl(
       id: string,
       operation: string,
       payload: { confirm?: string },
       options: { timeoutMs?: number },
     ) {
-      calls.push({ type: 'dispatch', id, operation, payload, options });
-      return { code: 'UNINSTALLED' };
+      try {
+        return Promise.resolve(
+          (() => {
+            calls.push({ type: 'dispatch', id, operation, payload, options });
+            return { code: 'UNINSTALLED' };
+          })(),
+        );
+      } catch (error) {
+        return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+      }
     },
     disconnect(id: string, options?: { reason?: string }) {
       calls.push({ type: 'disconnect', id, options });
@@ -36,8 +52,16 @@ void test('worker decommission finalizes server state only after worker acknowle
     },
   };
   const audit = {
-    async log(entry: { eventType: string }) {
-      calls.push({ type: 'audit', entry });
+    log(entry: { eventType: string }) {
+      try {
+        return Promise.resolve(
+          (() => {
+            calls.push({ type: 'audit', entry });
+          })(),
+        );
+      } catch (error) {
+        return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+      }
     },
   };
   const service = new WorkerLifecycleService({
@@ -75,9 +99,17 @@ void test('worker decommission finalizes server state only after worker acknowle
 void test('force remove deletes server state without remote uninstall acknowledgement', async () => {
   const calls: MockCall[] = [];
   const repository = {
-    async deleteWorker(id: string, options?: { ownerUserId?: string }) {
-      calls.push({ type: 'delete', id, options });
-      return true;
+    deleteWorker(id: string, options?: { ownerUserId?: string }) {
+      try {
+        return Promise.resolve(
+          (() => {
+            calls.push({ type: 'delete', id, options });
+            return true;
+          })(),
+        );
+      } catch (error) {
+        return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+      }
     },
   };
   const broker = {
@@ -87,8 +119,16 @@ void test('force remove deletes server state without remote uninstall acknowledg
     },
   };
   const audit = {
-    async log(entry: { eventType: string }) {
-      calls.push({ type: 'audit', entry });
+    log(entry: { eventType: string }) {
+      try {
+        return Promise.resolve(
+          (() => {
+            calls.push({ type: 'audit', entry });
+          })(),
+        );
+      } catch (error) {
+        return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+      }
     },
   };
   const service = new WorkerLifecycleService({
@@ -115,9 +155,17 @@ void test('force remove deletes server state without remote uninstall acknowledg
 void test('worker decommission preserves server state when worker is offline or does not acknowledge', async () => {
   let deleted = false;
   const repository = {
-    async deleteWorker() {
-      deleted = true;
-      return true;
+    deleteWorker() {
+      try {
+        return Promise.resolve(
+          (() => {
+            deleted = true;
+            return true;
+          })(),
+        );
+      } catch (error) {
+        return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+      }
     },
   };
   const audit = { async log() {} };
@@ -138,8 +186,16 @@ void test('worker decommission preserves server state when worker is offline or 
     repository,
     broker: {
       isOnline: () => true,
-      async dispatchControl() {
-        return { code: 'NOT_COMPLETE' };
+      dispatchControl() {
+        try {
+          return Promise.resolve(
+            (() => {
+              return { code: 'NOT_COMPLETE' };
+            })(),
+          );
+        } catch (error) {
+          return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
+        }
       },
       disconnect() {},
     },

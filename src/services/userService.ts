@@ -1,3 +1,4 @@
+import { stringifyUnknown } from '../utils/stringifyUnknown';
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import userRepository from '../repositories/userRepository';
@@ -27,7 +28,7 @@ function validationError(code: string, message: string) {
 }
 
 function normalizeEmail(value: unknown) {
-  const email = String(value || '')
+  const email = stringifyUnknown(value || '')
     .trim()
     .toLowerCase();
   if (!email) return null;
@@ -38,7 +39,7 @@ function normalizeEmail(value: unknown) {
 }
 
 function normalizeDisplayName(value: unknown, fallback: unknown) {
-  const displayName = String(value || fallback || '').trim();
+  const displayName = stringifyUnknown(value || fallback || '').trim();
   if (!displayName || displayName.length > 120)
     throw validationError(
       'INVALID_DISPLAY_NAME',
@@ -48,7 +49,7 @@ function normalizeDisplayName(value: unknown, fallback: unknown) {
 }
 
 function validatePassword(password: unknown) {
-  const value = String(password || '');
+  const value = stringifyUnknown(password || '');
   if (value.length < 10 || value.length > 256)
     throw validationError('INVALID_PASSWORD', 'Password must be between 10 and 256 characters.');
   return value;
@@ -57,6 +58,7 @@ function validatePassword(password: unknown) {
 function publicUser(user: User | null) {
   if (!user) return null;
   const { password_hash, ...safe } = user;
+  void password_hash;
   return safe;
 }
 

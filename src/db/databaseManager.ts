@@ -62,7 +62,7 @@ class DatabaseManager {
     try {
       const stat = fs.statSync(config.DATABASE_PATH);
       return stat.isFile() && stat.size > 0;
-    } catch (_) {
+    } catch {
       return false;
     }
   }
@@ -96,13 +96,13 @@ class DatabaseManager {
       this.state = STATES.CONFIGURED;
       try {
         await candidate.adapter.close();
-      } catch (_) {}
+      } catch {}
     }
 
     if (previous?.kind === 'mysql' && previous !== this.adapter && previous !== candidate.adapter) {
       try {
         await previous.close();
-      } catch (_) {}
+      } catch {}
     }
     return this.status();
   }
@@ -382,7 +382,7 @@ class DatabaseManager {
     if (previous?.kind === 'mysql' && previous !== this.adapter) {
       try {
         await previous.close();
-      } catch (_) {}
+      } catch {}
     }
     return this.status();
   }
@@ -392,7 +392,7 @@ class DatabaseManager {
       if (this.adapter?.kind === 'mysql')
         try {
           await this.adapter.close();
-        } catch (_) {}
+        } catch {}
       this.adapter = null;
       this.mysqlInfo = null;
       this.sourceInfo = null;
@@ -414,7 +414,7 @@ class DatabaseManager {
       if (this.adapter?.kind === 'mysql')
         try {
           await this.adapter.close();
-        } catch (_) {}
+        } catch {}
       this.adapter = null;
       this.mysqlInfo = null;
       this.sourceInfo = null;

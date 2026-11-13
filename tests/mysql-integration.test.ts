@@ -58,7 +58,7 @@ void test(
     t.after(async () => {
       try {
         await new MigrationRunner(adapter).fresh({ allowDestructive: true });
-      } catch (_) {}
+      } catch {}
       await adapter.close();
     });
 

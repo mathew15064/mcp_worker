@@ -19,7 +19,6 @@ interface UserRow extends UserInput {
   last_login_at: string | null;
 }
 import type { DatabaseAdapter } from '../db/contracts';
-import type Database from 'better-sqlite3';
 import databaseManager from '../db/databaseManager';
 
 class UserRepository {

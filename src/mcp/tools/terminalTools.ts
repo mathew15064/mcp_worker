@@ -35,6 +35,7 @@ export const listTerminals = defineTool({
   requiredScope: 'bot_report.terminal',
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
   async handler(args = {}, service = checkedTerminalService) {
+    void args;
     const principal = terminalPrincipal();
     return textResult({ terminals: await service.list({ actorId: principal.actor_id }) });
   },

@@ -64,7 +64,7 @@ async function recordSafeAudit({
       requestTruncated: Boolean(requestCapture?.truncated),
       responseTruncated: Boolean(responsePayload.truncated),
     });
-  } catch (_) {
+  } catch {
     // Non-blocking: audit failure must not crash active transport.
   }
 }
@@ -127,7 +127,7 @@ export function createMcpRouter({
         },
         { requestId, clientId: req.principal?.client_id },
       );
-    } catch (err) {
+    } catch {
       if (!res.headersSent) {
         res.status(500).json({
           error: 'Internal Server Error',
@@ -138,7 +138,7 @@ export function createMcpRouter({
         // Do not attempt a second response after the transport has started.
         try {
           res.end();
-        } catch (_) {}
+        } catch {}
       }
     }
   });
@@ -176,7 +176,7 @@ export function createMcpRouter({
         },
         { requestId, clientId: req.principal?.client_id },
       );
-    } catch (err) {
+    } catch {
       if (!res.headersSent) {
         res.status(500).json({
           error: 'Internal Server Error',
@@ -186,7 +186,7 @@ export function createMcpRouter({
       } else {
         try {
           res.end();
-        } catch (_) {}
+        } catch {}
       }
     }
   });

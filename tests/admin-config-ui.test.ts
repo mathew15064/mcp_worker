@@ -1,3 +1,4 @@
+import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -50,7 +51,7 @@ test.before(async () => {
   const app = (await import('../src/app.js')).default;
   server = http.createServer(app);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  baseUrl = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
+  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   await login();
   const workerRepo = (await import('../src/repositories/workerRepository.js')).default;
   const workerBroker = (await import('../src/services/workerConnectionBroker.js')).default;
@@ -208,7 +209,11 @@ void test('Audit Log traces MCP activity by client, tool, result, and request id
     headers: { cookie },
   });
   assert.equal(detailResponse.status, 200);
-  const detail = await detailResponse.json();
+  const detail = (await detailResponse.json()) as {
+    tool_name: string;
+    request_payload: string;
+    response_payload: string;
+  };
   assert.equal(detail.tool_name, 'runtime_info');
   assert.match(detail.request_payload, /tools\/call/);
   assert.match(detail.response_payload, /runtime ok/);
