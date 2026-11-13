@@ -14,7 +14,8 @@ interface LifecycleOptions {
   ownerUserId?: string | null;
 }
 type Repository = Pick<typeof workerRepository, 'deleteWorker'>;
-type Broker = Pick<typeof workerBroker, 'isOnline' | 'dispatchControl' | 'disconnect'>;
+type Broker = Pick<typeof workerBroker, 'isOnline' | 'dispatchControl' | 'disconnect'> &
+  Partial<Pick<typeof workerBroker, 'isOnlineDistributed'>>;
 type Audit = Pick<typeof terminalAuditRepository, 'log'>;
 type AuditEntry = Parameters<Audit['log']>[0];
 
@@ -57,7 +58,9 @@ class WorkerLifecycleService {
     });
 
     try {
-      if (!this.broker.isOnline(worker.id))
+      if (
+        !(await (this.broker.isOnlineDistributed?.(worker.id) ?? this.broker.isOnline(worker.id)))
+      )
         throw lifecycleError(
           'WORKER_OFFLINE',
           'Worker must be online before it can be removed remotely.',

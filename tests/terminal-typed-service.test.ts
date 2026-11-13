@@ -32,9 +32,6 @@ void test('typed execution-profile discovery forwards the authenticated user own
         ownerValues.push(ownerUserId);
         return [profile];
       },
-      async findWithCredentialById() {
-        return null;
-      },
     },
   });
   assert.deepEqual(await service.list({ actorId: 'principal:user:sample' }), [

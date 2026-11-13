@@ -2,7 +2,7 @@
   "name": "mcp_worker",
   "version": "2.0.0",
   "private": true,
-  "description": "Deterministic MCP coding execution harness with outbound worker and SSH compatibility transports",
+  "description": "Deterministic MCP coding execution harness with outbound Worker-only execution",
   "main": "dist/src/server.js",
   "scripts": {
     "start": "node dist/src/server.js",
@@ -11,7 +11,6 @@
     "test:e2e": "npm run build && playwright test --config dist/playwright.config.js",
     "backup-db": "node dist/scripts/backup-db.js",
     "rotate-admin-password": "node dist/scripts/rotate-admin-password.js",
-    "terminal-profile": "node dist/scripts/terminal-profile.js",
     "mcp-client": "node dist/scripts/mcp-client.js",
     "worker": "npm run build && node dist/worker/agent.js",
     "migrate": "node dist/scripts/migrate.js migrate",
@@ -32,15 +31,12 @@
   "keywords": [
     "mcp",
     "worker",
-    "ssh",
     "coding-harness",
     "mysql"
   ],
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
-    "@xterm/addon-fit": "0.10.0",
-    "@xterm/xterm": "5.5.0",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.6.2",
     "dotenv": "^17.3.1",
@@ -48,7 +44,6 @@
     "express-rate-limit": "^8.3.0",
     "express-session": "^1.19.0",
     "mysql2": "^3.24.6",
-    "ssh2": "1.16.0",
     "ws": "8.21.0",
     "zod": "^4.6.7"
   },
@@ -59,11 +54,13 @@
     "@types/express-session": "1.19.0",
     "@types/mime-types": "2.1.4",
     "@types/node": "26.6.6",
-    "@types/ssh2": "1.15.5",
     "@types/ws": "8.18.2",
     "eslint": "10.14.0",
     "prettier": "3.9.10",
     "typescript": "5.9.3",
     "typescript-eslint": "8.72.2"
+  },
+  "engines": {
+    "node": "22.x"
   }
 }

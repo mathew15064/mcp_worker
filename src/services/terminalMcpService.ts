@@ -3,16 +3,8 @@ import type { ExecutionProfile, ExecutionTransport } from './executionContracts'
 import { errorFields } from './workerProtocol';
 import executionProfileRepository from '../repositories/executionProfileRepository';
 import terminalAuditRepository from '../repositories/terminalAuditRepository';
-interface Credentials {
-  decrypt(envelope: string | null | undefined): string;
-}
-const terminalCredentialService: Credentials = require('./terminalCredentialService');
-const terminalSshService: ExecutionTransport = require('./terminalSshService');
 import workerExecutionService from './workerExecutionService';
-type ProfileRepository = Pick<
-  typeof executionProfileRepository,
-  'findAll' | 'findWithCredentialById'
->;
+type ProfileRepository = Pick<typeof executionProfileRepository, 'findAll'>;
 type AuditRepository = Pick<typeof terminalAuditRepository, 'log'>;
 interface ActorOptions {
   actorId?: string | null;
@@ -79,8 +71,6 @@ interface LogsOptions extends ActorOptions {
 interface TerminalOptions {
   profiles?: ProfileRepository;
   audit?: AuditRepository;
-  credentials?: Credentials;
-  ssh?: ExecutionTransport;
   worker?: ExecutionTransport;
 }
 interface CheckSummary {
@@ -269,20 +259,14 @@ function canonicalizeArtifactPath(artifactPath: unknown) {
 class TerminalMcpService {
   profiles: ProfileRepository;
   audit: AuditRepository;
-  credentials: Credentials;
-  ssh: ExecutionTransport;
   worker: ExecutionTransport;
   constructor({
     profiles = executionProfileRepository,
     audit = terminalAuditRepository,
-    credentials = terminalCredentialService,
-    ssh = terminalSshService,
     worker = workerExecutionService,
   }: TerminalOptions = {}) {
     this.profiles = profiles;
     this.audit = audit;
-    this.credentials = credentials;
-    this.ssh = ssh;
     this.worker = worker;
   }
 
@@ -317,20 +301,18 @@ class TerminalMcpService {
     const profile = matches[0];
     if (!profile.enabled)
       throw terminalServiceError('PROFILE_DISABLED', 'This Execution Profile is disabled.');
-    if (profile.transport === 'worker') return profile;
-    const privateProfile = await this.profiles.findWithCredentialById(profile.id);
-    if (!privateProfile)
-      throw terminalServiceError('PROFILE_NOT_FOUND', 'Execution Profile not found.');
-    return { ...privateProfile, transport: 'ssh' };
-  }
-
-  passwordFor(profile: ExecutionProfile) {
-    if (profile.transport === 'worker') return null;
-    return this.credentials.decrypt(profile.credential_envelope);
+    if (profile.transport !== 'worker' || !profile.worker_id)
+      throw terminalServiceError(
+        'WORKER_ONLY',
+        'Only enrolled Worker execution targets are supported.',
+      );
+    return profile;
   }
 
   executorFor(profile: ExecutionProfile): ExecutionTransport {
-    return profile.transport === 'worker' ? this.worker : this.ssh;
+    if (profile.transport !== 'worker' || !profile.worker_id)
+      throw terminalServiceError('WORKER_ONLY', 'Direct SSH execution is disabled.');
+    return this.worker;
   }
 
   log(
@@ -355,10 +337,7 @@ class TerminalMcpService {
   async status(name: string, { actorId = null }: ActorOptions = {}) {
     const profile = await this.findProfile(name, { actorId });
     try {
-      const inspection = await this.executorFor(profile).inspectProfile(
-        profile,
-        this.passwordFor(profile),
-      );
+      const inspection = await this.executorFor(profile).inspectProfile(profile, null);
       const status = inspection.pane_count === 1 ? 'READY' : 'ATTENTION_REQUIRED';
       this.log(profile, actorId, 'MCP_STATUS_CHECK', 'SUCCESS', status);
       return {
@@ -375,7 +354,7 @@ class TerminalMcpService {
         actorId,
         'MCP_STATUS_CHECK',
         'FAILED',
-        errorFields(error).code || 'SSH_CONNECT_FAILED',
+        errorFields(error).code || 'WORKER_EXECUTION_FAILED',
       );
       throw error;
     }
@@ -388,12 +367,7 @@ class TerminalMcpService {
   ) {
     const profile = await this.findProfile(name, { actorId });
     try {
-      const result = await this.executorFor(profile).sendText(
-        profile,
-        this.passwordFor(profile),
-        text,
-        { submit },
-      );
+      const result = await this.executorFor(profile).sendText(profile, null, text, { submit });
       this.log(profile, actorId, 'MCP_INPUT_SENT', 'SUCCESS', submit ? 'SUBMITTED' : 'PASTED');
       return {
         profile: profile.name,
@@ -407,7 +381,7 @@ class TerminalMcpService {
         actorId,
         'MCP_INPUT_SENT',
         'FAILED',
-        errorFields(error).code || 'SSH_CONNECT_FAILED',
+        errorFields(error).code || 'WORKER_EXECUTION_FAILED',
       );
       throw error;
     }
@@ -419,11 +393,7 @@ class TerminalMcpService {
       // captureText already reads the full tmux history before slicing. Asking for
       // the internal maximum lets us remove blank viewport rows first, then honor
       // the MCP caller's requested line count.
-      const result = await this.executorFor(profile).readText(
-        profile,
-        this.passwordFor(profile),
-        10000,
-      );
+      const result = await this.executorFor(profile).readText(profile, null, 10000);
       const normalized = normalizeCapturedText(result.text, lines);
       this.log(profile, actorId, 'MCP_OUTPUT_READ', 'SUCCESS');
       return {
@@ -437,7 +407,7 @@ class TerminalMcpService {
         actorId,
         'MCP_OUTPUT_READ',
         'FAILED',
-        errorFields(error).code || 'SSH_CONNECT_FAILED',
+        errorFields(error).code || 'WORKER_EXECUTION_FAILED',
       );
       throw error;
     }
@@ -460,15 +430,10 @@ class TerminalMcpService {
         throw terminalServiceError('INVALID_COMMAND', 'Command contains null bytes.');
       }
       const resolvedCwd = canonicalizeWorkspaceCwd(cwd);
-      const result = await this.executorFor(profile).execWorkspaceCommand(
-        profile,
-        this.passwordFor(profile),
-        command,
-        {
-          cwd: resolvedCwd,
-          timeoutMs,
-        },
-      );
+      const result = await this.executorFor(profile).execWorkspaceCommand(profile, null, command, {
+        cwd: resolvedCwd,
+        timeoutMs,
+      });
       const detailCode = result.exit_code === 0 ? 'EXEC_OK' : `EXEC_EXIT_${result.exit_code}`;
       this.log(profile, actorId, 'MCP_WORKSPACE_EXEC', 'SUCCESS', detailCode);
       return {
@@ -487,7 +452,7 @@ class TerminalMcpService {
         actorId,
         'MCP_WORKSPACE_EXEC',
         'FAILED',
-        errorFields(error).code || 'SSH_CONNECT_FAILED',
+        errorFields(error).code || 'WORKER_EXECUTION_FAILED',
       );
       throw error;
     }
@@ -508,12 +473,10 @@ class TerminalMcpService {
     try {
       const resolvedPath = canonicalizeArtifactPath(filePath);
       const resolvedRunAs = canonicalizeRunAs(runAs);
-      const result = await this.executorFor(profile).collectArtifact(
-        profile,
-        this.passwordFor(profile),
-        resolvedPath,
-        { maxBytes, runAs: resolvedRunAs },
-      );
+      const result = await this.executorFor(profile).collectArtifact(profile, null, resolvedPath, {
+        maxBytes,
+        runAs: resolvedRunAs,
+      });
       if (!result.is_text)
         throw terminalServiceError(
           'BINARY_FILE_UNSUPPORTED',
@@ -546,7 +509,7 @@ class TerminalMcpService {
         actorId,
         'MCP_FILE_READ',
         'FAILED',
-        errorFields(error).code || 'SSH_CONNECT_FAILED',
+        errorFields(error).code || 'WORKER_EXECUTION_FAILED',
       );
       throw error;
     }
@@ -575,7 +538,7 @@ class TerminalMcpService {
           );
         const current = await this.executorFor(profile).collectArtifact(
           profile,
-          this.passwordFor(profile),
+          null,
           resolvedPath,
           { maxBytes: 2 * 1024 * 1024, runAs: resolvedRunAs },
         );
@@ -586,19 +549,14 @@ class TerminalMcpService {
           );
         }
       }
-      await this.executorFor(profile).writeTextFile(
-        profile,
-        this.passwordFor(profile),
-        resolvedPath,
-        content,
-        { createDirs, runAs: resolvedRunAs },
-      );
-      const written = await this.executorFor(profile).collectArtifact(
-        profile,
-        this.passwordFor(profile),
-        resolvedPath,
-        { maxBytes: 2 * 1024 * 1024, runAs: resolvedRunAs },
-      );
+      await this.executorFor(profile).writeTextFile(profile, null, resolvedPath, content, {
+        createDirs,
+        runAs: resolvedRunAs,
+      });
+      const written = await this.executorFor(profile).collectArtifact(profile, null, resolvedPath, {
+        maxBytes: 2 * 1024 * 1024,
+        runAs: resolvedRunAs,
+      });
       this.log(profile, actorId, 'MCP_FILE_WRITE', 'SUCCESS', 'FILE_WRITTEN');
       return {
         profile: profile.name,
@@ -614,7 +572,7 @@ class TerminalMcpService {
         actorId,
         'MCP_FILE_WRITE',
         'FAILED',
-        errorFields(error).code || 'SSH_CONNECT_FAILED',
+        errorFields(error).code || 'WORKER_EXECUTION_FAILED',
       );
       throw error;
     }
@@ -647,12 +605,10 @@ class TerminalMcpService {
           'expected_count must be an integer from 1 to 1000.',
         );
       }
-      const current = await this.executorFor(profile).collectArtifact(
-        profile,
-        this.passwordFor(profile),
-        resolvedPath,
-        { maxBytes, runAs: resolvedRunAs },
-      );
+      const current = await this.executorFor(profile).collectArtifact(profile, null, resolvedPath, {
+        maxBytes,
+        runAs: resolvedRunAs,
+      });
       if (expectedSha256) {
         if (!/^[a-f0-9]{64}$/i.test(expectedSha256))
           throw terminalServiceError(
@@ -682,19 +638,13 @@ class TerminalMcpService {
       const updated = source.split(oldText).join(newText);
       if (Buffer.byteLength(updated, 'utf8') > maxBytes)
         throw terminalServiceError('FILE_TOO_LARGE', 'Patched file exceeds max_bytes.');
-      await this.executorFor(profile).writeTextFile(
-        profile,
-        this.passwordFor(profile),
-        resolvedPath,
-        updated,
-        { runAs: resolvedRunAs },
-      );
-      const written = await this.executorFor(profile).collectArtifact(
-        profile,
-        this.passwordFor(profile),
-        resolvedPath,
-        { maxBytes, runAs: resolvedRunAs },
-      );
+      await this.executorFor(profile).writeTextFile(profile, null, resolvedPath, updated, {
+        runAs: resolvedRunAs,
+      });
+      const written = await this.executorFor(profile).collectArtifact(profile, null, resolvedPath, {
+        maxBytes,
+        runAs: resolvedRunAs,
+      });
       this.log(profile, actorId, 'MCP_FILE_PATCH', 'SUCCESS', `PATCHED_${actualCount}`);
       return {
         profile: profile.name,
@@ -710,7 +660,7 @@ class TerminalMcpService {
         actorId,
         'MCP_FILE_PATCH',
         'FAILED',
-        errorFields(error).code || 'SSH_CONNECT_FAILED',
+        errorFields(error).code || 'WORKER_EXECUTION_FAILED',
       );
       throw error;
     }
@@ -736,12 +686,10 @@ class TerminalMcpService {
       }
       const resolvedCwd = canonicalizeWorkspaceCwd(cwd);
       const resolvedRunAs = canonicalizeRunAs(runAs);
-      const result = await this.executorFor(profile).startManagedProcess(
-        profile,
-        this.passwordFor(profile),
-        command,
-        { cwd: resolvedCwd, runAs: resolvedRunAs },
-      );
+      const result = await this.executorFor(profile).startManagedProcess(profile, null, command, {
+        cwd: resolvedCwd,
+        runAs: resolvedRunAs,
+      });
       this.log(profile, actorId, 'MCP_PROCESS_START', 'SUCCESS', result.process_id);
       return { profile: profile.name, cwd: resolvedCwd, ...result };
     } catch (error) {
@@ -750,7 +698,7 @@ class TerminalMcpService {
         actorId,
         'MCP_PROCESS_START',
         'FAILED',
-        errorFields(error).code || 'SSH_CONNECT_FAILED',
+        errorFields(error).code || 'WORKER_EXECUTION_FAILED',
       );
       throw error;
     }
@@ -765,7 +713,7 @@ class TerminalMcpService {
     try {
       const result = await this.executorFor(profile).getManagedProcessStatus(
         profile,
-        this.passwordFor(profile),
+        null,
         processId,
         { lines },
       );
@@ -777,7 +725,7 @@ class TerminalMcpService {
         actorId,
         'MCP_PROCESS_STATUS',
         'FAILED',
-        errorFields(error).code || 'SSH_CONNECT_FAILED',
+        errorFields(error).code || 'WORKER_EXECUTION_FAILED',
       );
       throw error;
     }
@@ -790,12 +738,11 @@ class TerminalMcpService {
   ) {
     const profile = await this.findProfile(name, { actorId });
     try {
-      const result = await this.executorFor(profile).stopManagedProcess(
-        profile,
-        this.passwordFor(profile),
-        processId,
-        { force, graceMs, lines },
-      );
+      const result = await this.executorFor(profile).stopManagedProcess(profile, null, processId, {
+        force,
+        graceMs,
+        lines,
+      });
       this.log(
         profile,
         actorId,
@@ -810,7 +757,7 @@ class TerminalMcpService {
         actorId,
         'MCP_PROCESS_STOP',
         'FAILED',
-        errorFields(error).code || 'SSH_CONNECT_FAILED',
+        errorFields(error).code || 'WORKER_EXECUTION_FAILED',
       );
       throw error;
     }
@@ -841,17 +788,12 @@ class TerminalMcpService {
         baseScript +
         `printf '__BR_STATUS__\\n'\n` +
         `git -c core.quotepath=false status --porcelain=v1 --untracked-files=normal\n`;
-      const result = await this.executorFor(profile).execWorkspaceCommand(
-        profile,
-        this.passwordFor(profile),
-        script,
-        {
-          cwd: resolvedRepo,
-          runAs: resolvedRunAs,
-          timeoutMs: 30000,
-          maxOutputBytes: 512 * 1024,
-        },
-      );
+      const result = await this.executorFor(profile).execWorkspaceCommand(profile, null, script, {
+        cwd: resolvedRepo,
+        runAs: resolvedRunAs,
+        timeoutMs: 30000,
+        maxOutputBytes: 512 * 1024,
+      });
       if (result.exit_code === 41)
         throw terminalServiceError('NOT_A_GIT_REPOSITORY', 'repo is not a Git repository.');
       if (result.exit_code === 42)
@@ -906,7 +848,7 @@ class TerminalMcpService {
         actorId,
         'MCP_REPO_SNAPSHOT',
         'FAILED',
-        errorFields(error).code || 'SSH_CONNECT_FAILED',
+        errorFields(error).code || 'WORKER_EXECUTION_FAILED',
       );
       throw error;
     }
@@ -954,7 +896,7 @@ class TerminalMcpService {
         `git -c core.quotepath=false diff --numstat --find-renames${suffix}\n`;
       const metaResult = await this.executorFor(profile).execWorkspaceCommand(
         profile,
-        this.passwordFor(profile),
+        null,
         metaCommand,
         {
           cwd: resolvedRepo,
@@ -975,7 +917,7 @@ class TerminalMcpService {
 
       const diffResult = await this.executorFor(profile).execWorkspaceCommand(
         profile,
-        this.passwordFor(profile),
+        null,
         `git -c color.ui=false diff --no-ext-diff --find-renames --unified=${context}${suffix}`,
         {
           cwd: resolvedRepo,
@@ -1033,7 +975,7 @@ class TerminalMcpService {
         actorId,
         'MCP_GIT_DIFF',
         'FAILED',
-        errorFields(error).code || 'SSH_CONNECT_FAILED',
+        errorFields(error).code || 'WORKER_EXECUTION_FAILED',
       );
       throw error;
     }
@@ -1076,17 +1018,12 @@ class TerminalMcpService {
     if (glob) flags.push('--glob', glob);
     const command = `rg ${flags.map(shellQuote).join(' ')} -- ${shellQuote(query)} .`;
     try {
-      const result = await this.executorFor(profile).execWorkspaceCommand(
-        profile,
-        this.passwordFor(profile),
-        command,
-        {
-          cwd: resolvedCwd,
-          runAs: resolvedRunAs,
-          timeoutMs: 30000,
-          maxOutputBytes: 2 * 1024 * 1024,
-        },
-      );
+      const result = await this.executorFor(profile).execWorkspaceCommand(profile, null, command, {
+        cwd: resolvedCwd,
+        runAs: resolvedRunAs,
+        timeoutMs: 30000,
+        maxOutputBytes: 2 * 1024 * 1024,
+      });
       if (![0, 1].includes(result.exit_code)) {
         if (result.exit_code === 127 || /rg: not found|ripgrep.*not found/i.test(result.stderr)) {
           throw terminalServiceError(
@@ -1139,7 +1076,7 @@ class TerminalMcpService {
         actorId,
         'MCP_CODE_SEARCH',
         'FAILED',
-        errorFields(error).code || 'SSH_CONNECT_FAILED',
+        errorFields(error).code || 'WORKER_EXECUTION_FAILED',
       );
       throw error;
     }
@@ -1171,17 +1108,12 @@ class TerminalMcpService {
       );
     }
     try {
-      const result = await this.executorFor(profile).execWorkspaceCommand(
-        profile,
-        this.passwordFor(profile),
-        command,
-        {
-          cwd: resolvedCwd,
-          runAs: resolvedRunAs,
-          timeoutMs,
-          maxOutputBytes: 2 * 1024 * 1024,
-        },
-      );
+      const result = await this.executorFor(profile).execWorkspaceCommand(profile, null, command, {
+        cwd: resolvedCwd,
+        runAs: resolvedRunAs,
+        timeoutMs,
+        maxOutputBytes: 2 * 1024 * 1024,
+      });
       const combined = `${result.stdout}\n${result.stderr}`;
       const summary = parseCheckSummary(combined);
       const failures = extractFailureLines(combined);
@@ -1206,7 +1138,7 @@ class TerminalMcpService {
         actorId,
         'MCP_CHECK_RUN',
         'FAILED',
-        errorFields(error).code || 'SSH_CONNECT_FAILED',
+        errorFields(error).code || 'WORKER_EXECUTION_FAILED',
       );
       throw error;
     }
@@ -1221,7 +1153,7 @@ class TerminalMcpService {
     try {
       const result = await this.executorFor(profile).readManagedProcessLogs(
         profile,
-        this.passwordFor(profile),
+        null,
         processId,
         { cursor, maxBytes },
       );
@@ -1233,7 +1165,7 @@ class TerminalMcpService {
         actorId,
         'MCP_PROCESS_LOGS',
         'FAILED',
-        errorFields(error).code || 'SSH_CONNECT_FAILED',
+        errorFields(error).code || 'WORKER_EXECUTION_FAILED',
       );
       throw error;
     }
@@ -1242,10 +1174,7 @@ class TerminalMcpService {
   async interrupt(name: string, { actorId = null }: ActorOptions = {}) {
     const profile = await this.findProfile(name, { actorId });
     try {
-      const result = await this.executorFor(profile).sendInterrupt(
-        profile,
-        this.passwordFor(profile),
-      );
+      const result = await this.executorFor(profile).sendInterrupt(profile, null);
       this.log(profile, actorId, 'MCP_TERMINAL_INTERRUPT', 'SUCCESS', 'INTERRUPT_SENT');
       return {
         profile: profile.name,
@@ -1259,7 +1188,7 @@ class TerminalMcpService {
         actorId,
         'MCP_TERMINAL_INTERRUPT',
         'FAILED',
-        errorFields(error).code || 'SSH_CONNECT_FAILED',
+        errorFields(error).code || 'WORKER_EXECUTION_FAILED',
       );
       throw error;
     }
@@ -1273,14 +1202,9 @@ class TerminalMcpService {
     const profile = await this.findProfile(name, { actorId });
     try {
       const resolvedPath = canonicalizeArtifactPath(artifactPath);
-      const result = await this.executorFor(profile).collectArtifact(
-        profile,
-        this.passwordFor(profile),
-        resolvedPath,
-        {
-          maxBytes,
-        },
-      );
+      const result = await this.executorFor(profile).collectArtifact(profile, null, resolvedPath, {
+        maxBytes,
+      });
       this.log(profile, actorId, 'MCP_ARTIFACT_COLLECT', 'SUCCESS', 'ARTIFACT_COLLECTED');
       return {
         profile: profile.name,
@@ -1292,7 +1216,7 @@ class TerminalMcpService {
         actorId,
         'MCP_ARTIFACT_COLLECT',
         'FAILED',
-        errorFields(error).code || 'SSH_CONNECT_FAILED',
+        errorFields(error).code || 'WORKER_EXECUTION_FAILED',
       );
       throw error;
     }

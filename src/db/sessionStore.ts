@@ -1,9 +1,23 @@
 import session from 'express-session';
+import crypto from 'node:crypto';
 import type { SessionData } from 'express-session';
 type Callback = (err?: unknown) => void;
 type GetCallback = (err: unknown, data?: SessionData | null) => void;
 import { getDb } from './connection';
 import type Database from 'better-sqlite3';
+
+function isRailwayAdminSession(data: SessionData) {
+  return (
+    process.env.MCP_PLATFORM === 'railway' && data.userId === 'env-admin' && data.role === 'admin'
+  );
+}
+
+function credentialFingerprint(db: Database.Database) {
+  const row = db
+    .prepare<[string], { value: string }>('SELECT value FROM system_settings WHERE key = ?')
+    .get('bootstrap.admin_password_hash');
+  return row?.value ? crypto.createHash('sha256').update(row.value).digest('hex') : null;
+}
 
 class SqliteSessionStore extends session.Store {
   private _customDb: Database.Database | null;
@@ -24,6 +38,10 @@ class SqliteSessionStore extends session.Store {
 
   get db() {
     return this._customDb || getDb();
+  }
+
+  close() {
+    clearInterval(this.cleanupInterval);
   }
 
   clearExpired() {
@@ -51,6 +69,13 @@ class SqliteSessionStore extends session.Store {
         return cb(null, null);
       }
       const data = JSON.parse(row.sess);
+      const adminSession = data as SessionData;
+      if (isRailwayAdminSession(adminSession)) {
+        const fingerprint = credentialFingerprint(this.db);
+        if (!fingerprint || adminSession.adminCredentialFingerprint !== fingerprint) {
+          return this.destroy(sid, (error) => cb(error || null, null));
+        }
+      }
       return cb(null, data);
     } catch (err) {
       return cb(err);
@@ -64,6 +89,16 @@ class SqliteSessionStore extends session.Store {
         maxAge = sess.cookie.maxAge;
       }
       const expired = Date.now() + maxAge;
+      if (isRailwayAdminSession(sess)) {
+        const fingerprint = credentialFingerprint(this.db);
+        if (
+          !fingerprint ||
+          (sess.adminCredentialFingerprint && sess.adminCredentialFingerprint !== fingerprint)
+        ) {
+          throw new Error('Admin credentials changed; session must be renewed.');
+        }
+        sess.adminCredentialFingerprint = fingerprint;
+      }
       const sessStr = JSON.stringify(sess);
 
       this.db

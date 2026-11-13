@@ -86,9 +86,38 @@ void test('root redirects to authenticated admin console with configuration navi
   assert.match(html, /Settings/);
   assert.match(html, /OAuth Clients/);
   assert.match(html, /Audit Log/);
-  assert.match(html, /SSH Profiles/);
+  assert.match(html, /Workers/);
+  assert.doesNotMatch(html, /SSH Profiles/);
+  assert.doesNotMatch(html, /href="\/admin\/users"/);
   assert.match(html, /Telegram/);
   assert.doesNotMatch(html, /Antigravity|Control Plane|Bot Inbox/);
+});
+
+void test('Users management is unavailable even with an authenticated admin session', async () => {
+  const urls = [
+    '/admin/users',
+    '/admin/users/retired/enable',
+    '/admin/users/retired/disable',
+    '/admin/users/retired/reset-password',
+  ];
+  for (const path of urls) {
+    const get = await fetch(baseUrl + path, { headers: { cookie }, redirect: 'manual' });
+    assert.equal(get.status, 404, 'GET ' + path);
+    const post = await fetch(baseUrl + path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', cookie },
+      redirect: 'manual',
+      body: new URLSearchParams({ _csrf: csrf, username: 'retired', password: 'TestOnly2026!' }),
+    });
+    assert.equal(post.status, 404, 'POST ' + path);
+  }
+  for (const path of ['/admin', '/admin/clients', '/admin/workers']) {
+    const response = await fetch(baseUrl + path, { headers: { cookie } });
+    assert.equal(response.status, 200, path);
+    const html = await response.text();
+    assert.doesNotMatch(html, /href="\/admin\/users"/);
+    assert.doesNotMatch(html, /New User|Reset User Password/);
+  }
 });
 
 void test('OAuth client can be created from admin UI and secret is shown once', async () => {
@@ -222,159 +251,77 @@ void test('Audit Log uses compact numbered pagination with configurable page siz
   assert.match(fiftyHtml, /<option value="50" selected>50<\/option>/);
 });
 
-void test('Admin SSH Profile is created through an active global Worker without SSH credentials', async () => {
-  const response = await fetch(`${baseUrl}/admin/terminals`, {
+void test('Admin manages Worker execution targets from the Workers page', async () => {
+  const response = await fetch(`${baseUrl}/admin/workers/profiles`, {
     method: 'POST',
     redirect: 'manual',
     headers: { 'content-type': 'application/x-www-form-urlencoded', cookie },
     body: new URLSearchParams({
       _csrf: csrf,
-      name: 'UI-Terminal',
-      description: 'Created from admin UI',
+      name: 'UI-Worker-Target',
+      description: 'MCP Worker execution',
       worker_id: adminWorker.id,
       enabled: 'true',
     }).toString(),
   });
   assert.equal(response.status, 302);
-  assert.equal(response.headers.get('location'), '/admin/terminals');
+  assert.equal(response.headers.get('location'), '/admin/workers');
   const workerRepo = (await import('../src/repositories/workerRepository.js')).default;
-  const profile = (await workerRepo.listAdminProfiles()).find(
-    (item) => item?.name === 'UI-Terminal',
+  const target = (await workerRepo.listAdminProfiles()).find(
+    (item) => item?.name === 'UI-Worker-Target',
   );
-  assert.ok(profile);
-  assert.equal(profile.worker_id, adminWorker.id);
-  assert.equal('tmux_session' in profile ? profile.tmux_session : undefined, '');
+  assert.ok(target);
+  assert.equal(target.worker_id, adminWorker.id);
+  assert.equal(target.enabled, true);
 
-  const page = await fetch(`${baseUrl}/admin/terminals`, { headers: { cookie } });
+  const page = await fetch(`${baseUrl}/admin/workers`, { headers: { cookie } });
   const html = await page.text();
-  assert.match(html, /Profiles are created automatically with each Worker/);
+  assert.match(html, /Execution Targets/);
+  assert.match(html, /UI-Worker-Target/);
   assert.match(html, /UI-Admin-Worker/);
+  assert.match(html, /id="worker-profile-modal"/);
+  assert.match(html, /New Execution Target/);
   assert.doesNotMatch(html, /name="host"|name="port"|name="username"|name="password"/);
+  assert.doesNotMatch(html, /Attach Shell|Test Shell|SSH Profiles/);
 });
 
-void test('Admin SSH Profile edit keeps Worker-backed metadata only', async () => {
-  const workerRepo = (await import('../src/repositories/workerRepository.js')).default;
-  const profile = (await workerRepo.listAdminProfiles()).find(
-    (item) => item?.name === 'UI-Terminal',
-  );
-  assert.ok(profile);
-  const response = await fetch(`${baseUrl}/admin/terminals/${profile.id}/update`, {
-    method: 'POST',
-    redirect: 'manual',
-    headers: { 'content-type': 'application/x-www-form-urlencoded', cookie },
-    body: new URLSearchParams({
-      _csrf: csrf,
-      name: 'UI-Terminal-Edited',
-      description: 'Updated from modal',
-      worker_id: adminWorker.id,
-      enabled: 'true',
-    }).toString(),
-  });
-  assert.equal(response.status, 302);
-  const updated = await workerRepo.findAdminProfileById(profile.id);
-  assert.ok(updated);
-  assert.equal(updated.name, 'UI-Terminal-Edited');
-  assert.equal(updated.worker_id, adminWorker.id);
-  assert.equal('tmux_session' in updated ? updated.tmux_session : undefined, '');
-  assert.equal(updated.enabled, true);
-  assert.equal('host' in updated, false);
-  assert.equal('username' in updated, false);
-  assert.equal('credential_envelope' in updated, false);
-});
-
-void test('Admin SSH Profile tests direct Worker shell and exposes Attach Shell', async () => {
-  const workerRepo = (await import('../src/repositories/workerRepository.js')).default;
-  const profile = (await workerRepo.listAdminProfiles()).find(
-    (item) => item?.name === 'UI-Terminal-Edited',
-  );
-  assert.ok(profile);
-
-  const workerExecution = (await import('../src/services/workerExecutionService.js')).default;
-  const originalTest = workerExecution.testConnection.bind(workerExecution);
-  workerExecution.testConnection = async (workerProfile: { id: string; worker_id: string }) => {
-    assert.equal(workerProfile.id, profile.id);
-    assert.equal(workerProfile.worker_id, adminWorker.id);
-    return {
-      code: 'TEST_OK',
-      pane_count: 1,
-      target_pane: 'ui-terminal-edit:0.0',
-      pane_current_command: 'bash',
-    };
-  };
-
-  try {
-    const testResponse = await fetch(`${baseUrl}/admin/terminals/${profile.id}/test`, {
+void test('Legacy SSH profile APIs and browser shell routes are removed, not only hidden', async () => {
+  const legacyGet = [
+    '/admin/terminals',
+    '/admin/terminals/retired/ssh',
+    '/admin/terminals/retired/shell',
+  ];
+  for (const path of legacyGet) {
+    const response = await fetch(baseUrl + path, { headers: { cookie }, redirect: 'manual' });
+    assert.equal(response.status, 404, path);
+  }
+  const legacyPost = [
+    '/admin/terminals',
+    '/admin/terminals/retired/update',
+    '/admin/terminals/retired/session',
+  ];
+  for (const path of legacyPost) {
+    const response = await fetch(baseUrl + path, {
       method: 'POST',
-      headers: {
-        'content-type': 'application/x-www-form-urlencoded',
-        accept: 'application/json',
-        cookie,
-      },
-      body: new URLSearchParams({ _csrf: csrf }).toString(),
-    });
-    assert.equal(testResponse.status, 200);
-    const result = await testResponse.json();
-    assert.equal(result.code, 'TEST_OK');
-    assert.equal(result.pane_count, 1);
-    assert.equal(result.target_pane, 'ui-terminal-edit:0.0');
-
-    const listPage = await fetch(`${baseUrl}/admin/terminals`, { headers: { cookie } });
-    const listHtml = await listPage.text();
-    assert.match(listHtml, /Attach Shell/);
-    assert.match(listHtml, /Test Shell/);
-    assert.doesNotMatch(
-      listHtml,
-      /name="tmux_session"|name="host"|name="username"|name="password"/,
-    );
-
-    const legacyConsole = await fetch(`${baseUrl}/admin/terminals/${profile.id}/ssh`, {
+      headers: { 'content-type': 'application/x-www-form-urlencoded', cookie },
+      body: new URLSearchParams({ _csrf: csrf, worker_id: adminWorker.id }),
       redirect: 'manual',
-      headers: { cookie },
     });
-    assert.equal(legacyConsole.status, 302);
-    assert.equal(legacyConsole.headers.get('location'), `/admin/terminals/${profile.id}/shell`);
-
-    const consolePage = await fetch(`${baseUrl}/admin/terminals/${profile.id}/shell`, {
-      headers: { cookie },
-    });
-    assert.equal(consolePage.status, 200);
-    assert.match(
-      await consolePage.text(),
-      /Interactive PTY attached directly to the Worker OS shell/,
-    );
-
-    const ticketResponse = await fetch(`${baseUrl}/admin/terminals/${profile.id}/session`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/x-www-form-urlencoded',
-        accept: 'application/json',
-        origin: baseUrl,
-        cookie,
-      },
-      body: new URLSearchParams({ _csrf: csrf }).toString(),
-    });
-    assert.equal(ticketResponse.status, 201);
-    const ticket = await ticketResponse.json();
-    assert.match(ticket.ws_url, /^ws:\/\/|^wss:\/\//);
-    assert.match(ticket.ws_url, /\/terminal\/ws\?/);
-  } finally {
-    workerExecution.testConnection = originalTest;
+    assert.equal(response.status, 404, path);
   }
 });
 
-void test('modern admin assets are served and Worker-backed SSH modal hooks are present', async () => {
-  const css = await fetch(`${baseUrl}/assets/admin.css`);
-  const js = await fetch(`${baseUrl}/assets/admin.js`);
+void test('Worker-only UI assets load without browser SSH controls', async () => {
+  const css = await fetch(baseUrl + '/assets/admin.css');
+  const js = await fetch(baseUrl + '/assets/admin.js');
   assert.equal(css.status, 200);
   assert.equal(js.status, 200);
   assert.match(await css.text(), /\.modal-backdrop/);
   assert.match(await js.text(), /data-modal-open/);
-  const page = await fetch(`${baseUrl}/admin/terminals`, { headers: { cookie } });
+  const page = await fetch(baseUrl + '/admin/workers', { headers: { cookie } });
   const html = await page.text();
-  assert.doesNotMatch(html, /data-account-ssh-new|New SSH Profile/);
-  assert.match(html, /data-account-ssh-edit/);
-  assert.match(html, /id="account-ssh-modal"/);
-  assert.doesNotMatch(html, /id="terminal-modal"|terminal-host|terminal-password/);
+  assert.match(html, /Outbound WSS only/);
+  assert.doesNotMatch(html, /account-ssh-modal|terminal-console|SSH Profiles/);
 });
 
 void test('Telegram config UI stores operational settings in DB and encrypts token with the application credential key', async () => {

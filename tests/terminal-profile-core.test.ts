@@ -1,8 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import helper from './helper';
-import legacyRepo from '../src/repositories/terminalProfileRepository';
-import credentials from '../src/services/terminalCredentialService';
 import workerRepo from '../src/repositories/workerRepository';
 import terminalService from '../src/services/terminalMcpService';
 const { setupEnv, cleanup, initDb } = helper;
@@ -13,22 +11,7 @@ initDb();
 
 let adminWorker: NonNullable<Awaited<ReturnType<typeof workerRepo.createWorker>>> | null = null;
 
-void test('terminal_list exposes only global Worker-backed aliases and never legacy SSH credentials', async () => {
-  const envelope = credentials.encrypt('fixture-password');
-  assert.doesNotMatch(envelope, /fixture-password/);
-  await legacyRepo.create(
-    {
-      name: 'LegacyDirectSsh',
-      description: 'legacy host',
-      host: '127.0.0.1',
-      port: 22,
-      username: 'dev',
-      tmux_session: 'main',
-      enabled: true,
-    },
-    envelope,
-  );
-
+void test('terminal_list exposes only Worker execution aliases and no SSH credentials', async () => {
   adminWorker = await workerRepo.createWorker({
     name: 'AdminWorker',
     publicKey: 'test-public-key',
@@ -49,10 +32,6 @@ void test('terminal_list exposes only global Worker-backed aliases and never leg
   assert.equal('host' in listed[0], false);
   assert.equal('username' in listed[0], false);
   assert.equal('password' in listed[0], false);
-  assert.equal(
-    listed.some((item) => item.name === 'LegacyDirectSsh'),
-    false,
-  );
 });
 
 void test('Worker-backed execution profile names are unique case-insensitively', async () => {

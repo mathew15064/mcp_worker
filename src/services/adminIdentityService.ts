@@ -70,7 +70,21 @@ function legacyAuthenticate(username: unknown, password: unknown) {
   }
 }
 
-export function authenticate(username: unknown, password: unknown) {
+export async function authenticate(username: unknown, password: unknown) {
+  if (process.env.MCP_PLATFORM === 'railway') {
+    const db = databaseManager.getAdapter();
+    if (!db || db.kind !== 'sqlite') return null;
+    const row = await db.queryOne<{ value: string }>(
+      'SELECT value FROM system_settings WHERE key = ?',
+      ['bootstrap.admin_password_hash'],
+    );
+    if (!row?.value) return null;
+    if (!timingSafeStringEqual(typeof username === 'string' ? username : '', config.ADMIN_USERNAME))
+      return null;
+    return (await bcrypt.compare(typeof password === 'string' ? password : '', row.value))
+      ? identity(process.env.MCP_PLATFORM)
+      : null;
+  }
   if (envAuthenticate(username, password)) return identity('env');
   if (legacyAuthenticate(username, password)) return identity('legacy');
   return null;
@@ -79,5 +93,11 @@ export function authenticate(username: unknown, password: unknown) {
 export function currentFromSession(session: AdminSession | null | undefined) {
   if (!session || session.userId !== ADMIN_ID || session.role !== 'admin') return null;
   if ((session.sessionVersion || SESSION_VERSION) !== SESSION_VERSION) return null;
-  return identity(session.authSource === 'legacy' ? 'legacy' : 'env');
+  return identity(
+    session.authSource === 'legacy'
+      ? 'legacy'
+      : session.authSource === 'railway'
+        ? 'railway'
+        : 'env',
+  );
 }

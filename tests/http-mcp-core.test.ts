@@ -103,16 +103,18 @@ void test('worker curl installer uses verified standalone binaries without Node.
   const windowsInstaller = await fetch(`${baseUrl}/worker/install.ps1`);
   assert.equal(windowsInstaller.status, 200);
   const ps1 = await windowsInstaller.text();
-  assert.match(ps1, /install-windows\.ps1/);
-  assert.match(ps1, /Invoke-WebRequest -UseBasicParsing/);
-  assert.match(ps1, /-ExecutionPolicy Bypass -File \$Tmp/);
-  assert.match(ps1, /Get-Process -Id \$PID/);
-  assert.doesNotMatch(ps1, /bot-report-worker-windows-\$Arch\.exe/);
+  assert.match(ps1, /PinnedPublicKeyB64 = ''/);
+  assert.match(ps1, /openssl dgst -sha256 -verify/);
+  assert.match(ps1, /Get-FileHash -Algorithm SHA256/);
+  assert.match(ps1, /bot-report-worker-windows-\$Arch\.exe/);
+  assert.doesNotMatch(ps1, /-ExecutionPolicy Bypass -File \$Tmp/);
+  assert.doesNotMatch(ps1, /install-windows\.ps1/);
 
   const windowsPayload = await fetch(`${baseUrl}/worker/install-windows.ps1`);
   assert.equal(windowsPayload.status, 200);
   const windowsPayloadPs1 = await windowsPayload.text();
   assert.match(windowsPayloadPs1, /bot-report-worker-windows-\$Arch\.exe/);
+  assert.equal(ps1, windowsPayloadPs1, 'Windows installer must not execute a second-stage script');
   assert.match(windowsPayloadPs1, /Get-FileHash -Algorithm SHA256/);
   assert.match(windowsPayloadPs1, /SetEnvironmentVariable\('Path'/);
   assert.doesNotMatch(windowsPayloadPs1, /node|npm ci/i);
@@ -154,49 +156,36 @@ void test('worker curl installer uses verified standalone binaries without Node.
   assert.equal((await fetch(`${baseUrl}/worker/dist/not-allowed`)).status, 404);
 });
 
-const standaloneBinaryBuilt = fs.existsSync(
-  path.resolve(__dirname, '../worker/bin/bot-report-worker-linux-amd64'),
-);
-void test(
-  'standalone curl installer produces an executable Worker CLI without target Node.js setup',
-  { skip: !standaloneBinaryBuilt },
-  async () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-report-worker-install-'));
-    try {
-      const binDir = path.join(home, '.local', 'bin');
-      const env = {
-        ...process.env,
-        HOME: home,
-        BOT_REPORT_WORKER_HOME: path.join(home, '.bot-report-worker'),
-        BOT_REPORT_WORKER_INSTALL_ROOT: path.join(home, '.local', 'share', 'bot-report-worker'),
-        BOT_REPORT_WORKER_BIN_DIR: binDir,
-        PATH: `${binDir}:${process.env.PATH}`,
-        BOT_REPORT_WORKER_SKIP_SERVICE: '1',
-      };
-      const result = await runProcess(
-        'sh',
-        [
-          '-c',
-          `curl -fsSL ${baseUrl}/worker/install.sh | sh && "$HOME/.local/bin/systemtd" version`,
-        ],
-        { env },
-      );
-      assert.equal(result.code, 0, `${result.stdout}${result.stderr}`);
-      assert.match(result.stdout, /installed standalone runtime/);
-      assert.match(result.stdout, /systemtd 2\./);
-      assert.match(result.stdout, /runtime=go/);
-      assert.equal(
-        fs.existsSync(
-          path.join(home, '.local', 'share', 'bot-report-worker', 'current', 'systemtd'),
-        ),
-        true,
-      );
-      assert.equal(fs.existsSync(path.join(binDir, 'bot-report-worker')), true);
-    } finally {
-      fs.rmSync(home, { recursive: true, force: true });
-    }
-  },
-);
+void test('unapproved curl installer fails closed without installing a Worker binary', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-report-worker-pending-'));
+  try {
+    const binDir = path.join(home, '.local', 'bin');
+    const installRoot = path.join(home, '.local', 'share', 'bot-report-worker');
+    const env = {
+      ...process.env,
+      HOME: home,
+      BOT_REPORT_WORKER_HOME: path.join(home, '.bot-report-worker'),
+      BOT_REPORT_WORKER_INSTALL_ROOT: installRoot,
+      BOT_REPORT_WORKER_BIN_DIR: binDir,
+      BOT_REPORT_WORKER_SKIP_SERVICE: '1',
+    };
+    const result = await runProcess(
+      'sh',
+      [
+        '-c',
+        `curl -fsSL ${baseUrl}/worker/install.sh -o "$HOME/installer.sh" && sh "$HOME/installer.sh"`,
+      ],
+      { env },
+    );
+    assert.notEqual(result.code, 0, 'unapproved public install unexpectedly succeeded');
+    assert.match(result.stderr, /signed release not approved/i);
+    assert.equal(fs.existsSync(path.join(installRoot, 'current', 'systemtd')), false);
+    assert.equal(fs.existsSync(path.join(binDir, 'bot-report-worker')), false);
+    assert.equal(fs.existsSync(path.join(env.BOT_REPORT_WORKER_HOME, 'state.json')), false);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
 
 void test('OAuth discovery and unauthenticated MCP challenge remain available', async () => {
   const metadata = await fetch(`${baseUrl}/.well-known/oauth-authorization-server`);
@@ -361,7 +350,7 @@ void test('OAuth rejects malformed scope without consuming a valid refresh token
   assert.equal(result.scope, 'bot_report.read');
 });
 
-void test('authenticated MCP initialize returns instructions and exactly 19 tools', async () => {
+void test('authenticated MCP initialize returns instructions and exactly 15 tools', async () => {
   const issued = await issueToken();
   const headers = {
     'content-type': 'application/json',
@@ -397,7 +386,7 @@ void test('authenticated MCP initialize returns instructions and exactly 19 tool
   assert.equal(list.status, 200);
   const listBody = await parseMcpResponse(list);
   const names = (listBody.result?.tools || []).map((tool) => tool.name);
-  assert.equal(names.length, 19);
+  assert.equal(names.length, 15);
   assert.ok(names.includes('runtime_info'));
   assert.ok(names.includes('file_patch'));
   assert.ok(names.includes('process_logs'));

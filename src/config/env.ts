@@ -12,7 +12,29 @@ const INSECURE_DEFAULTS = new Set([
   'bot-report-default-secret',
   'change-this-to-a-secure-random-64-character-hex-string',
 ]);
+function managedSecret(purpose: string, size: number): Buffer {
+  if (process.env.MCP_PLATFORM !== 'railway')
+    throw new Error('Not a managed self-hosted instance.');
+  const key = String(process.env.MCP_SETUP_SECRET || '');
+  if (key.length < 43 || !/^[A-Za-z0-9_-]+$/.test(key)) {
+    throw Object.assign(
+      new Error('MCP_SETUP_SECRET must be a high-entropy random base64url key (43+ characters).'),
+      { code: 'MCP_SETUP_SECRET_INVALID' },
+    );
+  }
+  return Buffer.from(
+    crypto.hkdfSync(
+      'sha256',
+      Buffer.from(key, 'utf8'),
+      Buffer.from('mcp_worker-selfhost-v1', 'utf8'),
+      Buffer.from(purpose, 'utf8'),
+      size,
+    ),
+  );
+}
+
 function getSessionSecret() {
+  if (process.env.MCP_PLATFORM === 'railway') return managedSecret('session', 64).toString('hex');
   const secret = process.env.SESSION_SECRET;
   const production = (process.env.NODE_ENV || 'development') === 'production';
   if (production) {
@@ -33,6 +55,7 @@ function getSessionSecret() {
 }
 
 const env = {
+  managedSecret,
   get PORT() {
     return parseInt(process.env.PORT || '3333', 10);
   },

@@ -17,18 +17,14 @@ function serviceWithArtifact(text: string) {
     id: 'p1',
     name: 'Dev',
     enabled: true,
-    credential_envelope: 'x',
-    host: '127.0.0.1',
-    port: 22,
-    username: 'dev',
-    tmux_session: 'main',
+    transport: 'worker',
+    worker_id: 'w1',
   };
   return {
     service: new TerminalMcpService({
-      profiles: { findAll: () => [profile], findWithCredentialById: () => profile },
+      profiles: { findAll: () => [profile] },
       audit: { log: () => {} },
-      credentials: { decrypt: () => 'fixture' },
-      ssh: {
+      worker: {
         collectArtifact: async () => artifact(),
         writeTextFile: async (
           _profile: unknown,
