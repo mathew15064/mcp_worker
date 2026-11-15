@@ -1,5 +1,22 @@
 # mcp_worker
 
+## Docker image (public release candidate)
+
+The standalone Linux/amd64 image is available on
+[Docker Hub](https://hub.docker.com/r/mathew15604/mcp-worker).
+It is built from the tagged [v2.0.0-rc.1 source](https://github.com/mathew15064/mcp_worker/tree/v2.0.0-rc.1).
+
+```sh
+docker pull mathew15604/mcp-worker:2.0.0-rc.1
+```
+
+Immutable image: `docker.io/mathew15604/mcp-worker@sha256:d520acbefafc64f45f6217e95e35271c1be716c2c2c37f0b12295cae8aff2bf5`.
+
+**Release-candidate limitations:** The signed Worker installer distribution remains disabled
+(`/worker/install*` and `/worker/dist/*` return HTTP 503); this is not a
+production-signed Worker release. Configure secrets and persistent data/backup
+storage before using the container with real data. No Railway service or CI/CD is required.
+
 mcp_worker is a deterministic MCP coding execution harness. ChatGPT performs reasoning; mcp_worker exposes bounded MCP primitives and routes execution through an explicit execution profile.
 
 Worker-only deployment: machines run standalone Go Workers that connect **outbound** over
