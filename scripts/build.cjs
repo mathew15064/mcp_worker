@@ -8,7 +8,7 @@ const root = path.resolve(__dirname, '..');
 const dist = path.join(root, 'dist');
 fs.rmSync(dist, { recursive: true, force: true });
 fs.mkdirSync(dist, { recursive: true });
-for (const name of ['src', 'scripts', 'worker', 'tests', 'package.json']) {
+for (const name of ['src', 'scripts', 'tests', 'package.json']) {
   const source = path.join(root, name);
   if (!fs.existsSync(source)) continue;
   fs.cpSync(source, path.join(dist, name), {

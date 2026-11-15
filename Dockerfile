@@ -23,7 +23,6 @@ RUN npm ci
 COPY tsconfig.json ./
 COPY src/ ./src/
 COPY scripts/ ./scripts/
-COPY worker/ ./worker/
 COPY tests/ ./tests/
 COPY playwright.config.ts ./
 RUN npm run build && npm prune --omit=dev && npm cache clean --force
@@ -83,7 +82,6 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY package.json ./
 COPY --from=builder /app/dist/src ./dist/src/
 COPY --from=builder /app/dist/scripts ./dist/scripts/
-COPY --from=builder /app/dist/worker ./dist/worker/
 COPY --from=builder /app/dist/package.json ./dist/package.json
 # Compatibility paths used by the standalone installer and release harness.
 RUN ln -s dist/src src && ln -s dist/scripts scripts && ln -s dist/worker worker

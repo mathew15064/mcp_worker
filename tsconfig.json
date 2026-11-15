@@ -16,7 +16,6 @@
   "include": [
     "api/**/*.ts",
     "src/**/*.ts",
-    "worker/**/*.ts",
     "tests/**/*.ts",
     "scripts/**/*.ts",
     "playwright.config.ts"
@@ -24,7 +23,6 @@
   "exclude": [
     "node_modules",
     "dist",
-    "worker/node_modules",
     "worker/bin"
   ]
 }

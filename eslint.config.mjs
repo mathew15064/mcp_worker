@@ -6,7 +6,6 @@ export default defineConfig(
     ignores: [
       'dist/**',
       'node_modules/**',
-      'worker/node_modules/**',
       'worker/bin/**',
       'reports/**',
       'test-results/**',
@@ -16,7 +15,6 @@ export default defineConfig(
   {
     files: [
       'src/**/*.ts',
-      'worker/**/*.ts',
       'scripts/**/*.ts',
       'tests/**/*.ts',
       'playwright.config.ts',

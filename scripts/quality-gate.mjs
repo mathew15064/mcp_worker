@@ -14,7 +14,6 @@ const root = path.resolve(import.meta.dirname, '..');
 const baselinePath = path.join(root, 'quality', 'baseline.json');
 const targets = [
   'src/**/*.ts',
-  'worker/**/*.ts',
   'scripts/**/*.ts',
   'tests/**/*.ts',
   'playwright.config.ts',

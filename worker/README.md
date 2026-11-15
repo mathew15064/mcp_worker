@@ -12,7 +12,11 @@ mcp_worker ships standalone binaries for:
 
 Linux binaries use `CGO_ENABLED=0`, avoiding a target glibc dependency. macOS and Windows also require no Node.js, npm, Python, Go, Docker, or other language runtime on the target machine.
 
-The legacy Node Worker source remains in `worker/` only as a rollback/compatibility implementation.
+The retired Node Worker source and npm CLI are no longer shipped. Existing
+Node Worker installations and saved identities are not modified by this source
+cleanup. Migration to Go uses the compatible identity format, but requires an
+independently approved signed Go Worker release. Do not replace a running
+Worker using an unsigned installer.
 
 ## Install
 

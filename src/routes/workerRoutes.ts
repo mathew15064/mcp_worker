@@ -28,13 +28,6 @@ const APPROVED_WORKER_RELEASE: ApprovedWorkerRelease = Object.freeze({
 const router = express.Router();
 const WORKER_DIR = path.resolve(__dirname, '../../worker');
 const WORKER_BIN_DIR = path.join(WORKER_DIR, 'bin');
-const LEGACY_DIST_FILES = Object.freeze([
-  'agent.js',
-  'cli.js',
-  'lifecycle.js',
-  'package.json',
-  'package-lock.json',
-]);
 const BINARY_DIST_FILES = Object.freeze([
   'bot-report-worker-linux-amd64',
   'bot-report-worker-linux-arm64',
@@ -45,7 +38,7 @@ const BINARY_DIST_FILES = Object.freeze([
   'bot-report-worker-windows-amd64.exe',
   'bot-report-worker-windows-arm64.exe',
 ]);
-const DIST_FILES = Object.freeze([...LEGACY_DIST_FILES, ...BINARY_DIST_FILES]);
+const DIST_FILES = BINARY_DIST_FILES;
 
 const enrollmentLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -1040,8 +1033,7 @@ router.get('/worker/dist/:file', (req, res) => {
   const file = String(req.params.file || '');
   if (!DIST_FILES.includes(file))
     return res.status(404).json({ error: 'Endpoint not found', code: 'NOT_FOUND' });
-  const directory = BINARY_DIST_FILES.includes(file) ? WORKER_BIN_DIR : WORKER_DIR;
-  const target = path.join(directory, file);
+  const target = path.join(WORKER_BIN_DIR, file);
   if (!fs.existsSync(target))
     return res.status(503).json({
       error: 'Worker binary distribution is not built.',
@@ -1108,7 +1100,6 @@ router.post('/worker/v1/enroll', enrollmentLimiter, async (req, res, next) => {
 export = Object.assign(router, {
   DIST_FILES,
   BINARY_DIST_FILES,
-  LEGACY_DIST_FILES,
   installerScript,
   macInstallerScript,
   windowsInstallerScript,

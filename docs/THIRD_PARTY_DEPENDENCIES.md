@@ -51,9 +51,6 @@ the apparent *missing-license-text* finding for that npm package, but does
 **not** complete the required combined third-party notices for the shipped
 app/MySQL images and Worker binaries or replace owner/legal approval.
 
-The legacy Node Worker lockfile has three MIT entries; native Go Worker is
-the supported default. Audit both when distributing either implementation.
-
 ## Go Worker
 
 | Module | Version | License family |

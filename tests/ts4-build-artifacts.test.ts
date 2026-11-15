@@ -14,9 +14,9 @@ void test('TS4 browser bundles are runnable as plain script tags without CommonJ
   }
 });
 
-void test('TS4 compiled Worker and script layout retains installer endpoints', () => {
+void test('TS4 compiled CLI layout excludes the retired Node Worker', () => {
   for (const name of ['agent.js', 'cli.js', 'lifecycle.js']) {
-    assert.ok(fs.statSync(path.join(compiled, 'worker', name)).isFile());
+    assert.equal(fs.existsSync(path.join(compiled, 'worker', name)), false);
   }
   for (const name of ['first-mcp-call.js', 'init-bundled-db.js', 'migrate.js', 'mcp-client.js']) {
     assert.ok(fs.statSync(path.join(compiled, 'scripts', name)).isFile());

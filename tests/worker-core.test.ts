@@ -1,10 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { WebSocket } from 'ws';
 
 import workerAuthService from '../src/services/workerAuthService';
@@ -18,10 +14,7 @@ const { UserService } = userServiceModule;
 const { WorkerExecutionService } = workerExecutionService;
 import terminalMcpService from '../src/services/terminalMcpService';
 const { TerminalMcpService } = terminalMcpService;
-import lifecycle from '../worker/lifecycle';
-import localWorkerCLI from '../worker/cli';
 import { stringifyUnknown as appStringifyUnknown } from '../src/utils/stringifyUnknown';
-const { buildCleanupPlan, applyCleanupPlan } = lifecycle;
 
 // These fixtures retain the production row and port shapes; only the WebSocket
 // transport itself is intentionally partial, because no network is opened.
@@ -749,109 +742,6 @@ void test('worker execution service maps the existing execution interface to typ
   assert.equal(calls[1].payload.cwd, '/work');
 });
 
-void test('Worker local roots default to unrestricted but explicit roots remain supported', () => {
-  assert.deepEqual(localWorkerCLI.normalizeRoots(''), []);
-  assert.deepEqual(localWorkerCLI.normalizeRoots('   '), []);
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-cli-roots-'));
-  try {
-    assert.deepEqual(localWorkerCLI.normalizeRoots(root), [root]);
-    assert.deepEqual(localWorkerCLI.normalizeRoots(`${root},${root}`), [root]);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-void test('Node Worker honors OS-permitted file and shell paths without configured roots', () => {
-  if (process.platform === 'win32') return;
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-unrestricted-'));
-  const restrictedRoot = path.join(base, 'restricted');
-  const outsideRoot = path.join(base, 'outside');
-  fs.mkdirSync(restrictedRoot);
-  fs.mkdirSync(outsideRoot);
-  const target = path.join(outsideRoot, 'new', 'note.txt');
-  const script = `
-    const agent = require(process.env.FIXTURE_AGENT_MODULE);
-    (async () => {
-      await agent.executeOperation('file.write', {
-        path: process.env.FIXTURE_TARGET, content: 'OS-allowed-file', create_dirs: true
-      });
-      const file = await agent.executeOperation('artifact.collect', {
-        path: process.env.FIXTURE_TARGET
-      });
-      const shell = await agent.executeOperation('workspace.exec', {
-        command: 'printf OS-allowed-shell', cwd: process.env.FIXTURE_CWD
-      });
-      process.stdout.write(JSON.stringify({ file: file.text, stdout: shell.stdout, code: shell.exit_code }));
-    })().catch(error => {
-      process.stdout.write(JSON.stringify({ error: error.code || String(error) }));
-    });
-  `;
-  try {
-    const agentPath = require.resolve('../worker/agent');
-    const env = {
-      ...process.env,
-      BOT_REPORT_WORKER_ALLOWED_ROOTS: '',
-      BOT_REPORT_WORKER_ALLOW_SHELL: 'true',
-      FIXTURE_AGENT_MODULE: agentPath,
-      FIXTURE_TARGET: target,
-      FIXTURE_CWD: outsideRoot,
-    };
-    const success = spawnSync(process.execPath, ['-e', script], {
-      cwd: base,
-      env,
-      encoding: 'utf8',
-      timeout: 15_000,
-    });
-    assert.equal(success.status, 0, success.stderr);
-    assert.deepEqual(JSON.parse(success.stdout), {
-      file: 'OS-allowed-file',
-      stdout: 'OS-allowed-shell',
-      code: 0,
-    });
-    const restricted = spawnSync(process.execPath, ['-e', script], {
-      cwd: base,
-      env: { ...env, BOT_REPORT_WORKER_ALLOWED_ROOTS: restrictedRoot },
-      encoding: 'utf8',
-      timeout: 15_000,
-    });
-    assert.equal(restricted.status, 0, restricted.stderr);
-    assert.deepEqual(JSON.parse(restricted.stdout), { error: 'WORKER_PATH_DENIED' });
-    assert.equal(fs.readFileSync(target, 'utf8'), 'OS-allowed-file');
-  } finally {
-    fs.rmSync(base, { recursive: true, force: true });
-  }
-});
-
-void test('local worker uninstall removes only verified installer-managed files', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-report-worker-cleanup-'));
-  const installRoot = path.join(dir, 'share', 'bot-report-worker');
-  const runtimeDir = path.join(installRoot, 'current');
-  const workerHome = path.join(dir, '.bot-report-worker');
-  const binDir = path.join(dir, 'bin');
-  const binPath = path.join(binDir, 'bot-report-worker');
-  fs.mkdirSync(runtimeDir, { recursive: true });
-  fs.mkdirSync(workerHome, { recursive: true });
-  fs.mkdirSync(binDir, { recursive: true });
-  fs.writeFileSync(path.join(runtimeDir, 'cli.js'), '#!/usr/bin/env node\n');
-  fs.symlinkSync(path.join(runtimeDir, 'cli.js'), binPath);
-  fs.writeFileSync(path.join(workerHome, 'install-root'), `${installRoot}\n`);
-  fs.writeFileSync(path.join(workerHome, 'bin-path'), `${binPath}\n`);
-  fs.writeFileSync(
-    path.join(workerHome, 'config.json'),
-    JSON.stringify({ tmux_created_by_worker: false }),
-  );
-
-  const plan = buildCleanupPlan({ runtimeDir, workerHome });
-  assert.equal(plan.install_root, installRoot);
-  assert.equal(plan.remove_bin, true);
-  const result = applyCleanupPlan(plan);
-  assert.equal(result.code, 'UNINSTALLED');
-  assert.equal(fs.existsSync(workerHome), false);
-  assert.equal(fs.existsSync(installRoot), false);
-  assert.equal(fs.existsSync(binPath), false);
-  fs.rmSync(dir, { recursive: true, force: true });
-});
-
 void test('MCP execution profile routes worker profiles without decrypting an SSH password', async () => {
   const profile = {
     id: crypto.randomUUID(),
@@ -1493,7 +1383,7 @@ void test('delayed external identity check cannot close a replacement Worker soc
   broker.close();
 });
 
-void test('Worker and app scalar parsing reject hostile toString and bound circular arrays', () => {
+void test('app scalar parsing rejects hostile toString and bounds circular arrays', () => {
   const hostile = {
     toString: () => {
       throw new Error('Hostile object toString called');
@@ -1501,9 +1391,7 @@ void test('Worker and app scalar parsing reject hostile toString and bound circu
   };
   const recursive: unknown[] = [];
   recursive.push(recursive);
-  for (const convert of [appStringifyUnknown, lifecycle.stringifyUnknown]) {
-    assert.equal(convert(hostile), '[object Object]');
-    assert.equal(convert(recursive), '');
-    assert.equal(convert(['alpha', 1, null, false]), 'alpha,1,,false');
-  }
+  assert.equal(appStringifyUnknown(hostile), '[object Object]');
+  assert.equal(appStringifyUnknown(recursive), '');
+  assert.equal(appStringifyUnknown(['alpha', 1, null, false]), 'alpha,1,,false');
 });
