@@ -1,8 +1,8 @@
 # Backup, restore and upgrade
 
-## Railway One-Click SQLite — verified local export and encrypted recovery
+## Optional SQLite export and encrypted recovery (local test tooling only)
 
-**Scope:** The Railway SQLite path differs from the legacy MySQL/Compose instructions below. See [the T4 recovery and isolation runbook](RAILWAY_RECOVERY_ISOLATION.md) for the complete operator workflow, negative tests, separate key custody, retention and approval gates. This is NOT a production restore command.
+These SQLite backup and restore tools remain available for disposable fixtures or legacy SQLite installations. They are **not** the backup procedure for the default standalone MySQL/Compose deployment below. Do not run them against live data without a separate recovery plan.
 
 `npm run backup-db` refuses implicit source or destination values: specify `DATABASE_PATH`, `RAILWAY_VOLUME_MOUNT_PATH` and `BACKUP_EXPORT_DIR` explicitly. The existing export directory must be a real non-symlink directory on a **different Linux mount** from the SQLite data volume. Never place snapshots in `/app/data/backups` or copy an active WAL database. SQLite's online backup API creates a consistent snapshot, validated against the claimed owner and supported schema; the completed snapshot and manifest include a SHA-256/byte-count check.
 
@@ -14,7 +14,7 @@ An **encrypted export** additionally requires:
 - `BACKUP_STAGING_DIR`: a private 0700 directory on Linux **tmpfs** outside both data and export mounts, with enough space for the database. This prevents the SQLite plaintext staging file from being written to persistent export disk; host swap and tmpfs operational security still require review.
 - The same explicit `DATABASE_PATH`, `RAILWAY_VOLUME_MOUNT_PATH` and separately mounted `BACKUP_EXPORT_DIR`.
 
-The encrypted output is `*.sqlite.enc` plus `*.sqlite.enc.manifest.json` with status `BACKUP_EXPORTED_ENCRYPTED_LOCAL`. It uses AES-256-GCM with a fresh random nonce per backup, authenticated tag, ciphertext SHA-256 and plaintext checksum. The complete encrypted manifest is separately authenticated with HMAC-SHA-256 using an HKDF-derived key (distinct from the AES-GCM key), so changing even valid-looking JSON fields fails restore. An unkeyed SHA-256 is only a corruption detector, not manifest authentication. The key is not included. **Encrypted local export is not remote backup**: after a separate owner-approved plan, the operator must transport the completed bundle to independent off-Railway versioned storage and test retrieval. Never claim recovery without separately recoverable application secrets (including `MCP_SETUP_SECRET`) and the original encryption key.
+The encrypted output is `*.sqlite.enc` plus `*.sqlite.enc.manifest.json` with status `BACKUP_EXPORTED_ENCRYPTED_LOCAL`. It uses AES-256-GCM with a fresh random nonce per backup, authenticated tag, ciphertext SHA-256 and plaintext checksum. The complete encrypted manifest is separately authenticated with HMAC-SHA-256 using an HKDF-derived key (distinct from the AES-GCM key), so changing even valid-looking JSON fields fails restore. An unkeyed SHA-256 is only a corruption detector, not manifest authentication. The key is not included. **Encrypted local export is not remote backup**: after a separate owner-approved plan, the operator must transport the completed bundle to independent off-host versioned storage and test retrieval. Never claim recovery without separately recoverable application secrets (including `MCP_SETUP_SECRET`) and the original encryption key.
 
 The local-only restore preflight is:
 
@@ -27,18 +27,18 @@ W3_SANDBOX_ONLY=1 W3_BACKUP_KEY_FILE=/tmp/fixture-key \
 
 It authenticates ciphertext and key, checks manifest/sha/schema/integrity/owner and publishes only into an empty sandbox target. It refuses overwrites, symlinks, missing keys, corrupt data or production paths. No supported production restore has been authorized or performed.
 
-For the **disposable PC transport simulation only**, use `T04_OFFSITE_SIMULATION_ONLY=1` and `T04_LOGICAL_STORE_TEST_ONLY=1` with `node scripts/railway-offsite-simulate.cjs deposit|retrieve SOURCE.sqlite.enc NEW_EMPTY_DIRECTORY`. The simulator refuses plaintext, missing HMAC-shaped manifests, symlinks, occupied stores, unsafe mount assumptions and any key-bearing environment variable. It copies the ciphertext and manifest, verifies readback, and never uploads to a remote provider. A matching independently held key is still required for the **separate** sandbox restore command; syntax or ciphertext checksum checks on a storage host do not substitute for HMAC verification at recovery. Logical same-mount simulation is explicitly **not** an off-host durability test. `T04_LOCAL_TEST_ONLY=1 bash scripts/test-recovery-local.sh` additionally executes an encrypted Docker exercise using separate disposable export, independent object-store, retrieved and fresh restore named volumes.
+For the **disposable PC transport simulation only**, use `T04_OFFSITE_SIMULATION_ONLY=1` and `T04_LOGICAL_STORE_TEST_ONLY=1` with `node scripts/railway-offsite-simulate.cjs deposit|retrieve SOURCE.sqlite.enc NEW_EMPTY_DIRECTORY`. The simulator refuses plaintext, missing HMAC-shaped manifests, symlinks, occupied stores, unsafe mount assumptions and any key-bearing environment variable. It copies the ciphertext and manifest, verifies readback, and never uploads to a remote provider. A matching independently held key is still required for the **separate** sandbox restore command; syntax or ciphertext checksum checks on a storage host do not substitute for HMAC verification at recovery. Logical same-mount simulation is explicitly **not** an off-host durability test. The standalone MySQL/Compose backup procedure below remains separate.
 
 **Remote durable storage/restore, cloud IAM, retention enforcement, key recovery, and measured RPO/RTO: NOT_TESTED.** Owner approval is required for any live export/recovery action.
 
-## Legacy MySQL / Compose (separate deployment type)
+## Standalone MySQL / Compose
 
 Back up the installer env, application data, and MySQL data as one matched
 set. The env includes the encryption key that decrypts the bootstrap; losing
 it can make a healthy database unusable. Worker identity/config on each
 machine is separate; securely back up its Worker home and installation
 metadata before maintenance. Never copy an active identity onto two running
-machines. Legacy Compose session handling differs from Railway: the Railway SQLite session table is captured, but an unexpired session remains usable only with matching signing secrets and application policy.
+machines. Session and encryption secrets must be restored together with the matching database.
 
 The example below is a **cold backup** of the default standalone Linux
 installation using the already-built app image as a tar helper. Stop the

@@ -9,10 +9,11 @@ MODE="${1:---targeted}"
 [[ "$MODE" == --targeted || "$MODE" == --full ]] || { echo "Usage: $0 [--targeted|--full]" >&2; exit 2; }
 [[ -z "${CI:-}" && -z "${GITHUB_ACTIONS:-}" ]] || { echo "PC-local only; CI prohibited" >&2; exit 2; }
 BRANCH="$(git branch --show-current)"
-case "$ROOT:$BRANCH" in
-  /root/mcpw_v200_full5_integration_test_20261114:work/full5-integration-test-20261114) QA_SCOPE=INTEGRATION_TEST ;;
-  *) echo "PC-local source worktree/branch is not approved for QA" >&2; exit 2 ;;
-esac
+[[ "$(git rev-parse --show-toplevel)" == "$ROOT" ]] || {
+  echo "PC-local source checkout does not match script directory" >&2
+  exit 2
+}
+QA_SCOPE=LOCAL_PC
 BASE="$(git rev-parse HEAD)"
 TREE="$(git rev-parse 'HEAD^{tree}')"
 if [[ -n "${T5_EXPECTED_SHA:-}" && "$BASE" != "$T5_EXPECTED_SHA" ]] ||
@@ -61,7 +62,7 @@ run() {
   record "$name" "$required" "$status" "$code" "$pass" "$fail" "$skip" "$note"
 }
 command -v node >/dev/null 2>&1 || { echo "Node unavailable" >&2; exit 2; }
-run script_syntax yes "node --check; bash/sh -n; no source builds" bash -c 'node --check scripts/test-linux-installer-lifecycle.cjs && node --check scripts/quality-gate.mjs && bash -n scripts/local-verify-quickstart.sh scripts/verify-oci-image-local.sh scripts/test-railway-local.sh && sh -n scripts/release-verify.sh scripts/release-scan.sh'
+run script_syntax yes "node --check; bash/sh -n; no source builds" bash -c 'node --check scripts/test-linux-installer-lifecycle.cjs && node --check scripts/quality-gate.mjs && bash -n scripts/local-verify-quickstart.sh scripts/verify-oci-image-local.sh && sh -n scripts/release-verify.sh scripts/release-scan.sh'
 NODE_VERSION="$(node -v)"
 NPM_VERSION="$(npm -v 2>/dev/null || echo missing)"
 GO_BIN=""
@@ -177,24 +178,20 @@ if [[ "$MODE" == --full ]]; then
   if [[ "${T5_ALLOW_DOCKER_BUILD:-0}" == 1 ]] && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && [[ -z "$(git status --porcelain)" ]]; then
     BUILD_NETWORK=none
     [[ "${T5_ALLOW_BUILD_NETWORK:-0}" == 1 ]] && BUILD_NETWORK=default
-    IMAGE="mcp-worker-t5-local:$(git rev-parse --short=12 HEAD)"
-    run railway_build yes "local Docker; pinned bases; no image pulls; dependency network requires opt-in" docker build --pull=false --network="$BUILD_NETWORK" -f Dockerfile.railway --build-arg "BOT_REPORT_GIT_SHA=$BASE" --build-arg "BOT_REPORT_TREE_SHA=$TREE" --build-arg "BOT_REPORT_BUILD_TIME=$(git show -s --format=%cI HEAD)" -t "$IMAGE" .
-    run railway_provenance yes "exact source SHA/TREE and runtime binaries" bash scripts/verify-oci-image-local.sh "$IMAGE" railway
-    run railway_docker yes "disposable Docker volume/SQLite integration" env RAILWAY_DOCKER_INTEGRATION=1 RAILWAY_TEST_IMAGE="$IMAGE" node --test dist/tests/railway-platform-config-docker.test.js
-    STANDALONE="mcp-worker-t5-standalone:$(git rev-parse --short=12 HEAD)"
-    run standalone_build yes "local standalone Node22 Go1.24; no pulls; network opt-in" docker build --pull=false --network="$BUILD_NETWORK" -f Dockerfile --build-arg "BOT_REPORT_GIT_SHA=$BASE" --build-arg "BOT_REPORT_TREE_SHA=$TREE" --build-arg "BOT_REPORT_BUILD_TIME=$(git show -s --format=%cI HEAD)" -t "$STANDALONE" .
-    run standalone_provenance yes "distinct standalone OCI identity and runtime" bash scripts/verify-oci-image-local.sh "$STANDALONE" standalone
+    STANDALONE="mcp-worker-local:$(git rev-parse --short=12 HEAD)"
+    run standalone_build yes "local Docker; pinned Node22 / Go1.26.10 bases, no image pulls" docker build --pull=false --network="$BUILD_NETWORK" -f Dockerfile --build-arg "BOT_REPORT_GIT_SHA=$BASE" --build-arg "BOT_REPORT_TREE_SHA=$TREE" --build-arg "BOT_REPORT_BUILD_TIME=$(git show -s --format=%cI HEAD)" -t "$STANDALONE" .
+    run standalone_provenance yes "exact committed SHA/tree, runtime and nonroot entrypoint" bash scripts/verify-oci-image-local.sh "$STANDALONE" standalone
   else
-    for gate in railway_build railway_provenance railway_docker standalone_build standalone_provenance; do missing "$gate" yes "requires explicit T5_ALLOW_DOCKER_BUILD=1, local Docker daemon, clean committed source, cached pinned bases; no silent pull"; done
+    for gate in standalone_build standalone_provenance; do missing "$gate" yes "needs T5_ALLOW_DOCKER_BUILD=1, clean source, cached bases and local Docker; no silent pulls"; done
   fi
 else
-  for gate in linux_installer_lifecycle go_test go_race go_vet wss_worker go_isolation mysql_integration mysql_setup_ui mysql_worker_live playwright_browser railway_build railway_provenance railway_docker standalone_build standalone_provenance; do missing "$gate" yes "targeted mode; use --full with exact disposable prerequisites"; done
+  for gate in linux_installer_lifecycle go_test go_race go_vet wss_worker go_isolation mysql_integration mysql_setup_ui mysql_worker_live playwright_browser standalone_build standalone_provenance; do missing "$gate" yes "targeted mode; use --full with exact disposable prerequisites"; done
 fi
 # Network audit and Trivy are always separately approved and never implicitly executed.
 missing dependency_audit yes "npm audit requires explicit approved network access and fresh registry evidence"
 missing sbom_trivy yes "cached authorized Trivy image/DB and local OCI images required; run release-scan.sh explicitly"
 missing native_other_os yes "native Windows/macOS/systemd matrix is not available on Linux PC"
-missing live_railway yes "cloud deployment and external HTTPS forbidden"
+missing external_mcp yes "external HTTPS and ChatGPT OAuth not checked locally"
 missing offsite_restore yes "independent offsite provider not approved"
 node - "$RESULTS" "$OUT/summary.json" <<'NODE'
 const fs=require("node:fs");

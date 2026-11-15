@@ -3,10 +3,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 deny() { printf 'OCI_LOCAL_DENIED: %s\n' "$1" >&2; exit 1; }
-[[ "$#" -eq 2 ]] || deny 'usage: verify-oci-image-local.sh LOCAL_IMAGE_TAG standalone|railway'
+[[ "$#" -eq 2 ]] || deny 'usage: verify-oci-image-local.sh LOCAL_IMAGE_TAG standalone'
 image="$1"
 flavor="$2"
-[[ "$flavor" == railway || "$flavor" == standalone ]] || deny 'unknown image flavor'
+[[ "$flavor" == standalone ]] || deny 'only standalone image flavor is supported'
 command -v docker >/dev/null && docker info >/dev/null 2>&1 || deny 'local Docker daemon unavailable'
 [[ -z "$(git status --porcelain)" ]] || deny 'dirty source cannot be identified by committed SHA/TREE alone'
 sha="$(git rev-parse HEAD)"
@@ -19,18 +19,14 @@ label() { docker image inspect --format "{{index .Config.Labels \"$1\"}}" "$imag
 [[ "$(label org.bot-report.source-tree)" == "$tree" ]] || deny 'tree label != exact PC HEAD tree'
 [[ "$(label org.bot-report.node-base)" == "$node_base" ]] || deny 'Node 22 pinned base label mismatch'
 [[ "$(label org.bot-report.go-base)" == "$go_base" ]] || deny 'Go 1.26.10 pinned builder label mismatch'
-[[ "$(label org.bot-report.image-flavor)" == "$flavor" ]] || deny 'standalone/Railway image flavor mismatch'
+[[ "$(label org.bot-report.image-flavor)" == "$flavor" ]] || deny 'standalone image flavor mismatch'
 [[ "$(label org.bot-report.build-origin)" == 'local-pc-only' ]] || deny 'missing local PC provenance'
 [[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image")" == linux/amd64 ]] || deny 'image not linux/amd64'
 [[ "$(docker image inspect --format '{{json .Config.Cmd}}' "$image")" == '["node","dist/src/server.js"]' ]] || deny 'runtime command differs'
 [[ "$(docker image inspect --format '{{json .Config.Healthcheck.Test}}' "$image")" == *healthz* ]] || deny 'healthcheck missing'
-if [[ "$flavor" == railway ]]; then
-  [[ "$(docker image inspect --format '{{.Config.User}}' "$image")" == root ]] || deny 'Railway initializer must start root to chown volume'
-  [[ "$(docker image inspect --format '{{json .Config.Entrypoint}}' "$image")" == '["docker-entrypoint-railway.sh"]' ]] || deny 'Railway entrypoint mismatch'
-else
-  [[ "$(docker image inspect --format '{{.Config.User}}' "$image")" == node ]] || deny 'standalone runtime must start as node'
-  [[ "$(docker image inspect --format '{{json .Config.Entrypoint}}' "$image")" == '["docker-entrypoint.sh"]' ]] || deny 'standalone entrypoint mismatch'
-fi
+[[ "$(docker image inspect --format '{{.Config.User}}' "$image")" == node ]] || deny 'standalone runtime must start as node'
+[[ "$(docker image inspect --format '{{json .Config.Entrypoint}}' "$image")" == '["docker-entrypoint.sh"]' ]] || deny 'standalone entrypoint mismatch'
+
 # Runtime probes, not only self-declared labels, with no network or host mounts.
 runtime="$(docker run --rm --pull=never --network=none --read-only --entrypoint node "$image" --version)" || deny 'Node executable probe failed'
 [[ "$runtime" == v22.* ]] || deny 'runtime Node is not v22'

@@ -32,47 +32,9 @@ credentials. Browser SSH/terminal consoles and user/admin SSH Profiles are remov
 The Admin UI focuses on OAuth Clients, Workers (including Execution Targets), Audit
 and system settings. The terminal_list tool still lists Worker aliases for compatibility.
 
-## Railway + SQLite Quickstart (developer beta — not published)
-
-**No public Deploy Template URL exists or is approved.** See the
-[Railway deployment guide](docs/RAILWAY_QUICKSTART.md),
-[guided first-run steps](docs/QUICKSTART_ONBOARDING.md) and the
-[owner GO/NO-GO checklist](docs/RELEASE_READINESS.md).
-The local IaC review target is [.railway/railway.ts](.railway/railway.ts).
-Do not treat a source branch or local plan as an authorized live deployment.
-
-**Release-image rule:** all build/test work happens on the owner's Local PC. A GitHub-source Railway service would perform a remote build and is **not** the approved One-Click path. After explicit owner approval, publish the exact locally built/tested OCI image to an approved container registry; record and independently verify the registry's immutable `repository@sha256:...` manifest digest. Configure Railway Template Composer with **Docker Image** as the service source, not GitHub source or a mutable tag. Railway may then pull/run that image only after distinct billing and deployment approval. No approved registry digest, live project or public template URL exists today. See [Railway Quickstart](docs/RAILWAY_QUICKSTART.md), [release readiness](docs/RELEASE_READINESS.md) and [dependency security review](docs/DEPENDENCY_SECURITY_REVIEW.md).
-
-After separately approved billing, immutable source and a real HTTPS domain,
-a first-time owner follows this path:
-
-1. **Deploy:** confirm one Railway Node service, one persistent SQLite volume,
-   one replica and provider costs; retrieve the instance-only private setup key
-   through the approved protected configuration surface.
-2. **Admin:** visit `/setup`, enter the key only into the form, create a distinct
-   strong password and sign in. Getting Started then guides the next steps.
-3. **Endpoint + OAuth:** copy the canonical HTTPS `/mcp` URL, create an OAuth
-   client using ChatGPT's exact callback and **Read** (`bot_report.read`) only;
-   privately save the one-time Client ID/secret in ChatGPT's secure OAuth form.
-4. **Signed Worker:** install and enroll a Go Worker on a computer you control
-   **only after separate owner approval of a signed distribution**. Until then,
-   `/worker/install*` and `/worker/dist/*` return 503. Do not run unsigned
-   installers or grant shell access as part of the read-only walkthrough.
-5. **ChatGPT:** explicitly approve the OAuth scopes in ChatGPT, call read-only
-   `runtime_info`, inspect the Admin audit entry, and confirm the connector
-   really appears connected in ChatGPT. An internal healthcheck, online Worker
-   or a generic MCP audit cannot prove the external ChatGPT connection.
-
-No user needs to run Docker, SSH, SQL, edit a `.env` file or use a terminal for
-the *web-owner* setup path; local Worker installation still requires explicit
-machine-owner action. **Current decision: NO-GO** pending signed Worker approval,
-disabled remote GitHub Actions, approved Railway billing/domain, encrypted
-off-platform recovery and real external E2E. Never reuse credentials, data
-volumes or backups from another deployment.
-
 ## Version and release policy
 
-The published V2 main branch is the historical baseline; this Worker-only refactor exposes 15 MCP tools over outbound Go Worker transport. Stable releases will use versioned Git tags. This repository contains the V2 source release candidate. Public source access does not imply a stable signed release. See [the public release roadmap](docs/PUBLIC_RELEASE_ROADMAP.md).
+GitHub `main` is the active development baseline. The Worker-only service exposes MCP tools over outbound Go Worker transport. Docker release candidates use versioned Git tags; the signed Worker installer remains gated until separately approved. See [release checklist](docs/RELEASE_CHECKLIST.md) and [the public release roadmap](docs/PUBLIC_RELEASE_ROADMAP.md).
 
 ## Compatibility identifiers
 
