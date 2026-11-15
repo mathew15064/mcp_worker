@@ -68,6 +68,7 @@ case "$project" in ''|*[!a-z0-9_-]*|[-_]*) fail "Invalid saved project." ;; esac
 case "$port" in ''|*[!0-9]*) fail "Invalid saved port." ;; esac
 [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || fail "Invalid saved port."
 export BOT_REPORT_GIT_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+export BOT_REPORT_TREE_SHA="$(git rev-parse 'HEAD^{tree}' 2>/dev/null || echo unknown)"
 export BOT_REPORT_BUILD_TIME="$(git show -s --format=%cI HEAD 2>/dev/null || echo unknown)"
 compose() { docker compose --env-file "$envfile" -p "$project" -f docker-compose.yml "$@"; }
 compose config -q || fail "Invalid installer configuration."
