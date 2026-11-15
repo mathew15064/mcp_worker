@@ -74,8 +74,10 @@ and components; the npm lockfile does **not** inventory the full image.
 The standalone database image retains MySQL Community Server 8.4 base and
 entrypoint, removes optional mysql-shell and builds gosu 1.19 from pinned
 upstream commit `6456aaa0f3c854d199d0f037f068eb97515b7513`. The gosu
-LICENSE is copied into the image. The Node npm CLI is upgraded to 11.21.2
-from an integrity-verified registry tarball.
+LICENSE is copied into the image. The standalone application image uses npm
+only in its build stage; the final Node.js server image excludes the global
+npm and corepack CLI files. Node.js and production application dependencies
+remain present.
 
 **Unresolved release blockers:** owner/legal review of required attribution,
 the complete license/notice bundle for both images and eight Worker binaries,

@@ -52,13 +52,6 @@ FROM ${BOT_REPORT_NODE_IMAGE} AS runner
 
 WORKDIR /app
 
-# Upgrade the npm CLI shipped by the Node base without changing Node itself.
-# Verify the exact npm registry tarball integrity before installing.
-RUN set -eux; cd /tmp; npm pack npm@11.21.2 --silent; \
-    node -e "const fs=require('node:fs'),c=require('node:crypto');if(c.createHash('sha512').update(fs.readFileSync('npm-11.21.2.tgz')).digest('base64')!=='7HPApk+AflMUavSseL1Pm6CnYqMIHk53x+KmuhqmTDqPkjPMgxIpTPcTqsE91EKNw4gFBJV9fnXiSdGm1DXq9A==')process.exit(1)"; \
-    npm install -g --ignore-scripts /tmp/npm-11.21.2.tgz; \
-    test "$(npm --version)" = 11.21.2; rm /tmp/npm-11.21.2.tgz; npm cache clean --force
-
 # Optional build provenance. Deploy tooling injects these; direct/manual builds may leave them as unknown.
 ARG BOT_REPORT_GIT_SHA=unknown
 ARG BOT_REPORT_BUILD_TIME=unknown
@@ -101,7 +94,12 @@ COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Ensure data directory exists and assign ownership to non-root node user (UID: 1000, GID: 1000)
-RUN apk upgrade --no-cache && mkdir -p /app/data && chown -R node:node /app
+# npm and corepack are build tools, not required by the running Node server.
+# Remove their CLI entrypoints and runtime files without adding a Docker layer.
+RUN apk upgrade --no-cache \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+    && mkdir -p /app/data && chown -R node:node /app
 
 # Switch to standard non-root user provided by node:22.22.3-alpine
 USER node
