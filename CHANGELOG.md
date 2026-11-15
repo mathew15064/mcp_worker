@@ -4,7 +4,7 @@
 
 - Published Linux/amd64 Docker image `mathew15604/mcp-worker:2.0.0-rc.2` from
   source commit `b237d156ff49669127bfafdf700d4886746f29a5`.
-- Immutable OCI index digest: `sha256:001bb9642fd5b5098c29cecc15dc466f29a5d6d7725be84b9565134ca3b`.
+- Immutable OCI index digest: `sha256:001bb9642fd5b5098c29cecc15dc466f29c66e3a5d6d7725be84b9565134ca3b`.
 - Simplified source: retired Railway deploy/CI assets, stale reports,
   global npm from the running image, and legacy Node Worker agent/CLI.
   The Go Worker is the only shipped Worker implementation.

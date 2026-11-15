@@ -7,7 +7,10 @@ GitHub `main` remains the development baseline.
 - Latest Docker Hub tag: `mathew15604/mcp-worker:2.0.0-rc.2` (Linux/amd64).
 - Tested source: Git tag [`v2.0.0-rc.2`](https://github.com/mathew15064/mcp_worker/tree/v2.0.0-rc.2),
   commit `b237d156ff49669127bfafdf700d4886746f29a5`.
-- Immutable OCI index digest: `sha256:001bb9642fd5b5098c29cecc15dc466f29a5d6d7725be84b9565134ca3b`.
+- Immutable OCI index digest: `sha256:001bb9642fd5b5098c29cecc15dc466f29c66e3a5d6d7725be84b9565134ca3b`.
+- **Erratum:** The already-published annotated Git tag message contains a truncated
+  image digest. Use the verified 64-hex-character digest above instead; do not
+  rewrite the source tag or overwrite the registry image.
 - PC checks: 169 Node tests passed (0 failed, 9 skipped), 3 real Go Worker WSS/OAuth
   tests, 16 Chromium tests, Go unit/race/vet, exact-commit Docker build,
   provenance verification and non-root HTTP health smoke.

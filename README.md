@@ -10,7 +10,9 @@ Latest candidate: [v2.0.0-rc.2 source](https://github.com/mathew15064/mcp_worker
 docker pull mathew15604/mcp-worker:2.0.0-rc.2
 ```
 
-Immutable image: `docker.io/mathew15604/mcp-worker@sha256:001bb9642fd5b5098c29cecc15dc466f29a5d6d7725be84b9565134ca3b`.
+Immutable image: `docker.io/mathew15604/mcp-worker@sha256:001bb9642fd5b5098c29cecc15dc466f29c66e3a5d6d7725be84b9565134ca3b`.
+
+**Digest erratum:** The existing annotated Git tag message for `v2.0.0-rc.2` accidentally truncates the digest; use the verified 64-character digest above.
 
 **Release-candidate limitations:** The signed Worker installer distribution remains disabled
 (`/worker/install*` and `/worker/dist/*` return HTTP 503); this is not a
