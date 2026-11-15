@@ -1,22 +1,27 @@
 # Changelog
 
-## Unreleased — V2 public preparation
+## v2.0.0-rc.2 — 2026-11-15 (public Docker image candidate)
 
-Source is prepared for the new MIT repository; no stable release tag or image has been published.
+- Published Linux/amd64 Docker image `mathew15604/mcp-worker:2.0.0-rc.2` from
+  source commit `b237d156ff49669127bfafdf700d4886746f29a5`.
+- Immutable OCI index digest: `sha256:001bb9642fd5b5098c29cecc15dc466f29a5d6d7725be84b9565134ca3b`.
+- Simplified source: retired Railway deploy/CI assets, stale reports,
+  global npm from the running image, and legacy Node Worker agent/CLI.
+  The Go Worker is the only shipped Worker implementation.
+- Verified locally: 169 Node tests passed (0 failed, 9 skipped), real Go
+  Worker WSS/OAuth 3/3, Chromium 16/16, Go unit/race/vet, Docker provenance,
+  non-root HTTP health, and Trivy app/MySQL 0 HIGH/CRITICAL.
+- Existing enrolled identities are not changed. Public signed Worker
+  distribution remains disabled (HTTP 503); external ChatGPT HTTPS and
+  offsite restore are not yet release-certified. Linux/amd64 only.
+- No Railway deployment, CI/CD or `latest` Docker tag.
 
-- V2 retains exactly 19 MCP tools, outbound Go Worker, OAuth ownership,
-  MySQL and the Admin UI; obsolete game/observer runtime removed.
-- Standalone Linux Docker quickstart with a private bundled database,
-  loopback web listener, generated secrets and explicit fresh initialization.
-- Getting Started checklist and local read-only OAuth/PKCE smoke helper.
-- User-mode Worker installer by default; checksum/signature verification,
-  previous-binary rollback and identity-preserving Linux lifecycle.
-- Release verification, pinned bases, CI runtime alignment, SBOM and
-  HIGH/CRITICAL scan gate.
-- Go 1.26.10 Worker/gosu builds, npm 11.21.2 with Node 26.13.0, and
-  bundled MySQL 8.4.13 derivative without optional MySQL Shell.
-- Public quickstart, remote MCP, security, recovery and contribution docs.
+## v2.0.0-rc.1 — 2026-11-15 (historical Docker image candidate)
 
-Known gates: third-party notices and source obligations, sanitized source audit,
-private security contact, native macOS/Windows lifecycle, systemd recovery,
-external HTTPS MCP, remote CI and official release signing/publication.
+- First public standalone Linux/amd64 Docker RC, sourced from
+  `ee27c57b5bba0d9e71693efeeb4702c4f1a839ea`.
+- Image digest: `sha256:d520acbefafc64f45f6217e95e35271c1be716c2c2c37f0b12295cae8aff2bf5`.
+- Includes the initial Worker-only MCP service, OAuth, admin UI, local
+  Docker quickstart and signed-distribution fail-closed controls.
+- This version remains published for reproducibility; it is not
+  overwritten by the `rc.2` update.

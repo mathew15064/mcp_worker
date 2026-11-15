@@ -4,13 +4,13 @@
 
 The standalone Linux/amd64 image is available on
 [Docker Hub](https://hub.docker.com/r/mathew15604/mcp-worker).
-It is built from the tagged [v2.0.0-rc.1 source](https://github.com/mathew15064/mcp_worker/tree/v2.0.0-rc.1).
+Latest candidate: [v2.0.0-rc.2 source](https://github.com/mathew15064/mcp_worker/tree/v2.0.0-rc.2) (Go Worker only). The previous `2.0.0-rc.1` remains available.
 
 ```sh
-docker pull mathew15604/mcp-worker:2.0.0-rc.1
+docker pull mathew15604/mcp-worker:2.0.0-rc.2
 ```
 
-Immutable image: `docker.io/mathew15604/mcp-worker@sha256:d520acbefafc64f45f6217e95e35271c1be716c2c2c37f0b12295cae8aff2bf5`.
+Immutable image: `docker.io/mathew15604/mcp-worker@sha256:001bb9642fd5b5098c29cecc15dc466f29a5d6d7725be84b9565134ca3b`.
 
 **Release-candidate limitations:** The signed Worker installer distribution remains disabled
 (`/worker/install*` and `/worker/dist/*` return HTTP 503); this is not a
