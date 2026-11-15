@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import { railwayWorkerDistributionBlocked } from '../src/services/workerReleaseGate';
 
 function cookie(response: Response) {
   return (response.headers.get('set-cookie') || '').split(';')[0];
@@ -14,7 +15,7 @@ function csrf(html: string) {
   return html.match(/name="_csrf" value="([^"]+)"/)?.[1] || '';
 }
 
-void test('Railway SQLite volume survives restart and locks owner setup', async () => {
+void test('Railway SQLite volume survives restart and locks owner setup', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-railway-sqlite-'));
   const keys = [
     'MCP_PLATFORM',
@@ -263,7 +264,15 @@ void test('Railway SQLite volume survives restart and locks owner setup', async 
     try {
       browser = await chromium.launch({ headless: true });
     } catch {
-      console.log('T5 browser check skipped: Chromium is not installed on this PC');
+      // Register a machine-readable TAP skip instead of silently printing
+      // "skipped" while the parent HTTP test reports success.
+      await t.test(
+        'Chromium browser probe',
+        {
+          skip: 'Chromium is not installed; mandatory Playwright gate must run separately',
+        },
+        () => {},
+      );
     }
     if (browser) {
       try {
@@ -643,9 +652,16 @@ void test('Even fully evidenced local prerequisites never attest external ChatGP
       baseUrl: 'https://owner.example',
     });
     assert.match(completeLocalFacts, /data-onboarding-step="6" data-complete="true"/);
-    assert.match(completeLocalFacts, /data-onboarding-status="pending"/);
+    // Each isolated Wave2 branch starts at the same base. After the
+    // T1 fail-closed gate is integrated, local is also deliberately blocked.
+    assert.match(
+      completeLocalFacts,
+      railwayWorkerDistributionBlocked()
+        ? /data-onboarding-status="blocked"/
+        : /data-onboarding-status="pending"/,
+    );
     assert.match(completeLocalFacts, /data-chatgpt-verification="unverified"/);
-    assert.match(completeLocalFacts, /ChatGPT connection still needs external verification/);
+    assert.match(completeLocalFacts, /Not automatically verified/);
     assert.doesNotMatch(completeLocalFacts, /data-onboarding-status="done"/);
     const unsafeOrigin = onboardingPage({
       ...common,

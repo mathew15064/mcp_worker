@@ -179,8 +179,91 @@ export class SchemaBuilder {
   async table(name: string, callback: (table: AlterTableBlueprint) => void) {
     const blueprint = new AlterTableBlueprint(name);
     callback(blueprint);
-    for (const operation of blueprint.operations)
+    for (const operation of blueprint.operations) {
+      // Retry a partially applied MySQL DDL migration without repeating ADD COLUMN.
+      // Do not silently accept a different legacy column definition.
+      const added = /^ADD COLUMN \`([A-Za-z0-9_]+)\` ([A-Z0-9()]+) (NULL|NOT NULL)/.exec(operation);
+      if (added) {
+        const existing = await this.adapter.queryOne<{
+          COLUMN_TYPE: string;
+          IS_NULLABLE: string;
+        }>(
+          `SELECT COLUMN_TYPE, IS_NULLABLE FROM information_schema.columns
+           WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
+          [name, added[1]],
+        );
+        if (existing) {
+          if (
+            existing.COLUMN_TYPE.toLowerCase() !== added[2].toLowerCase() ||
+            (existing.IS_NULLABLE === 'YES') !== (added[3] === 'NULL')
+          ) {
+            throw new Error(`MySQL migration column conflict: ${name}.${added[1]}`);
+          }
+          continue;
+        }
+      }
       await this.adapter.exec(`ALTER TABLE ${quoteId(name)} ${operation}`);
+    }
+  }
+
+  async addIndexIfMissing(table: string, index: string, columns: string[]) {
+    const existing = await this.adapter.queryAll<{ COLUMN_NAME: string; NON_UNIQUE: number }>(
+      `SELECT COLUMN_NAME, NON_UNIQUE FROM information_schema.statistics
+       WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?
+       ORDER BY SEQ_IN_INDEX`,
+      [table, index],
+    );
+    if (existing.length) {
+      if (
+        existing.some((row) => Number(row.NON_UNIQUE) !== 1) ||
+        existing.map((row) => row.COLUMN_NAME).join(',') !== columns.join(',')
+      ) {
+        throw new Error(`MySQL migration index conflict: ${table}.${index}`);
+      }
+      return;
+    }
+    await this.adapter.exec(
+      `ALTER TABLE ${quoteId(table)} ADD INDEX ${quoteId(index)} (${columns.map(quoteId).join(', ')})`,
+    );
+  }
+
+  async addForeignIfMissing(
+    table: string,
+    constraint: string,
+    column: string,
+    referencedTable: string,
+    onDelete: 'CASCADE' | 'SET NULL',
+  ) {
+    const existing = await this.adapter.queryOne<{
+      COLUMN_NAME: string;
+      REFERENCED_TABLE_NAME: string;
+      REFERENCED_COLUMN_NAME: string;
+      DELETE_RULE: string;
+    }>(
+      `SELECT k.COLUMN_NAME, k.REFERENCED_TABLE_NAME, k.REFERENCED_COLUMN_NAME, r.DELETE_RULE
+       FROM information_schema.key_column_usage k
+       JOIN information_schema.referential_constraints r
+         ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA
+        AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME
+        AND r.TABLE_NAME = k.TABLE_NAME
+       WHERE k.TABLE_SCHEMA = DATABASE() AND k.TABLE_NAME = ? AND k.CONSTRAINT_NAME = ?`,
+      [table, constraint],
+    );
+    if (existing) {
+      if (
+        existing.COLUMN_NAME !== column ||
+        existing.REFERENCED_TABLE_NAME !== referencedTable ||
+        existing.REFERENCED_COLUMN_NAME !== 'id' ||
+        existing.DELETE_RULE !== onDelete
+      ) {
+        throw new Error(`MySQL migration foreign key conflict: ${table}.${constraint}`);
+      }
+      return;
+    }
+    await this.adapter.exec(
+      `ALTER TABLE ${quoteId(table)} ADD CONSTRAINT ${quoteId(constraint)} FOREIGN KEY
+       (${quoteId(column)}) REFERENCES ${quoteId(referencedTable)} (${quoteId('id')}) ON DELETE ${onDelete}`,
+    );
   }
   async dropTable(name: string) {
     await this.adapter.exec(`DROP TABLE IF EXISTS ${quoteId(name)}`);

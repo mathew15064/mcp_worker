@@ -71,7 +71,12 @@ router.use((req, res, next) => {
 
 // Helper to determine if an authorization error can safely redirect
 async function isSafeErrorRedirect(clientId: unknown, redirectUri: unknown) {
-  if (typeof clientId !== 'string' || typeof redirectUri !== 'string') return false;
+  if (
+    typeof clientId !== 'string' ||
+    typeof redirectUri !== 'string' ||
+    !mcpOAuthService.isSafeRedirectUri(redirectUri)
+  )
+    return false;
   try {
     const client = await mcpOAuthRepository.findClientByClientId(clientId);
     if (!client || client.status !== 'active') return false;

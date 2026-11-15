@@ -8,6 +8,7 @@ import type { WorkerStreamHandlers, WorkerPayload, WorkerJobEnvelope } from './w
 import { WebSocketServer, WebSocket } from 'ws';
 import workerAuthService from './workerAuthService';
 import workerRepository from '../repositories/workerRepository';
+import userRepository from '../repositories/userRepository';
 const { WORKER_CONNECT_PATH } = workerAuthService;
 interface AlertPayload {
   code: string;
@@ -27,7 +28,12 @@ interface Notifier {
 }
 import ownerNotificationService from './ownerNotificationService';
 type WorkerRecord = NonNullable<Awaited<ReturnType<typeof workerRepository.findWorkerById>>>;
-type WorkerSocket = WebSocket & { workerId?: string; worker?: WorkerRecord };
+type WorkerSocket = WebSocket & {
+  workerId?: string;
+  worker?: WorkerRecord;
+  authorizedCapabilities?: string[];
+  lastHeartbeatAt?: number;
+};
 type WorkerRequest = IncomingMessage & { workerAuth?: { worker: WorkerRecord } };
 type WorkerRepository = Pick<
   typeof workerRepository,
@@ -60,6 +66,7 @@ interface BrokerOptions {
   maxStreamsGlobal?: number;
   maxStreamsPerWorker?: number;
   maxBufferedBytes?: number;
+  ownerStatusLookup?: (userId: string) => Promise<string | null>;
 }
 interface DispatchOptions {
   timeoutMs?: number | null;
@@ -107,12 +114,14 @@ class WorkerConnectionBroker {
   maxStreamsGlobal: number;
   maxStreamsPerWorker: number;
   maxBufferedBytes: number;
+  ownerStatusLookup: (userId: string) => Promise<string | null>;
   connections: Map<string, WorkerSocket>;
   pending: Map<string, PendingJob>;
   streams: Map<string, StreamRecord>;
   wss: WebSocketServer | null;
   server: HttpServer | null;
   upgradeHandler: ((request: WorkerRequest, socket: Duplex, head: Buffer) => void) | null;
+  heartbeatTimer: NodeJS.Timeout | null;
   constructor({
     authService = workerAuthService,
     repository = workerRepository,
@@ -125,6 +134,8 @@ class WorkerConnectionBroker {
     maxStreamsGlobal = 128,
     maxStreamsPerWorker = 16,
     maxBufferedBytes = 8 * 1024 * 1024,
+    ownerStatusLookup = async (userId: string) =>
+      (await userRepository.findById(userId))?.status ?? null,
   }: BrokerOptions = {}) {
     this.authService = authService;
     this.repository = repository;
@@ -137,12 +148,14 @@ class WorkerConnectionBroker {
     this.maxStreamsGlobal = maxStreamsGlobal;
     this.maxStreamsPerWorker = maxStreamsPerWorker;
     this.maxBufferedBytes = maxBufferedBytes;
+    this.ownerStatusLookup = ownerStatusLookup;
     this.connections = new Map<string, WorkerSocket>();
     this.pending = new Map<string, PendingJob>();
     this.streams = new Map<string, StreamRecord>();
     this.wss = null;
     this.server = null;
     this.upgradeHandler = null;
+    this.heartbeatTimer = null;
   }
 
   attach(server: HttpServer) {
@@ -189,6 +202,12 @@ class WorkerConnectionBroker {
     };
     server.on('upgrade', this.upgradeHandler);
     this.wss.on('connection', (ws, request) => this.handleConnection(ws, request));
+    this.heartbeatTimer = setInterval(() => {
+      this.expireStaleConnections();
+      void this.revalidateOwners();
+      void this.revalidateWorkerIdentities();
+    }, 20_000);
+    this.heartbeatTimer.unref();
     return this;
   }
 
@@ -210,7 +229,10 @@ class WorkerConnectionBroker {
       this.handleDisconnect(previous);
     }
     ws.workerId = workerId;
-    ws.worker = worker;
+    // Runtime advertisements must not mutate persisted, owner-approved grants.
+    ws.authorizedCapabilities = this.authService.normalizeCapabilities(worker.capabilities);
+    ws.worker = { ...worker, capabilities: [...ws.authorizedCapabilities] };
+    ws.lastHeartbeatAt = Date.now();
     Promise.resolve(this.repository.updateWorkerPresence(workerId, 'online')).catch(() => {});
 
     try {
@@ -236,12 +258,7 @@ class WorkerConnectionBroker {
       } catch {}
       return;
     }
-    if (
-      ws.workerId &&
-      this.connections.has(ws.workerId) &&
-      this.connections.get(ws.workerId) !== ws
-    )
-      return;
+    if (!ws.workerId || this.connections.get(ws.workerId) !== ws) return;
     if (message.type === 'resource_alert') {
       const code = stringifyUnknown(message.code || '');
       if (!['WORKER_MEMORY_EMERGENCY', 'WORKER_MEMORY_RECOVERED'].includes(code)) return;
@@ -276,23 +293,15 @@ class WorkerConnectionBroker {
       return;
     }
     if (message.type === 'heartbeat') {
-      const capabilities = Array.isArray(message.capabilities)
-        ? this.authService.normalizeCapabilities(message.capabilities)
-        : null;
-      const previous = this.authService.normalizeCapabilities(
-        Array.isArray(ws.worker?.capabilities) ? ws.worker.capabilities : [],
-      );
-      if (
-        capabilities &&
-        (capabilities.length !== previous.length ||
-          capabilities.some((cap, i) => cap !== previous[i]))
-      ) {
-        if (ws.worker) ws.worker.capabilities = capabilities;
-        Promise.resolve(
-          this.repository.updateWorkerCapabilities(ws.workerId || '', capabilities),
-        ).catch(() => {});
+      ws.lastHeartbeatAt = Date.now();
+      if (Array.isArray(message.capabilities) && ws.worker) {
+        const authorized = ws.authorizedCapabilities ?? ws.worker.capabilities;
+        const available = this.authService
+          .normalizeCapabilities(message.capabilities)
+          .filter((capability) => authorized.includes(capability));
+        ws.worker.capabilities = available;
       }
-      Promise.resolve(this.repository.touchWorker(ws.workerId || '')).catch(() => {});
+      Promise.resolve(this.repository.touchWorker(ws.workerId)).catch(() => {});
       try {
         ws.send(JSON.stringify({ type: 'heartbeat_ack', server_time: new Date().toISOString() }));
       } catch {}
@@ -369,6 +378,17 @@ class WorkerConnectionBroker {
     }
   }
 
+  expireStaleConnections(now = Date.now()) {
+    const maxHeartbeatSilenceMs = 75_000; // Go Worker sends every 20 seconds.
+    for (const ws of this.connections.values()) {
+      if (now - (ws.lastHeartbeatAt ?? now) <= maxHeartbeatSilenceMs) continue;
+      try {
+        ws.close(4002, 'heartbeat-expired');
+      } catch {}
+      this.handleDisconnect(ws);
+    }
+  }
+
   isOnline(workerId: string) {
     const ws = this.connections.get(workerId);
     return Boolean(ws && ws.readyState === WebSocket.OPEN);
@@ -432,6 +452,134 @@ class WorkerConnectionBroker {
     } catch {}
     this.handleDisconnect(ws);
     return true;
+  }
+
+  // Called after the owner's disabled status has been persisted.
+  // Revocation clears pending jobs and streams through handleDisconnect.
+  disconnectOwner(ownerUserId: string) {
+    let disconnected = 0;
+    for (const [workerId, ws] of this.connections) {
+      if (ws.worker?.owner_user_id !== ownerUserId) continue;
+      if (this.disconnect(workerId, { code: 4003, reason: 'owner-disabled' })) {
+        disconnected++;
+      }
+    }
+    return disconnected;
+  }
+
+  private async assertOwnerActive(workerId: string, ws: WorkerSocket, worker: WorkerRecord) {
+    if (!worker.owner_user_id) return;
+    let status: string | null;
+    try {
+      status = await this.ownerStatusLookup(worker.owner_user_id);
+    } catch {
+      if (this.connections.get(workerId) === ws) {
+        this.disconnect(workerId, { code: 4003, reason: 'owner-status-unavailable' });
+      }
+      throw brokerError('WORKER_OWNER_UNAVAILABLE', 'Worker owner status cannot be verified.');
+    }
+    if (this.connections.get(workerId) !== ws || ws.readyState !== WebSocket.OPEN) {
+      throw brokerError('WORKER_DISCONNECTED', 'Worker connection changed during owner check.');
+    }
+    if (status !== 'active') {
+      this.disconnect(workerId, { code: 4003, reason: 'owner-disabled' });
+      throw brokerError('WORKER_OWNER_DISABLED', 'Worker owner is not active.', 403);
+    }
+  }
+
+  // Also catches status changes made outside this app process. A failed owner
+  // lookup closes the socket instead of treating an unknown owner as active.
+  async revalidateOwners() {
+    await Promise.all(
+      [...this.connections.entries()].map(async ([workerId, ws]) => {
+        if (!ws.worker?.owner_user_id || ws.readyState !== WebSocket.OPEN) return;
+        try {
+          await this.assertOwnerActive(workerId, ws, ws.worker);
+        } catch {
+          // assertOwnerActive already revoked this exact socket if needed.
+        }
+      }),
+    );
+  }
+
+  // The socket authenticates a specific owner/key and initial grant set.
+  // Persisted changes must not silently transfer its existing authority.
+  private sessionRevocationReason(ws: WorkerSocket, current: WorkerRecord): string | null {
+    if (
+      !ws.worker ||
+      ws.worker.owner_user_id !== current.owner_user_id ||
+      ws.worker.public_key !== current.public_key
+    ) {
+      return 'worker-identity-changed';
+    }
+    const grants = ws.authorizedCapabilities ?? ws.worker.capabilities;
+    if (
+      !Array.isArray(grants) ||
+      !Array.isArray(current.capabilities) ||
+      grants.some((grant) => !current.capabilities.includes(grant))
+    ) {
+      return 'worker-capability-revoked';
+    }
+    return null;
+  }
+
+  // A Worker disabled or removed by another server instance must lose its
+  // existing socket and workloads, not merely fail its next job dispatch.
+  async revalidateWorkerIdentities() {
+    await Promise.all(
+      [...this.connections.entries()].map(async ([workerId, ws]) => {
+        if (!ws.worker || ws.readyState !== WebSocket.OPEN) return;
+        let current: WorkerRecord | null;
+        try {
+          current = await this.repository.findWorkerById(workerId);
+        } catch {
+          if (this.connections.get(workerId) === ws) {
+            this.disconnect(workerId, { code: 4003, reason: 'worker-status-unavailable' });
+          }
+          return;
+        }
+        if (this.connections.get(workerId) !== ws || ws.readyState !== WebSocket.OPEN) return;
+        if (!current) {
+          this.disconnect(workerId, { code: 4004, reason: 'worker-removed' });
+        } else if (!current.enabled) {
+          this.disconnect(workerId, { code: 4003, reason: 'worker-disabled' });
+        } else {
+          const reason = this.sessionRevocationReason(ws, current);
+          if (reason) this.disconnect(workerId, { code: 4003, reason });
+        }
+      }),
+    );
+  }
+
+  private async verifiedConnectedWorker(workerId: string, ws: WorkerSocket): Promise<WorkerRecord> {
+    let worker: WorkerRecord | null;
+    try {
+      worker = await this.repository.findWorkerById(workerId);
+    } catch {
+      if (this.connections.get(workerId) === ws) {
+        this.disconnect(workerId, { code: 4003, reason: 'worker-status-unavailable' });
+      }
+      throw brokerError('WORKER_STATUS_UNAVAILABLE', 'Worker identity cannot be verified.');
+    }
+    // A repository lookup may complete after this socket has been replaced.
+    if (this.connections.get(workerId) !== ws || ws.readyState !== WebSocket.OPEN) {
+      throw brokerError('WORKER_DISCONNECTED', 'Worker connection changed during request setup.');
+    }
+    if (!worker) {
+      this.disconnect(workerId, { code: 4004, reason: 'worker-removed' });
+      throw brokerError('WORKER_NOT_FOUND', 'Worker not found.', 404);
+    }
+    if (!worker.enabled) {
+      this.disconnect(workerId, { code: 4003, reason: 'worker-disabled' });
+      throw brokerError('WORKER_DISABLED', 'Worker identity is disabled.', 403);
+    }
+    const revocationReason = this.sessionRevocationReason(ws, worker);
+    if (revocationReason) {
+      this.disconnect(workerId, { code: 4003, reason: revocationReason });
+      throw brokerError('WORKER_SESSION_REVOKED', 'Worker session authority changed.', 403);
+    }
+    await this.assertOwnerActive(workerId, ws, worker);
+    return worker;
   }
 
   assertCapacity(
@@ -508,18 +656,17 @@ class WorkerConnectionBroker {
     const ws = this.connections.get(workerId);
     if (!ws || ws.readyState !== WebSocket.OPEN)
       throw brokerError('WORKER_OFFLINE', 'Worker is not connected.');
-    const worker = await this.repository.findWorkerById(workerId);
-    // The lookup can yield while a Worker disconnects or reconnects.
-    // Never send a new job or stream using a superseded socket.
+    const worker = await this.verifiedConnectedWorker(workerId, ws);
     if (this.connections.get(workerId) !== ws || ws.readyState !== WebSocket.OPEN) {
-      throw brokerError('WORKER_DISCONNECTED', 'Worker connection changed during request setup.');
+      throw brokerError('WORKER_DISCONNECTED', 'Worker connection changed during authorization.');
     }
-    if (!worker) throw brokerError('WORKER_NOT_FOUND', 'Worker not found.', 404);
-    if (!worker.enabled) throw brokerError('WORKER_DISABLED', 'Worker identity is disabled.', 403);
     const capabilities = Array.isArray(ws.worker?.capabilities)
       ? ws.worker.capabilities
       : worker.capabilities;
-    if (enforceCapability && !capabilities.includes(operation)) {
+    if (
+      enforceCapability &&
+      (!worker.capabilities.includes(operation) || !capabilities.includes(operation))
+    ) {
       throw brokerError(
         'WORKER_CAPABILITY_DENIED',
         `Worker does not allow operation '${operation}'.`,
@@ -572,18 +719,14 @@ class WorkerConnectionBroker {
     const ws = this.connections.get(workerId);
     if (!ws || ws.readyState !== WebSocket.OPEN)
       throw brokerError('WORKER_OFFLINE', 'Worker is not connected.');
-    const worker = await this.repository.findWorkerById(workerId);
-    // The lookup can yield while a Worker disconnects or reconnects.
-    // Never send a new job or stream using a superseded socket.
+    const worker = await this.verifiedConnectedWorker(workerId, ws);
     if (this.connections.get(workerId) !== ws || ws.readyState !== WebSocket.OPEN) {
-      throw brokerError('WORKER_DISCONNECTED', 'Worker connection changed during request setup.');
+      throw brokerError('WORKER_DISCONNECTED', 'Worker connection changed during authorization.');
     }
-    if (!worker) throw brokerError('WORKER_NOT_FOUND', 'Worker not found.', 404);
-    if (!worker.enabled) throw brokerError('WORKER_DISABLED', 'Worker identity is disabled.', 403);
     const capabilities = Array.isArray(ws.worker?.capabilities)
       ? ws.worker.capabilities
       : worker.capabilities;
-    if (!capabilities.includes(operation))
+    if (!worker.capabilities.includes(operation) || !capabilities.includes(operation))
       throw brokerError(
         'WORKER_CAPABILITY_DENIED',
         `Worker does not allow operation '${operation}'.`,
@@ -630,6 +773,10 @@ class WorkerConnectionBroker {
   }
 
   close() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
       pending.reject(brokerError('WORKER_BROKER_CLOSED', 'Worker broker is shutting down.'));

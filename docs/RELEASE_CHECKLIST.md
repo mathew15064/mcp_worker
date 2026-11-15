@@ -1,52 +1,79 @@
-# V2 publication checklist
+# V2 release checklist — current PC candidate
 
-This is a gate checklist, not an authorization to publish.
+**Decision: NO_GO / review required.** This checklist does not authorize a tag,
+commit, signing root, image publication, Railway operation, CI, production
+credential use, or acceptance of outside OAuth clients. Main reviewer alone
+assigns a task PASS; the product owner alone may authorize release.
 
-- [x] Local source cleanup and preliminary dependency provenance review.
-- [x] Standalone fresh install, persistence, read-only OAuth/PKCE onboarding.
-- [x] Real Linux Worker: all 19 tools, upgrade, rollback, signature rejection.
-- [x] Native Linux **user-mode** installer lifecycle: valid RSA signature,
-  rejection of invalid/missing signatures and bad checksums before replacement,
-  fresh install, no-op reinstall, distinct binary upgrade, verified rollback,
-  refusal of manual operations on systemd-managed identity, and uninstall,
-  all under a disposable unprivileged HOME (2026-11-11).
-- [x] Local release verification: 101/101 TS6.3 regression (2026-11-11);
-  eight Worker cross-build checksums.
-- [x] Local Chromium Admin UI suite (12 tests, P8.3).
-- [x] Cold backup/restore drill into a separate project: original volumes
-  retained, encrypted bootstrap, user/Worker records, OAuth and MCP verified.
-- [x] P8.5.1 image scan: zero HIGH/CRITICAL findings for tested app/MySQL
-  images using Trivy 0.76.2, DB updated 2026-11-10 19:01 UTC.
-- [ ] Repeat verification and scan against the final release commit/artifacts.
-- [ ] Independent secret/history/PII scan and owner-approved sanitized export.
-- [x] Owner-provided MIT LICENSE retained in new repository.
-- [ ] Third-party notices and corresponding-source
-  obligations for distributed MySQL derivative and other dependencies.
-- [ ] Private security reporting channel approved by owner.
-- [ ] Native macOS/Windows installer upgrade/rollback/uninstall tests.
-- [ ] Explicit systemd upgrade/recovery/uninstall validation.
-- [ ] External HTTPS reverse proxy and remote MCP client end-to-end verification.
-- [ ] Actual CI run on approved repository; inspect artifacts and scan gates.
-- [ ] Owner-approved signing key/public-key distribution and signed artifacts.
-- [ ] Release tag, image identity/provenance, rollback and backup evidence,
-  owner approval to publish.
+## Consolidated PC verification (2026-11-15, pre-freeze)
 
-## TS6.3 candidate evidence (2026-11-11)
+- Node 183 PASS, 0 FAIL, 10 environment SKIP; disposable MySQL 5/5; localhost OAuth/WSS/Go Worker 3/3; Chromium 16/16; Go 1.24 unit/race/vet; Node typecheck/lint/format/build PASS.
+- npm audit production: zero vulnerabilities; all-dependency audit: nine moderate dev-tool advisories, zero high/critical. Preliminary source secret-pattern scan found no matches; independent PII/history review remains pending.
+- Exact committed-source OCI builds, approved production Worker signing, external ChatGPT HTTPS connection and offsite recovery remain release gates. Repository-level GitHub Actions disablement has not been verified: no remote push.
 
-For the tested source head `94ec834`, the [GitHub CI](https://github.com/mathew15064/mcp_worker/actions/runs/42989467358)
-and [release-verification](https://github.com/mathew15064/mcp_worker/actions/runs/42989467214)
-workflows passed. A local clean-checkout rerun passed 101/101 regression
-tests, and temporary-key signature verification correctly rejected a
-tampered manifest. Gitleaks found only triaged SHA-256 quality-baseline
-fingerprints in its 46-commit history scan. See
-[the dated readiness audit](RELEASE_READINESS_2026-11-11.md).
+## Earlier T5 independent execution (2026-11-14, historical)
 
-These are **candidate** results, not final artifact/owner approval. An extra
-local Trivy attempt failed while downloading its database; do not mark that
-separate attempt PASS. External HTTPS, installer lifecycle, licensing, signing
-key custody and independent audits remain open.
+- RUN: `RUN-MCPW-V200-FULLDEV5-20261114T130527Z-33d23fe27be9`;
+  Task T5, snapshot version 1; PC-only checkout
+  `/root/mcpw_w2_t5_20261114`.
+- HEAD: `48473a309b6f832a44265249ab7227c0d45c62c3`;
+  TREE: `522e12c5347b4d8d6880e20d421b98127e855fbb`.
+  The worktree is **dirty by design** (an earlier T5 browser SKIP fix plus
+  this local QA patch), so there is **no committed release artifact** and
+  no exact clean-source OCI provenance claim. Other workers have separate
+  unintegrated changes.
+- PASS locally: Node 22 quality/typecheck/build; SQLite/OAuth quickstart
+  fixture; signed-release unit tests; native Linux test-only signed
+  installer lifecycle (canonical 9-entry manifest, complete 40-hex
+  version identities, independent pinned RSA SPKI, negative signature,
+  checksum, mismatched key, rollback/upgrade, and uninstall); Go 1.24
+  unit/race/vet, real loopback WSS, two-worker isolation; Chromium
+  Playwright suite (15/15). No production signing or external network
+  used to generate these fixtures.
+- Mandatory **NOT_TESTED**: disposable local MySQL suites; current
+  complete clean-source standalone/Railway OCI builds and container
+  volume verification; fresh npm audit; CycloneDX/Trivy scans and DB freshness;
+  macOS/Windows native installers; privileged systemd operations; real
+  Railway/HTTPS/ChatGPT connection; independent off-platform restore.
+  An ordinary root-run recovery suite also emitted a machine-counted
+  permission-dependent TAP SKIP. Treat as missing mandatory coverage.
+- `bash scripts/local-verify-quickstart.sh --targeted` is the
+  small-change smoke. `T5_BROWSER_SANDBOX=1 bash
+  scripts/local-verify-quickstart.sh --full` executes what is locally
+  available, records per-gate exit/skip/NOT_TESTED, and exits **3** when
+  mandatory coverage is missing. See
+  [RELEASE_ENGINEERING.md](RELEASE_ENGINEERING.md) for exact prerequisites.
 
-The public source repository is not a stable release; no release tag, signing
-key or production deployment is implied by this checklist. Keep production
-untouched. Scan findings are time-dependent; re-run before release and on
-base/dependency changes.
+## Owner/reviewer acceptance list
+
+- [ ] Main integrates T1–T5 without losing any prior dirty patches; review
+      exact final source commit/tree, lockfile, signed gate and tests.
+- [ ] All mandatory Node, browser, SQLite, MySQL, Go/WSS, native platform,
+      Docker/OCI, recovery and security gates recorded PASS without skips.
+- [ ] Independent owner-approved private signing key, SPKI pin, manifest
+      signatures and all eight native platform Worker artifacts.
+- [ ] Fresh, authorized dependency audit, SBOM and scanner DB / vulnerability
+      review on final immutable app **and** MySQL image identities.
+- [ ] License/third-party notices and MySQL derivative source obligations.
+- [ ] Approved public security reporting channel and sanitization/history
+      audit; systemd recovery and rollback/backup simulations.
+- [ ] Off-platform encrypted restore to independent empty resources with
+      approved retention, recovery operator and measurable RPO/RTO.
+- [ ] Owner-confirmed billing, exact OCI registry manifest digest, private
+      image source, one Railway service/SQLite volume/replica, HTTPS origin
+      and actual external read-only ChatGPT OAuth/MCP pilot.
+- [ ] Separate approval for merge, production signing, CI, tag, publish,
+      remote deployment and public template. Until then Worker download
+      returns HTTP 503 `WORKER_SIGNED_RELEASE_PENDING`.
+
+## Historical evidence only — NOT this run
+
+For the old `94ec834` candidate (2026-11-11), historical
+[GitHub CI](https://github.com/mathew15064/mcp_worker/actions/runs/42989467358)
+and [release verification](https://github.com/mathew15064/mcp_worker/actions/runs/42989467214)
+reported green, alongside a 101/101 local regression, a 12-test
+Chromium run and a dated Trivy 0.76.2 scan for **different images**
+(DB dated 2026-11-10). A separate Trivy attempt failed to fetch its DB.
+Those results are not evidence for this T5 worktree, the final integrated
+source, a new SBOM, a current vulnerability database, or authorization
+to run GitHub Actions. See [dated audit](RELEASE_READINESS_2026-11-11.md).

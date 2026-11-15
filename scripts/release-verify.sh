@@ -1,16 +1,28 @@
 #!/bin/sh
-# Disposable local/CI verification. Never run against a deployed database/Worker.
+# Explicit PC-only standalone/MySQL release-candidate integration; never use deployed resources.
+# Full Docker builds may require external upstream dependencies: opt in separately.
 set -eu
+[ -z "${CI:-}" ] && [ -z "${GITHUB_ACTIONS:-}" ] || { echo 'REFUSED: CI forbidden for this PC execution' >&2; exit 2; }
+[ "${T5_ALLOW_RELEASE_FULL:-0}" = 1 ] && [ "${T5_ALLOW_RELEASE_NETWORK_BUILD:-0}" = 1 ] || {
+  echo 'NOT_TESTED: standalone Docker build requires separately authorized T5_ALLOW_RELEASE_FULL=1 and T5_ALLOW_RELEASE_NETWORK_BUILD=1' >&2; exit 3;
+}
+command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 || {
+  echo 'NOT_TESTED: local Docker daemon unavailable' >&2; exit 3;
+}
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$ROOT"
 [ -z "$(git status --porcelain)" ] || { echo 'Commit source before release verification.' >&2; exit 1; }
 SHA=$(git rev-parse HEAD)
+TREE=$(git rev-parse HEAD^{tree})
+export BOT_REPORT_GIT_SHA="$SHA" BOT_REPORT_TREE_SHA="$TREE"
+BOT_REPORT_BUILD_TIME=$(git show -s --format=%cI HEAD)
+export BOT_REPORT_BUILD_TIME
 ID="br-release-$(openssl rand -hex 6)"
 ENVFILE=".env.setup-$ID"
 PORT="${BOT_REPORT_RELEASE_PORT:-13336}"
 IMAGE="$ID-app:local"
 MYSQL="$ID-mysql:local"
-GO_IMAGE="golang:1.26.10-alpine@sha256:87c65a688975c0b1d4585d204874c45ca78354670e3a5f11368c5a492303d696"
+GO_IMAGE="golang:1.24@sha256:d2d2bc1c84f7e60d7d2438a3836ae7d0c847f4888464e7ec9ba3a1339a1ee804"
 OUT="${BOT_REPORT_RELEASE_OUT:-$ROOT/reports/$ID}"
 mkdir -p "$OUT"
 TEST_TMP=$(mktemp -d)
@@ -74,12 +86,18 @@ docker exec -e NODE_ENV=test -e BOT_REPORT_ISOLATED_WORKER_TEST=1 -e MYSQL_TEST_
   exit 1
 }
 tail -12 "$OUT/regression.log"
-# Native Linux manual installer install/upgrade/rollback/uninstall in an
-# isolated temporary unprivileged HOME. No systemd, enrollment or host changes.
-BOT_REPORT_LIFECYCLE_TEST_ORIGIN="http://127.0.0.1:$PORT" node scripts/test-linux-installer-lifecycle.cjs >"$OUT/linux-installer-lifecycle.log" 2>&1
+# A passing process exit with conditional tests skipped is incomplete coverage.
+REGRESSION_SKIPS=$(sed -n 's/^[[:space:]]*# skipped \([0-9][0-9]*\).*$/\1/p' "$OUT/regression.log" | tail -1)
+[ "${REGRESSION_SKIPS:-0}" = 0 ] || {
+  echo "NOT_TESTED: mandatory Node regression contains $REGRESSION_SKIPS conditional TAP skips" >&2; exit 3;
+}
+# Signed native Linux fixture is self-hosted on ephemeral loopback, with
+# dynamically generated test-only SPKI/signatures and two offline Go builds.
+GOPROXY=off GOTOOLCHAIN=auto node scripts/test-linux-installer-lifecycle.cjs >"$OUT/linux-installer-lifecycle.log" 2>&1
 tail -8 "$OUT/linux-installer-lifecycle.log"
 printf '%s\n' "$SHA" >"$OUT/commit.txt"
 printf '%s\n' "$IMAGE" >"$OUT/image.txt"
 printf '%s\n' "$MYSQL" >"$OUT/mysql-image.txt"
-docker image inspect "$IMAGE" --format '{{.Id}} {{index .Config.Labels "org.opencontainers.image.revision"}}' >"$OUT/image-identity.txt"
-echo "PASS isolated release verification; evidence: $OUT"
+bash scripts/verify-oci-image-local.sh "$IMAGE" standalone > "$OUT/image-identity.txt"
+echo "LOCAL_STANDALONE_PRELIMINARY_PASS: source=$SHA tree=$TREE evidence=$OUT"
+echo 'NOT_TESTED: independent supply chain SBOM/Trivy, browser, native OS, offsite restore, external Railway; release remains NO_GO'

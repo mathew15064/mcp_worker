@@ -72,88 +72,30 @@ void test('HTTP surface is MCP-only', async () => {
   }
 });
 
-void test('worker curl installer uses verified standalone binaries without Node.js runtime dependencies', async () => {
-  const installer = await fetch(`${baseUrl}/worker/install.sh`);
-  assert.equal(installer.status, 200);
-  const script = await installer.text();
-  assert.match(script, /bot-report-worker-\$OS-\$ARCH/);
-  assert.match(script, /EXPECTED_OS='linux'/);
-  assert.match(script, /SHA256SUMS/);
-  assert.match(script, /uname -m/);
-  assert.match(script, /existing identity preserved/);
-  assert.match(script, /systemtd\.service/);
-  assert.match(script, /RefuseManualStop=yes/);
-  assert.match(script, /Restart=always/);
-  assert.match(script, /MEMORY_DIRECTIVE=MemoryLimit/);
-  assert.match(script, /MEMORY_DIRECTIVE=MemoryMax/);
-  assert.match(script, /\$MEMORY_DIRECTIVE=512M/);
-  assert.match(script, /TasksMax=128/);
-  assert.match(script, /StartLimitInterval=60/);
-  assert.match(script, /StartLimitBurst=5/);
-  assert.match(script, /ExecStart=\/usr\/local\/sbin\/systemtd run/);
-  assert.doesNotMatch(script, /need node|need npm|npm ci|Node\.js 22/);
-  assert.doesNotMatch(script, /br_enroll_/);
-
-  const linuxInstaller = await fetch(`${baseUrl}/worker/install-linux.sh`);
-  assert.equal(linuxInstaller.status, 200);
-  assert.match(await linuxInstaller.text(), /EXPECTED_OS='linux'/);
-  const macInstaller = await fetch(`${baseUrl}/worker/install-macos.sh`);
-  assert.equal(macInstaller.status, 200);
-  assert.match(await macInstaller.text(), /EXPECTED_OS='darwin'/);
-  const windowsInstaller = await fetch(`${baseUrl}/worker/install.ps1`);
-  assert.equal(windowsInstaller.status, 200);
-  const ps1 = await windowsInstaller.text();
-  assert.match(ps1, /PinnedPublicKeyB64 = ''/);
-  assert.match(ps1, /openssl dgst -sha256 -verify/);
-  assert.match(ps1, /Get-FileHash -Algorithm SHA256/);
-  assert.match(ps1, /bot-report-worker-windows-\$Arch\.exe/);
-  assert.doesNotMatch(ps1, /-ExecutionPolicy Bypass -File \$Tmp/);
-  assert.doesNotMatch(ps1, /install-windows\.ps1/);
-
-  const windowsPayload = await fetch(`${baseUrl}/worker/install-windows.ps1`);
-  assert.equal(windowsPayload.status, 200);
-  const windowsPayloadPs1 = await windowsPayload.text();
-  assert.match(windowsPayloadPs1, /bot-report-worker-windows-\$Arch\.exe/);
-  assert.equal(ps1, windowsPayloadPs1, 'Windows installer must not execute a second-stage script');
-  assert.match(windowsPayloadPs1, /Get-FileHash -Algorithm SHA256/);
-  assert.match(windowsPayloadPs1, /SetEnvironmentVariable\('Path'/);
-  assert.doesNotMatch(windowsPayloadPs1, /node|npm ci/i);
-
-  const sums = await fetch(`${baseUrl}/worker/dist/SHA256SUMS`);
-  if (sums.status === 200) {
-    const sumsText = await sums.text();
-    for (const file of [
-      'bot-report-worker-linux-amd64',
-      'bot-report-worker-linux-arm64',
-      'bot-report-worker-linux-386',
-      'bot-report-worker-linux-armv7',
-      'bot-report-worker-darwin-amd64',
-      'bot-report-worker-darwin-arm64',
-      'bot-report-worker-windows-amd64.exe',
-      'bot-report-worker-windows-arm64.exe',
-    ]) {
-      assert.match(sumsText, new RegExp(`  ${file}($|\\n)`));
-    }
-    const binary = await fetch(`${baseUrl}/worker/dist/bot-report-worker-linux-amd64`);
-    assert.equal(binary.status, 200);
-    assert.ok(Number(binary.headers.get('content-length') || 0) > 1024 * 1024);
-    // Drain the download so server.close cannot wait on an unread response.
-    assert.ok((await binary.arrayBuffer()).byteLength > 1024 * 1024);
-  } else {
-    assert.equal(sums.status, 503);
-    const unavailable: unknown = await sums.json();
-    assert.ok(unavailable && typeof unavailable === 'object' && 'code' in unavailable);
-    assert.equal(unavailable.code, 'WORKER_BINARY_DIST_UNAVAILABLE');
+void test('signed Worker installer and distribution routes always reject unapproved artifacts', async () => {
+  // A source-unapproved signed release must not be distributable on local or
+  // unknown platforms either. Native script shape is verified by isolated
+  // signer/installer fixture tests, not by publishing HTTP 200 templates.
+  for (const endpoint of [
+    '/worker/install.sh',
+    '/worker/install-linux.sh',
+    '/worker/install-macos.sh',
+    '/worker/install.ps1',
+    '/worker/install-windows.ps1',
+    '/worker/dist/SHA256SUMS',
+    '/worker/dist/SHA256SUMS.sig',
+    '/worker/dist/WORKER_RELEASE',
+    '/worker/dist/bot-report-worker-linux-amd64',
+    '/worker/dist/cli.js',
+    '/worker/dist/lifecycle.js',
+    '/worker/dist/not-allowed',
+  ]) {
+    const response = await fetch(`${baseUrl}${endpoint}`, { redirect: 'manual' });
+    assert.equal(response.status, 503, endpoint);
+    assert.equal(response.headers.get('cache-control'), 'no-store', endpoint);
+    const body = (await response.json()) as { code: string };
+    assert.equal(body.code, 'WORKER_SIGNED_RELEASE_PENDING', endpoint);
   }
-
-  // Legacy Node files remain downloadable only as a rollback/compatibility surface.
-  const legacyCli = await fetch(`${baseUrl}/worker/dist/cli.js`);
-  assert.equal(legacyCli.status, 200);
-  assert.match(await legacyCli.text(), /bot-report-worker login/);
-  const legacyLifecycle = await fetch(`${baseUrl}/worker/dist/lifecycle.js`);
-  assert.equal(legacyLifecycle.status, 200);
-  assert.match(await legacyLifecycle.text(), /buildCleanupPlan/);
-  assert.equal((await fetch(`${baseUrl}/worker/dist/not-allowed`)).status, 404);
 });
 
 void test('unapproved curl installer fails closed without installing a Worker binary', async () => {
@@ -178,7 +120,7 @@ void test('unapproved curl installer fails closed without installing a Worker bi
       { env },
     );
     assert.notEqual(result.code, 0, 'unapproved public install unexpectedly succeeded');
-    assert.match(result.stderr, /signed release not approved/i);
+    assert.match(result.stderr, /(?:503|signed release not approved)/i);
     assert.equal(fs.existsSync(path.join(installRoot, 'current', 'systemtd')), false);
     assert.equal(fs.existsSync(path.join(binDir, 'bot-report-worker')), false);
     assert.equal(fs.existsSync(path.join(env.BOT_REPORT_WORKER_HOME, 'state.json')), false);

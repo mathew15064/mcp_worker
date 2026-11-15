@@ -1,7 +1,7 @@
 import { stringifyUnknown } from '../utils/stringifyUnknown';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { routeError } from '../http/domainErrors';
-import { formString, formFlag } from '../http/requestContracts';
+import { formString, formFlag, formList } from '../http/requestContracts';
 import pages from '../http/pages';
 declare module 'express-serve-static-core' {
   interface Request {
@@ -20,6 +20,7 @@ import authRoutes from './authRoutes';
 const { currentIdentity } = authRoutes;
 import oauthRepo from '../repositories/mcpOAuthRepository';
 import workerRepo from '../repositories/workerRepository';
+import { workerSignedReleaseReadiness } from '../services/workerReleaseGate';
 import workerBroker from '../services/workerConnectionBroker';
 import workerLifecycle from '../services/workerLifecycleService';
 import oauthService from '../services/mcpOAuthService';
@@ -155,7 +156,12 @@ router.post('/account/clients', async (req, res) => {
       profileId: req.currentUser.profile_id,
       ownerUserId: req.currentUser.id,
       redirectUris,
-      allowedScopes: ['bot_report.read', 'bot_report.terminal', 'offline_access'],
+      allowedScopes: [
+        'bot_report.read',
+        ...formList(req.body, 'scopes').filter(
+          (scope) => scope === 'bot_report.terminal' || scope === 'offline_access',
+        ),
+      ],
     });
     if (!result.client) throw new Error('OAuth client creation returned no client.');
     setOneTimeSecret(req, { clientId: result.client.client_id, clientSecret: result.rawSecret });
@@ -252,6 +258,15 @@ router.get('/account/workers', async (req, res, next) => {
 });
 
 router.post('/account/workers/enrollment', async (req, res) => {
+  if (!workerSignedReleaseReadiness().productionDistributionApproved) {
+    return res
+      .status(503)
+      .set('Cache-Control', 'no-store')
+      .type('html')
+      .send(
+        errorPage(503, 'Signed Worker release approval is pending; enrollment is unavailable.'),
+      );
+  }
   try {
     const ttlSeconds = Math.max(
       60,

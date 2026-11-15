@@ -1,391 +1,209 @@
 #!/usr/bin/env bash
-# T1: Manual, PC-only verification. No GitHub Actions, deploy, publish or release.
+# T5 Wave 3 PC-local QA: no downloads, installs, CI, cloud, signing, commits or publication.
+# --targeted is quick and honest; --full attempts mandatory gates only with explicit sandboxes.
 set -uo pipefail
 umask 077
-
-ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-PINNED_SHA="ae588a1a56f2561ca2323457463e5b9e203de509"
-CURRENT_BRANCH="$(git -C "$ROOT" branch --show-current)"
-
-die() { printf 'LOCAL_VERIFY_REFUSED: %s\n' "$1" >&2; exit 2; }
-# Reject actual CI invocation before later tests receive a minimal synthetic
-# environment. Never treat a CI marker set to "false" as authorization.
-[[ -z "${CI:-}" && -z "${GITHUB_ACTIONS:-}" ]] ||
-  die "CI/GitHub Actions environment is forbidden; use the owner PC interactively"
-command -v git >/dev/null 2>&1 || die "git is required"
-# Branch AND canonical worktree path are a fixed allowlist, not a user-supplied
-# wildcard or environment override. The original/shared base, staging, and
-# production checkouts are never accepted as verification targets.
-case "$CURRENT_BRANCH:$ROOT" in
-  work/railway-final-t1:/root/mcp_worker_railway_final_t1_20261113|\
-  work/oneclick-unblock-t1:/root/mcp_worker_oneclick_unblock_t1_20261113|\
-  work/railway-oneclick-final-integration-20261113:/root/mcp_worker_railway_oneclick_final_integration_20261113) ;;
-  *) die "not an explicitly authorized PC branch AND worktree (T1 or final integration)" ;;
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+cd "$ROOT" || exit 2
+MODE="${1:---targeted}"
+[[ "$MODE" == --targeted || "$MODE" == --full ]] || { echo "Usage: $0 [--targeted|--full]" >&2; exit 2; }
+[[ -z "${CI:-}" && -z "${GITHUB_ACTIONS:-}" ]] || { echo "PC-local only; CI prohibited" >&2; exit 2; }
+BRANCH="$(git branch --show-current)"
+case "$ROOT:$BRANCH" in
+  /root/mcpw_v200_full5_integration_test_20261114:work/full5-integration-test-20261114) QA_SCOPE=INTEGRATION_TEST ;;
+  *) echo "PC-local source worktree/branch is not approved for QA" >&2; exit 2 ;;
 esac
-git -C "$ROOT" cat-file -e "${PINNED_SHA}^{commit}" 2>/dev/null ||
-  die "pinned commit is missing"
-git -C "$ROOT" merge-base --is-ancestor "$PINNED_SHA" HEAD ||
-  die "current HEAD does not descend from the pinned commit"
-[[ "$(git -C "$ROOT" rev-parse --show-toplevel)" == "$ROOT" ]] ||
-  die "cannot verify worktree root"
-# Refuse changes including staged files and untracked source, before npm ci.
-# Runtime artifacts are deliberately written outside the repository.
-[[ -z "$(git -C "$ROOT" status --porcelain --untracked-files=normal)" ]] ||
-  die "worktree must be clean (tracked, staged, and untracked files)"
-
-HEAD_SHA="$(git -C "$ROOT" rev-parse HEAD)"
-SHORT_SHA="${HEAD_SHA:0:12}"
-STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-REPORT_PARENT="${LOCAL_VERIFY_REPORT_DIR:-$ROOT/../mcp_worker_t01_evidence}"
-mkdir -p -- "$REPORT_PARENT" || die "cannot create evidence directory"
-REPORT_PARENT="$(CDPATH= cd -- "$REPORT_PARENT" && pwd -P)"
-case "$REPORT_PARENT/" in
-  "$ROOT/"*) die "evidence directory must be outside the source worktree" ;;
-esac
-REPORT="$REPORT_PARENT/$STAMP-$SHORT_SHA-$$"
-mkdir -m 700 -- "$REPORT" || die "cannot create exclusive evidence directory"
-mkdir -m 700 -- "$REPORT/logs"
-SCRATCH="$(mktemp -d "$REPORT/.private-run.XXXXXXXX")" || die "cannot create private scratch"
-trap 'rm -rf -- "$SCRATCH"' EXIT
-RESULTS="$REPORT/results.tsv"
-printf 'gate\tstatus\texit_code\tstarted_utc\tended_utc\tduration_seconds\ttest_skips\tnote\n' > "$RESULTS"
-
-safe_version() {
-  local name="$1"; shift
-  if command -v "$name" >/dev/null 2>&1; then
-    "$@" 2>&1 | head -1 | cut -c 1-160
-  else
-    printf 'MISSING\n'
-  fi
-}
-NODE_VERSION="$(safe_version node node --version)"
-NPM_VERSION="$(safe_version npm npm --version)"
-GO_VERSION="$(safe_version go go version)"
-# Resolve the module-pinned Go toolchain from the PC's existing local cache.
-# GOPROXY=off forbids any toolchain download during resolution or test.
-LOCAL_GO_DIR=''
-if command -v go >/dev/null 2>&1; then
-  module_goroot="$(cd "$ROOT/worker-go" && GOTOOLCHAIN=auto GOPROXY=off go env GOROOT 2>/dev/null || true)"
-  if [[ -x "$module_goroot/bin/go" ]]; then
-    LOCAL_GO_DIR="$module_goroot/bin"
-    GO_VERSION="$("$LOCAL_GO_DIR/go" version)"
-  fi
+BASE="$(git rev-parse HEAD)"
+TREE="$(git rev-parse 'HEAD^{tree}')"
+if [[ -n "${T5_EXPECTED_SHA:-}" && "$BASE" != "$T5_EXPECTED_SHA" ]] ||
+   [[ -n "${T5_EXPECTED_TREE:-}" && "$TREE" != "$T5_EXPECTED_TREE" ]]; then
+  echo "SOURCE_DRIFT: commit/tree differs from reviewed source" >&2
+  exit 2
 fi
-# npm lifecycle scripts must use the same Node 22 executable as the harness.
-# Some minimal subprocess environments otherwise fall back to /usr/bin/node 18.
-NODE_BIN_REAL="$(readlink -f "$(command -v node)")"
-[[ -x "$NODE_BIN_REAL" ]] || die 'a verified Node executable is required'
-TEST_PATH="$(dirname "$NODE_BIN_REAL"):${LOCAL_GO_DIR:+$LOCAL_GO_DIR:}$PATH"
-DOCKER_VERSION="$(safe_version docker docker --version)"
-OPENSSL_VERSION="$(safe_version openssl openssl version)"
-{
-  printf 'task=T1\n'
-  printf 'source_sha=%s\n' "$HEAD_SHA"
-  printf 'pinned_base_sha=%s\n' "$PINNED_SHA"
-  printf 'branch=%s\n' "$CURRENT_BRANCH"
-  printf 'started_utc=%s\n' "$(date -u +%FT%TZ)"
-  printf 'os=%s\n' "$(uname -s -m)"
-  printf 'node=%s\nnpm=%s\ngo=%s\ndocker=%s\nopenssl=%s\n' \
-    "$NODE_VERSION" "$NPM_VERSION" "$GO_VERSION" "$DOCKER_VERSION" "$OPENSSL_VERSION"
-  printf 'execution=PC-local; no remote deployment, publication or CI\n'
-  printf 'npm_offline=%s\n' "${LOCAL_VERIFY_NPM_OFFLINE:-0}"
-  printf 'git_status_dirty=%s\n' "$(test -z "$(git -C "$ROOT" status --porcelain)" && echo no || echo yes)"
-} > "$REPORT/metadata.txt"
-printf 'Evidence: %s\n' "$REPORT"
-
-# A temporary raw log is created in a private 0700 directory and destroyed.
-# Persist ONLY sanitized, bounded diagnostic logs. No env dumps or test fixtures.
-sanitize() {
-  awk '
-    {
-      gsub(/\033\[[0-9;]*[[:alpha:]]/, "")
-      l=tolower($0)
-      if (l ~ /(secret|password|passwd|api[_-]?key|auth(orization)?[_-]?(token|header)|bearer|cookie|credential|private key|private-key|-----begin |-----end |token[=:]|key[=:]|session[=:]|\.pem|\.key|@[^ ]+\.[a-z]{2,})/) {
-        print "[REDACTED sensitive-looking line]"; next
-      }
-      if (length($0)>600) print substr($0,1,600) " [TRUNCATED]"
-      else print
-    }
-  ' "$1" | tail -n 500 > "$2"
-}
+OUT="${T5_QA_OUT:-$(mktemp -d "${TMPDIR:-/tmp}/t5-qa.XXXXXXXX")}"
+mkdir -p -m 700 "$OUT" || exit 2
+RESULTS="$OUT/results.tsv"
+printf "gate\tmandatory\tstatus\texit_code\ttest_pass\ttest_fail\ttest_skip\tprerequisites_or_note\n" > "$RESULTS"
+printf "run=PC-LOCAL-%s\ntask=T5\nbase=%s\ntree=%s\nbranch=%s\nmode=%s\ndiff_sha256=%s\n" "${BASE:0:12}" "$BASE" "$TREE" "$BRANCH" "$MODE" "$(git diff --binary | sha256sum | cut -d\  -f1)" > "$OUT/context.txt"
+FAIL=0
 record() {
-  local gate="$1" status="$2" code="$3" seconds="$4" skips="$5" note="$6"
-  local started="${7:-$(date -u +%FT%TZ)}" ended="${8:-$(date -u +%FT%TZ)}"
+  local name="$1" mandatory="$2" status="$3" exit_code="$4" pass="$5" fail="$6" skip="$7" note="$8"
   note="${note//$'\t'/ }"; note="${note//$'\n'/ }"
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$gate" "$status" "$code" "$started" "$ended" "$seconds" "$skips" "$note" >> "$RESULTS"
-  printf '%-30s %-10s %ss %s\n' "$gate" "$status" "$seconds" "$note"
+  printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$name" "$mandatory" "$status" "$exit_code" "$pass" "$fail" "$skip" "$note" >> "$RESULTS"
+  printf "T5_GATE %s status=%s exit=%s test_pass/fail/skip=%s/%s/%s %s\n" "$name" "$status" "$exit_code" "$pass" "$fail" "$skip" "$note"
 }
-omit() {
-  local gate="$1" status="$2" why="$3"
-  printf '%s: %s\n' "$status" "$why" > "$REPORT/logs/$gate.log"
-  record "$gate" "$status" "-" "0" "-" "$why"
-}
-# Pass commands as discrete argv; never eval/execute user-provided strings.
+missing() { record "$1" "$2" NOT_TESTED "-" 0 0 0 "$3"; }
+# Every command executes once; on a failed command later runnable gates are withheld.
+# A green exit with TAP skips is PARTIAL (optional) or NOT_TESTED (mandatory).
 run() {
-  local gate="$1" budget="$2" note="$3"
-  shift 3
-  local raw start elapsed code status skips started_utc ended_utc
-  raw="$(mktemp "$SCRATCH/$gate.XXXXXXXX")" || die "scratch unavailable"
-  started_utc="$(date -u +%FT%TZ)"
-  start="$(date +%s)"
-  (
-    cd -- "$ROOT" || exit 1
-    # Allow only minimal, non-secret host context to enter test processes.
-    env -i PATH="$TEST_PATH" NODE="$NODE_BIN_REAL" HOME="$HOME" USER="${USER:-local}" \
-      LANG=C.UTF-8 LC_ALL=C.UTF-8 CI=false GOTOOLCHAIN=local GOPROXY=off \
-      npm_config_audit=false npm_config_fund=false \
-      npm_config_update_notifier=false NO_PROXY=127.0.0.1,localhost,::1 \
-      no_proxy=127.0.0.1,localhost,::1 \
-      npm_config_offline="${LOCAL_VERIFY_NPM_OFFLINE:-false}" \
-      timeout --signal=TERM --kill-after=10s "$budget" "$@"
-  ) > "$raw" 2>&1
-  code=$?
-  ended_utc="$(date -u +%FT%TZ)"
-  elapsed=$(( $(date +%s) - start ))
-  skips="$(grep -E '^[[:space:]]*# skipped [0-9]+' "$raw" | tail -n 1 | awk '{print $3}' || true)"
-  skips="${skips:-0}"
-  if [[ "$code" -eq 0 ]]; then status=PASS; else status=FAIL; fi
-  if [[ "$code" -eq 124 || "$code" -eq 137 ]]; then note="$note; timed out"; fi
-  if [[ "$skips" != 0 ]]; then note="$note; internal TAP skips=$skips"; fi
-  sanitize "$raw" "$REPORT/logs/$gate.log"
-  rm -f -- "$raw"
-  record "$gate" "$status" "$code" "$elapsed" "$skips" "$note" "$started_utc" "$ended_utc"
-  [[ "$code" -eq 0 ]]
+  local name="$1" required="$2" note="$3"; shift 3
+  if (( FAIL )); then missing "$name" "$required" "stopped after prior command failure"; return 0; fi
+  local raw code pass fail skip status
+  raw="$(mktemp "$OUT/.raw.XXXXXXXX")" || exit 2
+  "$@" > "$raw" 2>&1; code=$?
+  pass="$(sed -n -E "s/^[[:space:]]*# pass ([0-9]+).*/\1/p" "$raw" | tail -1)"; pass="${pass:-0}"
+  fail="$(sed -n -E "s/^[[:space:]]*# fail ([0-9]+).*/\1/p" "$raw" | tail -1)"; fail="${fail:-0}"
+  skip="$(sed -n -E "s/^[[:space:]]*# skipped ([0-9]+).*/\1/p" "$raw" | tail -1)"; skip="${skip:-0}"
+  # Playwright reports its own test counts, not Node TAP. Count test.skip
+  # independently and refuse a zero-discovery "successful" browser command.
+  if [[ "$name" == playwright_browser ]]; then
+    pass="$(grep -oE '[0-9]+ passed' "$raw" | tail -1 | cut -d' ' -f1 || true)"; pass="${pass:-0}"
+    skip="$(grep -oE '[0-9]+ skipped' "$raw" | tail -1 | cut -d' ' -f1 || true)"; skip="${skip:-0}"
+    if [[ "$pass" -eq 0 ]]; then code=1; fi
+  fi
+  if [[ "$code" -ne 0 || "$fail" -gt 0 ]]; then status=FAIL; FAIL=1
+    # Bounded output; suppress lines that might expose sandbox secrets.
+    grep -Ei "^(not ok|# fail|# tests|# skipped|error:|fail |npm error)" "$raw" | tail -20 | cut -c 1-240 >&2 || true
+  elif [[ "$skip" -gt 0 ]]; then
+    if [[ "$required" == yes ]]; then status=NOT_TESTED; else status=PARTIAL; fi
+  else status=PASS; fi
+  rm -f "$raw"
+  record "$name" "$required" "$status" "$code" "$pass" "$fail" "$skip" "$note"
 }
-# Return success only if the fixed Playwright fixture port has no listener.
-# Playwright's webServer then performs its own /login HTTP readiness check.
-LOOPBACK_PORT_PROBE_JS='
-  const net = require("node:net");
-  const socket = net.connect({host:"127.0.0.1",port:3399});
-  socket.setTimeout(2000);
-  socket.on("connect",()=>{ console.error("Port 3399 is already listening; refusing to reuse an unknown server"); socket.destroy(); process.exitCode=1; });
-  socket.on("timeout",()=>{ console.error("Port 3399 readiness probe timed out"); socket.destroy(); process.exitCode=1; });
-  socket.on("error",(err)=>{ if (err.code!=="ECONNREFUSED") { console.error("Loopback probe failed:",err.code); process.exitCode=1; } });
-'
-loopback_port_free() {
-  "$NODE_BIN_REAL" -e "$LOOPBACK_PORT_PROBE_JS"
-}
-# Never kill an unrelated service. Only a listening process in this exact
-# worktree whose argv is the Playwright test fixture is eligible for cleanup.
-cleanup_own_e2e_listener() {
-  command -v fuser >/dev/null 2>&1 || return 0
-  local pid cmd cwd attempt
-  for pid in $(fuser -n tcp 3399 2>/dev/null || true); do
-    [[ "$pid" =~ ^[0-9]+$ ]] || continue
-    cwd="$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)"
-    cmd="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
-    if [[ "$cwd" == "$ROOT" && "$cmd" == *"tests/e2e/fixtures/start-test-server.js"* ]]; then
-      kill -TERM "$pid" 2>/dev/null || true
-      printf 'Stopped owned leftover Playwright fixture PID %s\n' "$pid"
-    else
-      printf 'Refusing to kill non-fixture port-3399 process %s\n' "$pid" >&2
-      return 1
-    fi
-  done
-  for (( attempt=0; attempt<10; attempt++ )); do
-    if loopback_port_free >/dev/null 2>&1; then return 0; fi
-    sleep 1
-  done
-  printf 'Port 3399 did not clear after owned fixture cleanup\n' >&2
-  return 1
-}
-has_go() {
-  command -v go >/dev/null 2>&1 || return 1
-  local v major minor
-  v="$(printf '%s\n' "$GO_VERSION" | sed -nE 's/.* go([0-9]+)\.([0-9]+)(\.[0-9]+)?.*/\1 \2/p')"
-  [[ "$v" =~ ^[0-9]+\ [0-9]+$ ]] || return 1
-  read -r major minor <<< "$v"
-  (( major > 1 || (major == 1 && minor >= 24) ))
-}
-has_node() {
-  command -v node >/dev/null 2>&1 &&
-  command -v npm >/dev/null 2>&1 &&
-  [[ "$(node -p 'process.versions.node.split(".")[0]')" == 22 ]]
-}
-if find "$ROOT/.github/workflows" -type f 2>/dev/null | grep -q .; then
-  omit workflow_removal FAIL 'workflow files still present in this worktree'
+command -v node >/dev/null 2>&1 || { echo "Node unavailable" >&2; exit 2; }
+run script_syntax yes "node --check; bash/sh -n; no source builds" bash -c 'node --check scripts/test-linux-installer-lifecycle.cjs && node --check scripts/quality-gate.mjs && bash -n scripts/local-verify-quickstart.sh scripts/verify-oci-image-local.sh scripts/test-railway-local.sh && sh -n scripts/release-verify.sh scripts/release-scan.sh'
+NODE_VERSION="$(node -v)"
+NPM_VERSION="$(npm -v 2>/dev/null || echo missing)"
+GO_BIN=""
+if command -v go >/dev/null 2>&1; then
+  GOROOT_LOCAL="$(cd worker-go && GOTOOLCHAIN=auto GOPROXY=off go env GOROOT 2>/dev/null || true)"
+  if [[ -x "$GOROOT_LOCAL/bin/go" ]] && "$GOROOT_LOCAL/bin/go" version 2>/dev/null | grep -Eq " go1[.]24[.]"; then GO_BIN="$GOROOT_LOCAL/bin/go"; fi
+fi
+printf "node=%s\nnpm=%s\ngo=%s\ndocker=%s\n" "$NODE_VERSION" "$NPM_VERSION" "${GO_BIN:-NOT_AVAILABLE_GO_1_24_OFFLINE}" "$(docker --version 2>/dev/null || echo NOT_AVAILABLE)" >> "$OUT/context.txt"
+if [[ "$NODE_VERSION" != v22.* ]]; then
+  missing node_quality yes "Node 22 required; got $NODE_VERSION"
+  missing node_build yes "Node 22 required"
+  NODE_OK=0
+elif [[ ! -d node_modules || ! -x node_modules/.bin/tsc ]]; then
+  missing node_quality yes "node_modules absent; use authorized cached npm ci separately (no automatic download)"
+  missing node_build yes "node_modules absent"
+  NODE_OK=0
 else
-  record workflow_removal PASS 0 0 0 'no Actions YAML files remain in worktree'
+  run node_quality yes "typecheck + typed lint + Prettier + quality baseline" bash -c 'npm run typecheck && npm run lint:typed && npm run format:check && node scripts/quality-gate.mjs check'
+  run node_build yes "compile once for targeted tests; do not rebuild for each gate" npm run build
+  NODE_OK=$((1-FAIL))
 fi
-if ! command -v timeout >/dev/null 2>&1; then
-  die 'coreutils timeout is required; no host packages will be installed'
-fi
-
-if has_node; then
-  if run npm_ci 600 'lockfile installation in this local worktree' npm ci; then npm_ok=1; else npm_ok=0; fi
-else
-  npm_ok=0
-  omit npm_ci SKIP 'Node 22.x and npm are required; install via authorized host procedure'
-fi
-for script in typecheck lint lint:typed format:check quality:check build; do
-  gate="npm_${script//[:]/_}"; gate="${gate//[-]/_}"
-  if (( npm_ok )); then
-    if run "$gate" 600 "npm run $script" npm run "$script"; then
-      if [[ "$script" == build ]]; then build_ok=1; fi
+# Non-root recovery uses only a disposable read-only app copy, because cached
+# host npm dependencies can be root-readable-only. Never chmod the source tree.
+recovery_nonroot_docker() {
+  local stage rc=0
+  stage="$(mktemp -d "$OUT/.recovery-nonroot.XXXXXXXX")" || return 1
+  if ! mkdir -p "$stage/app" || ! cp -a dist "$stage/app/dist" || \
+     ! cp -a "$(realpath node_modules)" "$stage/app/node_modules" || \
+     ! cp -a scripts "$stage/app/scripts" || \
+     ! cp package.json "$stage/app/package.json" || \
+     ! chmod -R a+rX "$stage/app"; then
+    rm -rf "$stage"
+    return 1
+  fi
+  docker run --rm --pull=never --network=none \
+    --user 1000:1000 --cap-drop=ALL --security-opt=no-new-privileges \
+    --read-only --tmpfs /tmp:rw,mode=1777,size=512m --pids-limit=256 --memory=2g \
+    --mount "type=bind,source=$stage/app,target=/app,readonly" \
+    --workdir /app -e NODE_ENV=test node:22 \
+    node --test --test-concurrency=1 \
+      dist/tests/railway-disaster-recovery.test.js \
+      dist/tests/railway-instance-isolation.test.js || rc=$?
+  rm -rf "$stage"
+  return "$rc"
+}
+if (( NODE_OK )); then
+  run railway_sqlite yes "SQLite HTTP/OAuth fixture; optional Chromium subtest must count as TAP skip" node --test --test-concurrency=1 dist/tests/railway-sqlite-quickstart.test.js
+  run signed_release_unit yes "test-only signer, canonical inventory and negative trust" node --test --test-concurrency=1 dist/tests/worker-signed-release.test.js
+  if [[ "$MODE" == --full && "${T5_RECOVERY_NONROOT_CONTAINER_TEST:-0}" == 1 ]]; then
+    if command -v docker >/dev/null && docker info >/dev/null 2>&1 && docker image inspect node:22 >/dev/null 2>&1; then
+      run railway_recovery yes "cached Node22 non-root Docker; offline SQLite backup/restore, no root skip" recovery_nonroot_docker
     else
-      if [[ "$script" == build ]]; then build_ok=0; fi
+      missing railway_recovery yes "non-root recovery opt-in requires Docker and cached node:22"
     fi
   else
-    omit "$gate" NOT_TESTED 'requires successful npm ci'
-    [[ "$script" == build ]] && build_ok=0
+    run railway_recovery yes "local SQLite backup/restore; root-only permissions test may skip" node --test --test-concurrency=1 dist/tests/railway-disaster-recovery.test.js dist/tests/railway-instance-isolation.test.js
   fi
-done
-
-if (( npm_ok )); then
-  run npm_test 900 'npm test includes its own build; TAP skip count is retained' npm test || true
 else
-  omit npm_test NOT_TESTED 'requires successful npm ci'
+  missing railway_sqlite yes "compiled tests require working Node 22 dependencies"
+  missing signed_release_unit yes "compiled signed tests unavailable"
+  missing railway_recovery yes "compiled recovery tests unavailable"
 fi
-if (( npm_ok )) && (( build_ok )); then
-  if run playwright_port_preflight 15 '127.0.0.1:3399 must be unoccupied before Playwright webServer readiness' "$NODE_BIN_REAL" -e "$LOOPBACK_PORT_PROBE_JS"; then
-    if run npm_test_e2e 900 'Playwright fixture at 127.0.0.1:3399; first attempt is permanent evidence' npm run test:e2e; then
-      # Normally Playwright tears the fixture down; check for leaked processes.
-      cleanup_own_e2e_listener || record playwright_cleanup FAIL 1 0 0 'owned fixture cleanup failed or foreign port owner detected'
+if [[ "$MODE" == --full ]]; then
+  if (( NODE_OK )) && [[ -n "$GO_BIN" ]] && command -v openssl >/dev/null; then
+    run linux_installer_lifecycle yes "ephemeral RSA SPKI, nine signed entries, two offline Go builds; unprivileged loopback only" env PATH="$(dirname "$GO_BIN"):$PATH" GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local node scripts/test-linux-installer-lifecycle.cjs
+  else missing linux_installer_lifecycle yes "Node build, Go 1.24 cached, OpenSSL required; no external staging"; fi
+  if [[ -n "$GO_BIN" ]]; then
+    run go_test yes "Go1.24 module; GOPROXY=off" bash -c 'cd worker-go && GOTOOLCHAIN=local GOPROXY=off "$1" test ./...' _ "$GO_BIN"
+    run go_race yes "Go1.24 race detector; GOPROXY=off" bash -c 'cd worker-go && GOTOOLCHAIN=local GOPROXY=off "$1" test -race ./...' _ "$GO_BIN"
+    run go_vet yes "Go1.24 vet; GOPROXY=off" bash -c 'cd worker-go && GOTOOLCHAIN=local GOPROXY=off "$1" vet ./...' _ "$GO_BIN"
+  else
+    for gate in go_test go_race go_vet; do missing "$gate" yes "offline Go1.24 toolchain missing"; done
+  fi
+  if (( NODE_OK )) && [[ -n "$GO_BIN" ]] && command -v openssl >/dev/null; then
+    run wss_worker yes "real localhost WSS, Go Worker, OAuth PKCE" env PATH="$(dirname "$GO_BIN"):$PATH" GOPROXY=off GOTOOLCHAIN=local BOT_REPORT_W2_T03_GO_E2E=1 node --test dist/tests/railway-worker-wss-e2e.test.js
+    run go_isolation yes "two Go Workers in isolated SQLite local sandboxes" env PATH="$(dirname "$GO_BIN"):$PATH" GOPROXY=off GOTOOLCHAIN=local BOT_REPORT_W3_T04_GO_E2E=1 node --test dist/tests/railway-instance-isolation-go.test.js
+  else missing wss_worker yes "requires built Node tests, offline Go1.24 and OpenSSL"; missing go_isolation yes "requires built Node tests, offline Go1.24 and OpenSSL"; fi
+  # Worker-live must run in a disposable Node container, never against a
+  # host-installed Worker. The original PC source and dependencies are read-only.
+  mysql_worker_docker() {
+    local deps
+    deps="$(realpath node_modules)" || return 1
+    mkdir -p dist/worker/bin || return 1
+    (cd worker-go && GOTOOLCHAIN=local GOPROXY=off "$GO_BIN" build -o ../dist/worker/bin/bot-report-worker-linux-amd64 .) || return 1
+    local mounts=(--mount "type=bind,source=$ROOT,target=$ROOT,readonly")
+    if [[ "$deps" != "$ROOT/node_modules" ]]; then
+      mounts+=(--mount "type=bind,source=$deps,target=$deps,readonly")
+    fi
+    docker run --rm --pull=never --network=host \
+      --cap-drop=ALL --security-opt=no-new-privileges --pids-limit=256 --memory=2g \
+      "${mounts[@]}" \
+      --mount type=bind,source="$(command -v rg)",target=/usr/local/bin/rg,readonly \
+      --workdir "$ROOT" \
+      -e NODE_ENV=test -e MYSQL_TEST_HOST -e MYSQL_TEST_PORT \
+      -e MYSQL_TEST_DATABASE -e MYSQL_TEST_USERNAME -e MYSQL_TEST_PASSWORD \
+      -e BOT_REPORT_ISOLATED_WORKER_TEST=1 \
+      node:22 node --test --test-concurrency=1 dist/tests/worker-live-integration.test.js
+  }
+  if (( NODE_OK )) && [[ "${T5_MYSQL_SANDBOX:-0}" == 1 ]] && [[ "${MYSQL_TEST_HOST:-}" == 127.0.0.1 || "${MYSQL_TEST_HOST:-}" == localhost ]] && [[ "${MYSQL_TEST_DATABASE:-}" == bot_report_test* ]]; then
+    run mysql_integration yes "explicit disposable localhost MySQL schema and credentials" env NODE_ENV=test node --test dist/tests/mysql-integration.test.js
+    run mysql_setup_ui yes "same disposable localhost MySQL" env NODE_ENV=test node --test dist/tests/mysql-setup-ui-integration.test.js
+    if [[ "${T5_MYSQL_WORKER_CONTAINER_TEST:-0}" == 1 ]] && [[ -n "$GO_BIN" ]] && command -v docker >/dev/null && docker info >/dev/null 2>&1 && docker image inspect node:22 >/dev/null 2>&1 && command -v rg >/dev/null; then
+      run mysql_worker_live yes "cached Node22 + git/rg; disposable Docker Worker, read-only source, localhost MySQL" mysql_worker_docker
     else
-      # Only the well-defined transient qualifies for one fresh attempt.
-      # The original FAIL and its redacted log are NEVER overwritten.
-      if grep -q 'ERR_NETWORK_CHANGED' "$REPORT/logs/npm_test_e2e.log"; then
-        if cleanup_own_e2e_listener && loopback_port_free; then
-          run npm_test_e2e_retry 900 'one bounded retry after preserved ERR_NETWORK_CHANGED failure; overall result remains FAIL' npm run test:e2e || true
-          cleanup_own_e2e_listener || record playwright_cleanup FAIL 1 0 0 'post-retry fixture cleanup failed'
-        else
-          omit npm_test_e2e_retry NOT_TESTED 'transient detected but fixture port could not be safely recovered'
-        fi
-      else
-        cleanup_own_e2e_listener || record playwright_cleanup FAIL 1 0 0 'post-failure fixture cleanup failed'
-        omit npm_test_e2e_retry NOT_TESTED 'initial browser failure was not ERR_NETWORK_CHANGED; no retry'
-      fi
+      missing mysql_worker_live yes "requires T5_MYSQL_WORKER_CONTAINER_TEST=1, Go1.24, Docker, cached node:22, ripgrep and disposable localhost MySQL"
     fi
   else
-    omit npm_test_e2e NOT_TESTED 'port 3399 occupied or loopback probe failed; foreign listeners are never killed'
-    omit npm_test_e2e_retry NOT_TESTED 'initial browser attempt not started'
+    for gate in mysql_integration mysql_setup_ui mysql_worker_live; do missing "$gate" yes "requires T5_MYSQL_SANDBOX=1, MYSQL_TEST_HOST=127.0.0.1|localhost, MYSQL_TEST_DATABASE and disposable server; NEVER use production DB"; done
   fi
-else
-  omit playwright_port_preflight NOT_TESTED 'requires successful npm ci and build'
-  omit npm_test_e2e NOT_TESTED 'requires successful npm ci and build'
-  omit npm_test_e2e_retry NOT_TESTED 'initial browser attempt not started'
-fi
-
-if (( npm_ok )) && (( build_ok )); then
-  run railway_script_syntax 60 'local shell syntax; no provisioning' \
-    bash -c 'sh -n docker-entrypoint-railway.sh && bash -n scripts/verify-railway-docker-isolation.sh && sh -n scripts/sign-worker-manifest.sh && node --check scripts/verify-railway-sandbox-child.cjs && node --check scripts/verify-railway-offvolume-restore.cjs && node --check scripts/check-railway-pr-stack.mjs' || true
-  run railway_pr_stack 240 'synthetic ancestry only; no git fetch' \
-    node --test dist/tests/railway-pr-stack.test.js || true
-  run railway_sqlite 300 'local SQLite and Railway config checks' \
-    node --test dist/tests/railway-sqlite-quickstart.test.js dist/tests/railway-platform-config.test.js || true
-  run railway_recovery 420 'two local Node instances and backup/restore' \
-    node --test --test-concurrency=1 dist/tests/railway-instance-isolation.test.js dist/tests/railway-disaster-recovery.test.js || true
-  run signing_offline 360 'ephemeral signing fixtures only; no release key or publication' \
-    node --test dist/tests/worker-signed-release.test.js || true
-else
-  for gate in railway_script_syntax railway_pr_stack railway_sqlite railway_recovery signing_offline; do
-    omit "$gate" NOT_TESTED 'requires npm dependencies and successful build'
-  done
-fi
-
-if (( npm_ok )); then
-  if run railway_sdk_ci 600 'Railway SDK dependencies installed only in .railway' \
-    npm ci --prefix .railway --ignore-scripts; then
-    run railway_sdk_types 300 'offline TypeScript source validation' \
-      ./node_modules/.bin/tsc --noEmit --skipLibCheck --module NodeNext \
-      --moduleResolution NodeNext --target ES2022 --allowImportingTsExtensions \
-      .railway/railway.ts .railway/validate.ts || true
-    run railway_sdk_graph 300 'offline SDK graph validation; NEVER run railway plan/apply' \
-      ./.railway/node_modules/.bin/tsx .railway/validate.ts || true
+  if (( NODE_OK )) && [[ "${T5_BROWSER_SANDBOX:-0}" == 1 ]] && node -e "const fs=require('node:fs'); const {chromium}=require('@playwright/test');process.exit(fs.existsSync(chromium.executablePath())?0:1)" >/dev/null 2>&1; then
+    run playwright_browser yes "real cached Chromium; no silent green on absence" ./node_modules/.bin/playwright test --config dist/playwright.config.js
+  else missing playwright_browser yes "T5_BROWSER_SANDBOX=1 plus executable Playwright Chromium cache and built Node tests required"; fi
+  if [[ "${T5_ALLOW_DOCKER_BUILD:-0}" == 1 ]] && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && [[ -z "$(git status --porcelain)" ]]; then
+    BUILD_NETWORK=none
+    [[ "${T5_ALLOW_BUILD_NETWORK:-0}" == 1 ]] && BUILD_NETWORK=default
+    IMAGE="mcp-worker-t5-local:$(git rev-parse --short=12 HEAD)"
+    run railway_build yes "local Docker; pinned bases; no image pulls; dependency network requires opt-in" docker build --pull=false --network="$BUILD_NETWORK" -f Dockerfile.railway --build-arg "BOT_REPORT_GIT_SHA=$BASE" --build-arg "BOT_REPORT_TREE_SHA=$TREE" --build-arg "BOT_REPORT_BUILD_TIME=$(git show -s --format=%cI HEAD)" -t "$IMAGE" .
+    run railway_provenance yes "exact source SHA/TREE and runtime binaries" bash scripts/verify-oci-image-local.sh "$IMAGE" railway
+    run railway_docker yes "disposable Docker volume/SQLite integration" env RAILWAY_DOCKER_INTEGRATION=1 RAILWAY_TEST_IMAGE="$IMAGE" node --test dist/tests/railway-platform-config-docker.test.js
+    STANDALONE="mcp-worker-t5-standalone:$(git rev-parse --short=12 HEAD)"
+    run standalone_build yes "local standalone Node22 Go1.24; no pulls; network opt-in" docker build --pull=false --network="$BUILD_NETWORK" -f Dockerfile --build-arg "BOT_REPORT_GIT_SHA=$BASE" --build-arg "BOT_REPORT_TREE_SHA=$TREE" --build-arg "BOT_REPORT_BUILD_TIME=$(git show -s --format=%cI HEAD)" -t "$STANDALONE" .
+    run standalone_provenance yes "distinct standalone OCI identity and runtime" bash scripts/verify-oci-image-local.sh "$STANDALONE" standalone
   else
-    omit railway_sdk_types NOT_TESTED 'Railway SDK dependency install failed'
-    omit railway_sdk_graph NOT_TESTED 'Railway SDK dependency install failed'
+    for gate in railway_build railway_provenance railway_docker standalone_build standalone_provenance; do missing "$gate" yes "requires explicit T5_ALLOW_DOCKER_BUILD=1, local Docker daemon, clean committed source, cached pinned bases; no silent pull"; done
   fi
 else
-  for gate in railway_sdk_ci railway_sdk_types railway_sdk_graph; do
-    omit "$gate" NOT_TESTED 'requires successful root npm ci'
-  done
+  for gate in linux_installer_lifecycle go_test go_race go_vet wss_worker go_isolation mysql_integration mysql_setup_ui mysql_worker_live playwright_browser railway_build railway_provenance railway_docker standalone_build standalone_provenance; do missing "$gate" yes "targeted mode; use --full with exact disposable prerequisites"; done
 fi
-
-if has_go; then
-  run go_test 600 'offline module cache; GOTOOLCHAIN=local; GOPROXY=off' \
-    bash -c 'cd worker-go && go test ./...' || true
-  run go_test_race 900 'Linux race detector; local toolchain' \
-    bash -c 'cd worker-go && go test -race ./...' || true
-  run go_vet 420 'static analysis with local toolchain' \
-    bash -c 'cd worker-go && go vet ./...' || true
-  run go_build 600 'output stays in private local evidence directory' \
-    bash -c 'cd worker-go && go build -trimpath -o "$1" .' _ "$REPORT/worker-local" || true
-else
-  for gate in go_test go_test_race go_vet go_build; do
-    omit "$gate" SKIP 'Go >=1.24 unavailable; no auto-download/global installation'
-  done
-fi
-if has_go && (( npm_ok )) && (( build_ok )) && command -v openssl >/dev/null 2>&1; then
-  run railway_wss_oauth 600 'real Go worker, WSS, OAuth PKCE, local loopback only' \
-    env BOT_REPORT_W2_T03_GO_E2E=1 node --test dist/tests/railway-worker-wss-e2e.test.js || true
-  run railway_go_isolation 600 'two local Go workers with independent SQLite volumes' \
-    env BOT_REPORT_W3_T04_GO_E2E=1 node --test dist/tests/railway-instance-isolation-go.test.js || true
-else
-  omit railway_wss_oauth SKIP 'requires Go >=1.24, OpenSSL, npm ci and build'
-  omit railway_go_isolation SKIP 'requires Go >=1.24, OpenSSL, npm ci and build'
-fi
-
-IMAGE="mcp-worker-local:$SHORT_SHA"
-# Builds always execute on this PC. Offline mode forbids network; an explicit
-# online mode only permits Docker to fetch build dependencies, never deploy.
-DOCKER_MODE="${LOCAL_VERIFY_DOCKER_MODE:-offline}"
-case "$DOCKER_MODE" in offline|online) ;; *) die 'LOCAL_VERIFY_DOCKER_MODE must be offline or online' ;; esac
-if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
-  omit docker_local_build SKIP 'Docker CLI/daemon unavailable'
-  docker_ok=0
-elif [[ "$DOCKER_MODE" == offline ]] && (
-  ! docker image inspect 'node:22.22.3-alpine@sha256:e58326d0d441090181ac150dc2078d3e2cf6a0d42e809aebba3ef5880935ffdd' >/dev/null 2>&1 ||
-  ! docker image inspect 'golang:1.24@sha256:d2d2bc1c84f7e60d7d2438a3836ae7d0c847f4888464e7ec9ba3a1339a1ee804' >/dev/null 2>&1
-); then
-  omit docker_local_build SKIP 'pinned Docker images not cached; use explicitly authorized online mode if appropriate'
-  docker_ok=0
-else
-  build_args=(--pull=false)
-  if [[ "$DOCKER_MODE" == offline ]]; then build_args+=(--network=none); fi
-  if run docker_local_build 1200 "Local Docker build ($DOCKER_MODE); never deploy" \
-    docker build "${build_args[@]}" \
-      --build-arg "BOT_REPORT_GIT_SHA=$HEAD_SHA" \
-      --build-arg "BOT_REPORT_TREE_SHA=$(git -C "$ROOT" rev-parse "$HEAD_SHA^{tree}")" \
-      --build-arg "BOT_REPORT_BUILD_TIME=$(git -C "$ROOT" show -s --format=%cI "$HEAD_SHA")" \
-      -f Dockerfile.railway -t "$IMAGE" .; then
-    docker_ok=1
-  else
-    docker_ok=0
-  fi
-fi
-if (( docker_ok )) && (( npm_ok )) && (( build_ok )); then
-  run railway_oci_provenance 120 'source SHA and Git tree must equal the exact PC-built image labels; registry still NOT_TESTED' \
-    bash scripts/verify-oci-image-local.sh "$IMAGE" || true
-  run railway_docker_config 900 'disposable Docker containers and volumes only' \
-    env RAILWAY_DOCKER_INTEGRATION=1 RAILWAY_TEST_IMAGE="$IMAGE" \
-    node --test dist/tests/railway-platform-config-docker.test.js || true
-  run railway_docker_isolation 1200 'disposable volumes; backup/restore; read-only denial' \
-    env W3_SANDBOX_ONLY=1 bash scripts/verify-railway-docker-isolation.sh "$IMAGE" || true
-  run railway_offsite_encrypted 900 'five disposable PC volumes and authenticated AES-GCM/HMAC restore; remote backup NOT_TESTED' \
-    env -u CI T04_LOCAL_TEST_ONLY=1 bash scripts/test-t4-offsite-docker.sh "$IMAGE" || true
-else
-  omit railway_oci_provenance SKIP 'requires freshly built local Docker image and committed source'
-  omit railway_docker_config SKIP 'requires freshly built local Docker image and compiled tests'
-  omit railway_docker_isolation SKIP 'requires freshly built local Docker image and compiled tests'
-  omit railway_offsite_encrypted SKIP 'requires freshly built local Docker image and compiled tests'
-fi
-
-# These previous CI actions require external resources, approval, or a platform
-# matrix. Explicitly disclose coverage gaps rather than imply they ran.
-omit remote_pr_ancestry NOT_TESTED 'live GitHub ref refresh excluded from offline PC verification'
-omit remote_audit NOT_TESTED 'npm audit needs registry access; offline gate not claimed'
-omit release_scan NOT_TESTED 'release-verify/SBOM require external image and release prerequisites'
-omit cross_os_matrix NOT_TESTED 'only Linux x86_64 PC was available'
-{
-  printf 'ended_utc=%s\n' "$(date -u +%FT%TZ)"
-  printf 'status_counts:\n'
-  awk -F '\t' 'NR>1 { n[$2]++ } END {for (s in n) printf "%s=%d\n",s,n[s]}' "$RESULTS" | sort
-} >> "$REPORT/metadata.txt"
-printf '\nSummary by status (see results.tsv and sanitized logs):\n'
-awk -F '\t' 'NR>1 { n[$2]++ } END {for (s in n) printf "%s=%d\n",s,n[s]}' "$RESULTS" | sort
-printf 'Evidence path: %s\n' "$REPORT"
-if awk -F '\t' 'NR>1 && $2=="FAIL" { found=1 } END {exit !found}' "$RESULTS"; then exit 1; fi
-if awk -F '\t' 'NR>1 && ($2=="SKIP" || $2=="NOT_TESTED") { found=1 } END {exit !found}' "$RESULTS"; then exit 3; fi
+# Network audit and Trivy are always separately approved and never implicitly executed.
+missing dependency_audit yes "npm audit requires explicit approved network access and fresh registry evidence"
+missing sbom_trivy yes "cached authorized Trivy image/DB and local OCI images required; run release-scan.sh explicitly"
+missing native_other_os yes "native Windows/macOS/systemd matrix is not available on Linux PC"
+missing live_railway yes "cloud deployment and external HTTPS forbidden"
+missing offsite_restore yes "independent offsite provider not approved"
+node - "$RESULTS" "$OUT/summary.json" <<'NODE'
+const fs=require("node:fs");
+const [input,out]=process.argv.slice(2);
+const rows=fs.readFileSync(input,"utf8").trimEnd().split("\n").slice(1).map(l=>{const [gate,mandatory,status,exit_code,tap_pass,tap_fail,tap_skip,note]=l.split("\t");return {gate,mandatory:mandatory==="yes",status,exit_code:exit_code==="-"?null:Number(exit_code),test_counts:{pass:Number(tap_pass),fail:Number(tap_fail),skip:Number(tap_skip)},prerequisites_or_note:note};});
+const summary={status:rows.some(x=>x.status==="FAIL")?"FAIL":rows.some(x=>x.mandatory&&x.status!=="PASS")?"NO_GO":"LOCAL_GATES_COMPLETE_REVIEW_REQUIRED",gates:rows};
+fs.writeFileSync(out,JSON.stringify(summary,null,2)+"\n");console.log("T5_QA_SUMMARY "+JSON.stringify({status:summary.status,counts:rows.reduce((a,r)=>(a[r.status]=(a[r.status]||0)+1,a),{})}));
+NODE
+printf "T5_QA_EVIDENCE=%s (local, no remote upload)\n" "$OUT"
+if (( FAIL )); then exit 1; fi
+if grep -Eq $'\tyes\t(NOT_TESTED|PARTIAL|SKIP)\t' "$RESULTS"; then exit 3; fi
 exit 0

@@ -4,11 +4,15 @@ const migration = {
     await schema.table('mcp_oauth_clients', (table) => {
       table.addString('owner_user_id', 96, { nullable: true });
     });
-    await schema.adapter.exec(
-      'ALTER TABLE `mcp_oauth_clients` ADD INDEX `idx_mcp_clients_owner_user` (`owner_user_id`)',
-    );
-    await schema.adapter.exec(
-      'ALTER TABLE `mcp_oauth_clients` ADD CONSTRAINT `fk_mcp_clients_owner_user` FOREIGN KEY (`owner_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE',
+    await schema.addIndexIfMissing('mcp_oauth_clients', 'idx_mcp_clients_owner_user', [
+      'owner_user_id',
+    ]);
+    await schema.addForeignIfMissing(
+      'mcp_oauth_clients',
+      'fk_mcp_clients_owner_user',
+      'owner_user_id',
+      'users',
+      'CASCADE',
     );
   },
   async down(schema: SchemaBuilder) {

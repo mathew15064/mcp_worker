@@ -433,6 +433,16 @@ class McpOAuthRepository {
     );
   }
 
+  // RFC 7009: never revoke another OAuth client's token, including the
+  // omitted/unknown token_type_hint path. The client guard belongs in the
+  // UPDATE predicate to avoid a read-check/write time-of-check race.
+  async revokeAccessTokenForClient(tokenHash: string, clientId: string) {
+    return this.db.execute(
+      'UPDATE mcp_oauth_access_tokens SET revoked_at = ? WHERE token_hash = ? AND client_id = ? AND revoked_at IS NULL',
+      [new Date().toISOString(), tokenHash, clientId],
+    );
+  }
+
   async revokeAccessTokensByClientId(clientId: string) {
     return this.db.execute(
       'UPDATE mcp_oauth_access_tokens SET revoked_at = ? WHERE client_id = ? AND revoked_at IS NULL',
@@ -522,6 +532,13 @@ class McpOAuthRepository {
       `UPDATE mcp_oauth_refresh_tokens SET revoked_at = ?, replaced_by_hash = ?
       WHERE token_hash = ? AND revoked_at IS NULL`,
       [new Date().toISOString(), replacedByHash, tokenHash],
+    );
+  }
+
+  async revokeRefreshTokenForClient(tokenHash: string, clientId: string) {
+    return this.db.execute(
+      'UPDATE mcp_oauth_refresh_tokens SET revoked_at = ? WHERE token_hash = ? AND client_id = ? AND revoked_at IS NULL',
+      [new Date().toISOString(), tokenHash, clientId],
     );
   }
 

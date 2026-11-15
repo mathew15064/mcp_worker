@@ -9,6 +9,7 @@ import type { DatabaseAdapter, SqlRow } from './contracts';
 import type Database from 'better-sqlite3';
 import { MigrationRunner } from './migrationRunner';
 import { runMigrations } from './migrations';
+import { assertRailwaySqliteSchema } from './sqliteSchemaValidation';
 type MysqlInput = Parameters<typeof MysqlAdapter.create>[0];
 type SourceInfo = Awaited<ReturnType<MigrationRunner['inspectSource']>>;
 interface Candidate {
@@ -195,26 +196,8 @@ class DatabaseManager {
         }
       }
       runMigrations(db);
-      // IF NOT EXISTS does not validate pre-existing table shapes. Reject
-      // incompatible/partial legacy schemas before advertising readiness.
-      const requiredColumns: Record<string, string[]> = {
-        system_settings: ['key', 'value', 'updated_at'],
-        sessions: ['sid', 'sess', 'expired'],
-        users: ['id', 'username', 'password_hash', 'role', 'session_version'],
-        mcp_oauth_clients: ['id', 'client_id', 'status', 'profile_id', 'owner_user_id'],
-      };
-      for (const [table, required] of Object.entries(requiredColumns)) {
-        const found = new Set(
-          (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(
-            (column) => column.name,
-          ),
-        );
-        if (required.some((column) => !found.has(column))) {
-          throw Object.assign(new Error(`Incompatible Railway SQLite table: ${table}`), {
-            code: 'RAILWAY_SCHEMA_INCOMPATIBLE',
-          });
-        }
-      }
+      // IF NOT EXISTS alone cannot certify a pre-existing legacy schema.
+      assertRailwaySqliteSchema(db);
       db.exec(
         'CREATE TABLE IF NOT EXISTS railway_schema_versions (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)',
       );

@@ -128,7 +128,7 @@ void test('fresh schema, WAL, online backup and offline restore are consistent',
   });
 });
 
-void test('legacy SQLite upgrade preserves rows and runs idempotently', async () => {
+void test('partial legacy SQLite schema refuses READY and preserves existing grants on retry', async () => {
   await withDisposableVolume(async ({ dbPath }) => {
     const legacy = new Database(dbPath);
     legacy.exec(
@@ -147,36 +147,36 @@ void test('legacy SQLite upgrade preserves rows and runs idempotently', async ()
     );
     legacy.close();
     for (let run = 0; run < 2; run++) {
-      await databaseManager.initialize();
-      assert.equal(databaseManager.isRailwaySqliteReady(), true);
-      const db = getDb();
-      const user = db
-        .prepare('SELECT username, session_version FROM users WHERE id = ?')
-        .get('legacy-user') as { username: string; session_version: number };
-      assert.deepEqual(user, { username: 'legacy', session_version: 1 });
-      const client = db
-        .prepare('SELECT client_id, profile_id, owner_user_id FROM mcp_oauth_clients WHERE id = ?')
-        .get('legacy-client') as {
-        client_id: string;
-        profile_id: string;
-        owner_user_id: string | null;
-      };
-      assert.deepEqual(client, {
-        client_id: 'old-client',
-        profile_id: 'legacy_profile',
-        owner_user_id: null,
-      });
-      assert.equal(
-        (
-          db.prepare('SELECT COUNT(*) AS count FROM railway_schema_versions').get() as {
-            count: number;
-          }
-        ).count,
-        1,
+      await assert.rejects(
+        () => databaseManager.initialize(),
+        (error: unknown) =>
+          error instanceof Error && 'code' in error && error.code === 'RAILWAY_SCHEMA_INCOMPATIBLE',
       );
-      assert.equal(db.pragma('quick_check', { simple: true }), 'ok');
-      await databaseManager.close();
+      assert.equal(databaseManager.isRailwaySqliteReady(), false);
+      assert.equal(databaseManager.getAdapter(), null);
       closeDb();
+      const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+      try {
+        assert.deepEqual(
+          db.prepare('SELECT username, password_hash FROM users WHERE id = ?').get('legacy-user'),
+          { username: 'legacy', password_hash: 'existing-hash' },
+        );
+        assert.deepEqual(
+          db
+            .prepare('SELECT client_id, allowed_scopes_json FROM mcp_oauth_clients WHERE id = ?')
+            .get('legacy-client'),
+          { client_id: 'old-client', allowed_scopes_json: '[]' },
+        );
+        assert.equal(db.pragma('quick_check', { simple: true }), 'ok');
+        assert.equal(
+          db.prepare("SELECT name FROM sqlite_master WHERE name='railway_schema_versions'").get(),
+          undefined,
+          'failed migration transaction must not add a READY ledger',
+        );
+      } finally {
+        db.close();
+      }
+      await databaseManager.close();
       databaseManager.resetForTests();
     }
   });
@@ -230,7 +230,7 @@ void test('malformed schema and corrupt database refuse readiness', async () => 
     const malformed = new Database(dbPath);
     malformed.exec('CREATE TABLE sessions (sid TEXT PRIMARY KEY)');
     malformed.close();
-    await assert.rejects(() => databaseManager.initialize(), /Incompatible Railway SQLite table/);
+    await assert.rejects(() => databaseManager.initialize(), /Incompatible Railway SQLite schema/);
     assert.equal(databaseManager.getAdapter(), null);
     closeDb();
   });

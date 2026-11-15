@@ -96,6 +96,58 @@ func TestAllowedPathRejectsSymlinkEscape(t *testing.T) {
 	}
 }
 
+func TestLoginDefaultsToOSPermissionsWithoutWorkspaceRoots(t *testing.T) {
+	t.Setenv("BOT_REPORT_WORKER_HOME", filepath.Join(t.TempDir(), "worker-home"))
+	t.Setenv("BOT_REPORT_WORKER_ALLOWED_ROOTS", "")
+	t.Setenv("BOT_REPORT_WORKER_ALLOW_SHELL", "")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/worker/v1/enroll" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"worker_id":"11111111-2222-4333-8444-555555555555","name":"Fixture","profile":{"id":"profile-1","name":"Fixture"}}`))
+	}))
+	defer server.Close()
+
+	err := login(cliOptions{
+		"server": server.URL, "insecure-http": "true", "token": "br_enroll_fixture",
+		"name": "Fixture", "no-start": "true",
+	})
+	if err != nil {
+		t.Fatalf("login without roots or --allow-shell: %v", err)
+	}
+	var cfg Config
+	if ok, err := readJSON(configPath(), &cfg); !ok || err != nil {
+		t.Fatalf("read config: ok=%v err=%v", ok, err)
+	}
+	if len(cfg.AllowedRoots) != 0 || !cfg.AllowShell {
+		t.Fatalf("expected unrestricted roots and default OS-user shell, got %#v", cfg)
+	}
+	agent, err := newAgent()
+	if err != nil {
+		t.Fatalf("empty-roots agent should start: %v", err)
+	}
+	defer agent.shutdown()
+	if err := agent.requireShell(); err != nil {
+		t.Fatalf("default shell should be enabled: %v", err)
+	}
+}
+
+func TestEmptyRootConfigStillRespectsExplicitShellDisable(t *testing.T) {
+	root := t.TempDir()
+	if roots, err := normalizeRoots(""); err != nil || len(roots) != 0 {
+		t.Fatalf("empty roots should mean no path allowlist: %v %v", roots, err)
+	}
+	if _, err := assertAllowedPath(root, nil, true); err != nil {
+		t.Fatalf("unrestricted path should be accepted: %v", err)
+	}
+	a := &Agent{cfg: Config{AllowShell: false}}
+	if err := a.requireShell(); errorCode(err) != "WORKER_SHELL_DISABLED" {
+		t.Fatalf("explicit shell disabled must remain enforceable: %v", err)
+	}
+}
+
 func TestStandaloneAgentAuthenticatesAndExecutesTypedWorkspaceJob(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "worker-home")
@@ -183,6 +235,173 @@ func TestStandaloneAgentAuthenticatesAndExecutesTypedWorkspaceJob(t *testing.T) 
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for worker result")
+	}
+}
+
+func TestLiveWebSocketOwnerRevocationStopsWorkAndDisconnects(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix process group fixture; Windows requires native runtime verification")
+	}
+	root := t.TempDir()
+	home := filepath.Join(root, "worker-home")
+	t.Setenv("BOT_REPORT_WORKER_HOME", home)
+	t.Setenv("TMPDIR", t.TempDir())
+	privatePEM, publicPEM, err := generateIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != connectPath {
+			http.NotFound(w, r)
+			return
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_ = conn.WriteControl(websocket.CloseMessage,
+			websocket.FormatCloseMessage(4003, "owner-disabled"), time.Now().Add(time.Second))
+	}))
+	defer server.Close()
+	cfg := Config{
+		ServerURL: server.URL, WorkerName: "Revoked Worker", ProfileName: "Revoked",
+		AllowedRoots: []string{root}, AllowShell: true,
+		AllowInsecureHTTP: true, MaxJobMS: defaultMaxJobMS,
+	}
+	state := State{
+		PrivateKey: privatePEM, PublicKey: publicPEM,
+		WorkerID: "11111111-2222-4333-8444-555555555555", Name: "Revoked Worker",
+		ServerURL: server.URL,
+	}
+	if err := writeJSONAtomic(configPath(), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSONAtomic(statePath(), &state); err != nil {
+		t.Fatal(err)
+	}
+	agent, err := newAgent()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A managed process survives a regular network outage; a server-issued
+	// owner revocation must terminate it before connectOnce returns.
+	started, err := agent.startManagedProcess(map[string]any{
+		"cwd": root, "command": "sleep 10",
+	})
+	if err != nil {
+		agent.shutdown()
+		t.Fatal(err)
+	}
+	id := started.(map[string]any)["process_id"].(string)
+	record, err := agent.getProcess(id)
+	if err != nil {
+		agent.shutdown()
+		t.Fatal(err)
+	}
+	stopped, err := agent.connectOnce()
+	if err != nil {
+		agent.shutdown()
+		t.Fatal(err)
+	}
+	if !stopped || !agent.shutting.Load() {
+		agent.shutdown()
+		t.Fatal("revocation must stop the daemon and prevent automatic reconnect")
+	}
+	select {
+	case <-record.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server revocation left managed process running")
+	}
+}
+
+func TestHandshakeAuthRejectionStopsPreviouslyManagedWorkloads(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix managed-process fixture; Windows needs native runtime QA")
+	}
+	for _, tc := range []struct {
+		name    string
+		status  int
+		payload string
+		stop    bool
+	}{
+		{"disabled-owner", 403, `{"code":"WORKER_OWNER_DISABLED"}`, true},
+		{"invalid-identity", 401, `{"code":"WORKER_AUTH_INVALID"}`, true},
+		{"owner-status-unavailable", 503, `{"code":"WORKER_OWNER_UNAVAILABLE"}`, true},
+		{"transient-service-error", 503, `{"code":"SERVICE_UNAVAILABLE"}`, false},
+		{"transient-upstream-error", 502, `{"code":"BAD_GATEWAY"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			t.Setenv("BOT_REPORT_WORKER_HOME", filepath.Join(root, "worker-home"))
+			t.Setenv("TMPDIR", t.TempDir())
+			privatePEM, publicPEM, err := generateIdentity()
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != connectPath {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.payload))
+			}))
+			defer server.Close()
+			cfg := Config{
+				ServerURL: server.URL, WorkerName: "Fixture Worker", ProfileName: "Fixture",
+				AllowedRoots: []string{root}, AllowShell: true,
+				AllowInsecureHTTP: true, MaxJobMS: defaultMaxJobMS,
+			}
+			state := State{
+				PrivateKey: privatePEM, PublicKey: publicPEM,
+				WorkerID: "11111111-2222-4333-8444-555555555555",
+				Name:     "Fixture Worker", ServerURL: server.URL,
+			}
+			if err := writeJSONAtomic(configPath(), &cfg); err != nil {
+				t.Fatal(err)
+			}
+			if err := writeJSONAtomic(statePath(), &state); err != nil {
+				t.Fatal(err)
+			}
+			agent, err := newAgent()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer agent.shutdown()
+			started, err := agent.startManagedProcess(map[string]any{
+				"cwd": root, "command": "sleep 10",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			record, err := agent.getProcess(started.(map[string]any)["process_id"].(string))
+			if err != nil {
+				t.Fatal(err)
+			}
+			stopped, connectErr := agent.connectOnce()
+			if tc.stop {
+				if !stopped || connectErr != nil || !agent.shutting.Load() {
+					t.Fatalf("auth rejection must stop workloads without reconnect: stopped=%v err=%v", stopped, connectErr)
+				}
+				select {
+				case <-record.done:
+				case <-time.After(2 * time.Second):
+					t.Fatal("auth rejection left managed process running")
+				}
+			} else {
+				if stopped || connectErr == nil || agent.shutting.Load() {
+					t.Fatalf("transient failure must preserve retry: stopped=%v err=%v", stopped, connectErr)
+				}
+				select {
+				case <-record.done:
+					t.Fatal("transient failure unexpectedly stopped managed process")
+				default:
+				}
+			}
+		})
 	}
 }
 

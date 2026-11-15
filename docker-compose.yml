@@ -4,6 +4,7 @@ services:
       context: .
       args:
         BOT_REPORT_GIT_SHA: ${BOT_REPORT_GIT_SHA:-unknown}
+        BOT_REPORT_TREE_SHA: ${BOT_REPORT_TREE_SHA:-unknown}
         BOT_REPORT_BUILD_TIME: ${BOT_REPORT_BUILD_TIME:-unknown}
     image: ${COMPOSE_PROJECT_NAME:-mcp_worker}-app:local
     restart: unless-stopped

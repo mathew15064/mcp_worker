@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
@@ -15,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -271,9 +269,6 @@ func normalizeRoots(value string) ([]string, error) {
 			seen[abs] = true
 			roots = append(roots, abs)
 		}
-	}
-	if len(roots) == 0 {
-		return nil, fail("WORKER_ALLOWED_ROOTS_REQUIRED", "At least one allowed workspace root is required.")
 	}
 	return roots, nil
 }
@@ -565,13 +560,7 @@ func login(options cliOptions) error {
 	if rootInput == "" {
 		rootInput = os.Getenv("BOT_REPORT_WORKER_ALLOWED_ROOTS")
 	}
-	if rootInput == "" {
-		cwd, _ := os.Getwd()
-		rootInput, err = prompt(reader, "Allowed workspace root(s), comma-separated", cwd)
-		if err != nil {
-			return err
-		}
-	}
+	// No roots means access to any path permitted by the Worker OS account.
 	roots, err := normalizeRoots(rootInput)
 	if err != nil {
 		return err
@@ -596,13 +585,7 @@ func login(options cliOptions) error {
 	if err != nil {
 		return err
 	}
-	allowShell := options["allow-shell"] == "true" || os.Getenv("BOT_REPORT_WORKER_ALLOW_SHELL") == "true"
-	if !allowShell && options["allow-shell"] == "" && os.Getenv("BOT_REPORT_WORKER_ALLOW_SHELL") == "" {
-		allowShell, err = yesNo(reader, "Allow mcp_worker to execute shell commands as this OS user?", false)
-		if err != nil {
-			return err
-		}
-	}
+	allowShell := options["allow-shell"] == "true" || os.Getenv("BOT_REPORT_WORKER_ALLOW_SHELL") != "false"
 	if err := ensureWorkerHome(); err != nil {
 		return err
 	}
@@ -719,10 +702,10 @@ Usage:
 Login options:
   --server <url>       mcp_worker base URL (installer provides a default)
   --token <token>      One-time enrollment token; omitted = hidden prompt
-  --roots <paths>      Comma-separated allowed workspace roots
+  --roots <paths>      Optional restricted roots (default: any path allowed by OS)
   --name <name>        Worker display name; default = hostname
   --profile <name>     Execution alias; default = worker name
-  --allow-shell        Allow interactive shell/workspace/git/check/process execution
+  --allow-shell        Shell is enabled by default; set BOT_REPORT_WORKER_ALLOW_SHELL=false to disable
   --insecure-http      Permit HTTP only for trusted local development
   --no-start           Enroll only; do not connect the worker
 
@@ -790,6 +773,14 @@ func assertAllowedPath(input string, roots []string, mustExist bool) (string, er
 	if err != nil {
 		return "", err
 	}
+	if len(roots) == 0 {
+		if mustExist {
+			if _, err := os.Stat(resolved); err != nil {
+				return "", err
+			}
+		}
+		return resolved, nil
+	}
 	allowed := false
 	for _, root := range roots {
 		if isWithinRoot(resolved, root) {
@@ -856,7 +847,10 @@ type commandResult struct {
 }
 
 func runFile(name string, args []string, input []byte, timeout time.Duration, maxBytes int64) (commandResult, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	return runFileContext(context.Background(), name, args, input, timeout, maxBytes)
+}
+func runFileContext(parent context.Context, name string, args []string, input []byte, timeout time.Duration, maxBytes int64) (commandResult, error) {
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	if input != nil {
@@ -883,6 +877,9 @@ func runFile(name string, args []string, input []byte, timeout time.Duration, ma
 }
 
 func (a *Agent) runShell(command, cwd string, timeout time.Duration, maxBytes int64) (map[string]any, error) {
+	return a.runShellContext(context.Background(), command, cwd, timeout, maxBytes)
+}
+func (a *Agent) runShellContext(parent context.Context, command, cwd string, timeout time.Duration, maxBytes int64) (map[string]any, error) {
 	if a.shutting.Load() {
 		return nil, fail("WORKER_SHUTTING_DOWN", "Worker is shutting down.")
 	}
@@ -890,8 +887,11 @@ func (a *Agent) runShell(command, cwd string, timeout time.Duration, maxBytes in
 		return nil, a.resourceEmergencyError()
 	}
 	started := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
+	if err := checkJobContext(ctx); err != nil {
+		return nil, err
+	}
 	cmd := platformShellCommandContext(ctx, command, "workspace")
 	// CommandContext's default Cancel only kills the immediate child.
 	// Kill the workload group before Wait can block on inherited output pipes.
@@ -902,6 +902,9 @@ func (a *Agent) runShell(command, cwd string, timeout time.Duration, maxBytes in
 	er := &cappedBuffer{limit: maxBytes}
 	cmd.Stdout = out
 	cmd.Stderr = er
+	if err := checkJobContext(ctx); err != nil {
+		return nil, err
+	}
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
@@ -921,9 +924,9 @@ func (a *Agent) runShell(command, cwd string, timeout time.Duration, maxBytes in
 	if a.resourceEmergency.Load() && err != nil {
 		return nil, a.resourceEmergencyError()
 	}
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	if ctx.Err() != nil {
 		_ = platformTerminateWorkload(cmd, true)
-		return nil, fail("WORKER_JOB_TIMEOUT", "Local worker command timed out.")
+		return nil, fail("WORKER_JOB_TIMEOUT", "Local worker command timed out or was cancelled.")
 	}
 	code := 0
 	if err != nil {
@@ -972,18 +975,21 @@ func clamp(v, min, max int) int {
 }
 
 func inspectTmux(session string) (map[string]any, error) {
+	return inspectTmuxContext(context.Background(), session)
+}
+func inspectTmuxContext(ctx context.Context, session string) (map[string]any, error) {
 	if _, err := validateTmuxSession(session); err != nil {
 		return nil, err
 	}
-	version, err := runFile("tmux", []string{"-V"}, nil, 10*time.Second, 2*1024*1024)
+	version, err := runFileContext(ctx, "tmux", []string{"-V"}, nil, 10*time.Second, 2*1024*1024)
 	if err != nil || version.code != 0 {
 		return nil, fail("TMUX_NOT_AVAILABLE", "tmux is not available on the worker host.")
 	}
-	exists, err := runFile("tmux", []string{"has-session", "-t", "=" + session}, nil, 10*time.Second, 2*1024*1024)
+	exists, err := runFileContext(ctx, "tmux", []string{"has-session", "-t", "=" + session}, nil, 10*time.Second, 2*1024*1024)
 	if err != nil || exists.code != 0 {
 		return nil, fail("TMUX_SESSION_NOT_FOUND", "Configured tmux session was not found.")
 	}
-	list, err := runFile("tmux", []string{"list-panes", "-t", "=" + session, "-F", "#{pane_id}\t#{pane_current_command}"}, nil, 10*time.Second, 2*1024*1024)
+	list, err := runFileContext(ctx, "tmux", []string{"list-panes", "-t", "=" + session, "-F", "#{pane_id}\t#{pane_current_command}"}, nil, 10*time.Second, 2*1024*1024)
 	if err != nil || list.code != 0 {
 		return nil, fail("TMUX_INSPECTION_FAILED", "Unable to inspect tmux session.")
 	}
@@ -1120,6 +1126,12 @@ func (s *shellSession) finish(a *Agent, reason string) {
 }
 
 func (a *Agent) getOrCreateShell(key string, cols, rows int) (*shellSession, error) {
+	return a.getOrCreateShellContext(context.Background(), key, cols, rows)
+}
+func (a *Agent) getOrCreateShellContext(ctx context.Context, key string, cols, rows int) (*shellSession, error) {
+	if err := checkJobContext(ctx); err != nil {
+		return nil, err
+	}
 	if err := a.requireShell(); err != nil {
 		return nil, err
 	}
@@ -1131,6 +1143,10 @@ func (a *Agent) getOrCreateShell(key string, cols, rows int) (*shellSession, err
 	cols = clamp(cols, 2, 500)
 	rows = clamp(rows, 2, 200)
 	a.shellMu.Lock()
+	if err := checkJobContext(ctx); err != nil {
+		a.shellMu.Unlock()
+		return nil, err
+	}
 	if existing := a.shells[key]; existing != nil {
 		a.shellMu.Unlock()
 		return existing, nil
@@ -1139,10 +1155,17 @@ func (a *Agent) getOrCreateShell(key string, cols, rows int) (*shellSession, err
 		a.shellMu.Unlock()
 		return nil, fail("SHELL_SESSION_LIMIT", "Worker shell session limit reached.")
 	}
-	cmd, terminal, shellPath, err := startInteractiveShell(a.roots[0], cols, rows, "shell")
+	cmd, terminal, shellPath, err := startInteractiveShell(a.defaultCWD(), cols, rows, "shell")
 	if err != nil {
 		a.shellMu.Unlock()
 		return nil, fail("SHELL_START_FAILED", "Unable to start an interactive worker shell.")
+	}
+	if err := checkJobContext(ctx); err != nil {
+		_ = platformTerminateWorkload(cmd, true)
+		_ = terminal.Close()
+		_ = cmd.Wait()
+		a.shellMu.Unlock()
+		return nil, err
 	}
 	session := &shellSession{key: key, cmd: cmd, terminal: terminal, pid: cmd.Process.Pid, shell: shellPath, cwd: cmd.Dir, subscribers: map[string]*safeSocket{}}
 	a.shells[key] = session
@@ -1167,7 +1190,10 @@ func (a *Agent) getOrCreateShell(key string, cols, rows int) (*shellSession, err
 }
 
 func (a *Agent) shellInspect(p map[string]any) (any, error) {
-	session, err := a.getOrCreateShell(payloadString(p, "session_key"), 80, 24)
+	return a.shellInspectContext(context.Background(), p)
+}
+func (a *Agent) shellInspectContext(ctx context.Context, p map[string]any) (any, error) {
+	session, err := a.getOrCreateShellContext(ctx, payloadString(p, "session_key"), 80, 24)
 	if err != nil {
 		return nil, err
 	}
@@ -1175,7 +1201,10 @@ func (a *Agent) shellInspect(p map[string]any) (any, error) {
 }
 
 func (a *Agent) shellSend(p map[string]any) (any, error) {
-	session, err := a.getOrCreateShell(payloadString(p, "session_key"), 80, 24)
+	return a.shellSendContext(context.Background(), p)
+}
+func (a *Agent) shellSendContext(ctx context.Context, p map[string]any) (any, error) {
+	session, err := a.getOrCreateShellContext(ctx, payloadString(p, "session_key"), 80, 24)
 	if err != nil {
 		return nil, err
 	}
@@ -1187,6 +1216,10 @@ func (a *Agent) shellSend(p map[string]any) (any, error) {
 		text += "\n"
 	}
 	session.mu.Lock()
+	if ctxErr := checkJobContext(ctx); ctxErr != nil {
+		session.mu.Unlock()
+		return nil, ctxErr
+	}
 	_, err = session.terminal.Write([]byte(text))
 	session.mu.Unlock()
 	if err != nil {
@@ -1196,7 +1229,10 @@ func (a *Agent) shellSend(p map[string]any) (any, error) {
 }
 
 func (a *Agent) shellRead(p map[string]any) (any, error) {
-	session, err := a.getOrCreateShell(payloadString(p, "session_key"), 80, 24)
+	return a.shellReadContext(context.Background(), p)
+}
+func (a *Agent) shellReadContext(ctx context.Context, p map[string]any) (any, error) {
+	session, err := a.getOrCreateShellContext(ctx, payloadString(p, "session_key"), 80, 24)
 	if err != nil {
 		return nil, err
 	}
@@ -1219,11 +1255,18 @@ func (a *Agent) shellRead(p map[string]any) (any, error) {
 }
 
 func (a *Agent) shellInterrupt(p map[string]any) (any, error) {
-	session, err := a.getOrCreateShell(payloadString(p, "session_key"), 80, 24)
+	return a.shellInterruptContext(context.Background(), p)
+}
+func (a *Agent) shellInterruptContext(ctx context.Context, p map[string]any) (any, error) {
+	session, err := a.getOrCreateShellContext(ctx, payloadString(p, "session_key"), 80, 24)
 	if err != nil {
 		return nil, err
 	}
 	session.mu.Lock()
+	if ctxErr := checkJobContext(ctx); ctxErr != nil {
+		session.mu.Unlock()
+		return nil, ctxErr
+	}
 	_, err = session.terminal.Write([]byte{3})
 	session.mu.Unlock()
 	if err != nil {
@@ -1364,6 +1407,8 @@ type Agent struct {
 	cfg               Config
 	state             State
 	roots             []string
+	fileRoots         []anchoredRoot
+	jobCount          atomic.Int32
 	maxJob            time.Duration
 	privateKey        ed25519.PrivateKey
 	processMu         sync.RWMutex
@@ -1392,7 +1437,7 @@ func newAgent() (*Agent, error) {
 	if !ok1 || !ok2 || state.WorkerID == "" {
 		return nil, fail("WORKER_NOT_LOGGED_IN", "Run systemtd login first.")
 	}
-	if cfg.ServerURL == "" || len(cfg.AllowedRoots) == 0 {
+	if cfg.ServerURL == "" {
 		return nil, fail("WORKER_CONFIG_INVALID", "Worker config is incomplete.")
 	}
 	roots, err := normalizeRoots(strings.Join(cfg.AllowedRoots, ","))
@@ -1408,8 +1453,22 @@ func newAgent() (*Agent, error) {
 		maxMS = defaultMaxJobMS
 	}
 	maxMS = clamp(maxMS, 1000, defaultMaxJobMS)
-	return &Agent{cfg: cfg, state: state, roots: roots, maxJob: time.Duration(maxMS) * time.Millisecond, privateKey: priv, processes: map[string]*managedProcess{}, commands: map[int]*exec.Cmd{}, shells: map[string]*shellSession{}}, nil
+	fileRoots, err := openAnchoredRoots(roots)
+	if err != nil {
+		return nil, err
+	}
+	return &Agent{cfg: cfg, state: state, roots: roots, fileRoots: fileRoots, maxJob: time.Duration(maxMS) * time.Millisecond, privateKey: priv, processes: map[string]*managedProcess{}, commands: map[int]*exec.Cmd{}, shells: map[string]*shellSession{}}, nil
 }
+func (a *Agent) defaultCWD() string {
+	if len(a.roots) > 0 {
+		return a.roots[0]
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		return cwd
+	}
+	return "."
+}
+
 func (a *Agent) requireShell() error {
 	if !a.cfg.AllowShell {
 		return fail("WORKER_SHELL_DISABLED", "Shell execution is disabled by local worker policy.")
@@ -1424,19 +1483,25 @@ func rejectRunAs(payload map[string]any) error {
 }
 
 func (a *Agent) executeOperation(operation string, p map[string]any) (any, error) {
+	return a.executeOperationContext(context.Background(), operation, p)
+}
+func (a *Agent) executeOperationContext(ctx context.Context, operation string, p map[string]any) (any, error) {
+	if err := checkJobContext(ctx); err != nil {
+		return nil, err
+	}
 	switch operation {
 	case "shell.inspect":
-		return a.shellInspect(p)
+		return a.shellInspectContext(ctx, p)
 	case "shell.send":
-		return a.shellSend(p)
+		return a.shellSendContext(ctx, p)
 	case "shell.read":
-		return a.shellRead(p)
+		return a.shellReadContext(ctx, p)
 	case "shell.interrupt":
-		return a.shellInterrupt(p)
+		return a.shellInterruptContext(ctx, p)
 	case "tmux.inspect":
-		return inspectTmux(payloadString(p, "tmux_session"))
+		return inspectTmuxContext(ctx, payloadString(p, "tmux_session"))
 	case "tmux.send":
-		info, err := inspectTmux(payloadString(p, "tmux_session"))
+		info, err := inspectTmuxContext(ctx, payloadString(p, "tmux_session"))
 		if err != nil {
 			return nil, err
 		}
@@ -1452,23 +1517,23 @@ func (a *Agent) executeOperation(operation string, p map[string]any) (any, error
 			return nil, fail("INVALID_INPUT", "Terminal input must be 1 byte to 64 KiB.")
 		}
 		bufferName := "brw-" + randomHex(8)
-		r, err := runFile("tmux", []string{"load-buffer", "-b", bufferName, "-"}, []byte(text), 10*time.Second, 2*1024*1024)
+		r, err := runFileContext(ctx, "tmux", []string{"load-buffer", "-b", bufferName, "-"}, []byte(text), 10*time.Second, 2*1024*1024)
 		if err != nil || r.code != 0 {
 			return nil, fail("TMUX_INPUT_FAILED", "Unable to load tmux input buffer.")
 		}
-		r, err = runFile("tmux", []string{"paste-buffer", "-b", bufferName, "-t", target, "-d"}, nil, 10*time.Second, 2*1024*1024)
+		r, err = runFileContext(ctx, "tmux", []string{"paste-buffer", "-b", bufferName, "-t", target, "-d"}, nil, 10*time.Second, 2*1024*1024)
 		if err != nil || r.code != 0 {
 			return nil, fail("TMUX_INPUT_FAILED", "Unable to paste tmux input.")
 		}
 		if payloadBool(p, "submit", true) {
-			r, err = runFile("tmux", []string{"send-keys", "-t", target, "Enter"}, nil, 10*time.Second, 2*1024*1024)
+			r, err = runFileContext(ctx, "tmux", []string{"send-keys", "-t", target, "Enter"}, nil, 10*time.Second, 2*1024*1024)
 			if err != nil || r.code != 0 {
 				return nil, fail("TMUX_INPUT_FAILED", "Unable to submit tmux input.")
 			}
 		}
 		return map[string]any{"code": "INPUT_SENT", "target_pane": target, "pane_current_command": info["pane_current_command"]}, nil
 	case "tmux.read":
-		info, err := inspectTmux(payloadString(p, "tmux_session"))
+		info, err := inspectTmuxContext(ctx, payloadString(p, "tmux_session"))
 		if err != nil {
 			return nil, err
 		}
@@ -1477,7 +1542,7 @@ func (a *Agent) executeOperation(operation string, p map[string]any) (any, error
 			return nil, err
 		}
 		lines := clamp(payloadInt(p, "lines", 200), 1, 10000)
-		r, err := runFile("tmux", []string{"capture-pane", "-p", "-J", "-t", target, "-S", "-"}, nil, 10*time.Second, 2*1024*1024)
+		r, err := runFileContext(ctx, "tmux", []string{"capture-pane", "-p", "-J", "-t", target, "-S", "-"}, nil, 10*time.Second, 2*1024*1024)
 		if err != nil || r.code != 0 {
 			return nil, fail("CAPTURE_FAILED", "Unable to read tmux history.")
 		}
@@ -1493,7 +1558,7 @@ func (a *Agent) executeOperation(operation string, p map[string]any) (any, error
 		}
 		return map[string]any{"text": strings.Join(rows[start:], "\n"), "lines": minInt(count, lines), "truncated": count > lines, "target_pane": target, "pane_current_command": info["pane_current_command"]}, nil
 	case "tmux.interrupt":
-		info, err := inspectTmux(payloadString(p, "tmux_session"))
+		info, err := inspectTmuxContext(ctx, payloadString(p, "tmux_session"))
 		if err != nil {
 			return nil, err
 		}
@@ -1501,7 +1566,7 @@ func (a *Agent) executeOperation(operation string, p map[string]any) (any, error
 		if err != nil {
 			return nil, err
 		}
-		r, err := runFile("tmux", []string{"send-keys", "-t", target, "C-c"}, nil, 10*time.Second, 2*1024*1024)
+		r, err := runFileContext(ctx, "tmux", []string{"send-keys", "-t", target, "C-c"}, nil, 10*time.Second, 2*1024*1024)
 		if err != nil || r.code != 0 {
 			return nil, fail("TMUX_INTERRUPT_FAILED", "Unable to send interrupt to tmux.")
 		}
@@ -1519,7 +1584,7 @@ func (a *Agent) executeOperation(operation string, p map[string]any) (any, error
 		}
 		cwd := payloadString(p, "cwd")
 		if cwd == "" {
-			cwd = a.roots[0]
+			cwd = a.defaultCWD()
 		}
 		cwd, err := assertAllowedPath(cwd, a.roots, true)
 		if err != nil {
@@ -1527,84 +1592,33 @@ func (a *Agent) executeOperation(operation string, p map[string]any) (any, error
 		}
 		timeoutMS := clamp(payloadInt(p, "timeout_ms", 30000), 100, int(a.maxJob.Milliseconds()))
 		maxBytes := int64(clamp(payloadInt(p, "max_output_bytes", 1024*1024), 1, 10*1024*1024))
-		return a.runShell(command, cwd, time.Duration(timeoutMS)*time.Millisecond, maxBytes)
+		return a.runShellContext(ctx, command, cwd, time.Duration(timeoutMS)*time.Millisecond, maxBytes)
 	case "artifact.collect":
 		if err := rejectRunAs(p); err != nil {
 			return nil, err
 		}
-		target, err := assertAllowedPath(payloadString(p, "path"), a.roots, true)
-		if err != nil {
-			return nil, err
-		}
-		info, err := os.Stat(target)
-		if err != nil {
-			return nil, err
-		}
-		if !info.Mode().IsRegular() {
-			return nil, fail("ARTIFACT_NOT_FILE", "Artifact path is not a regular file.")
-		}
-		maxBytes := int64(clamp(payloadInt(p, "max_bytes", 2*1024*1024), 1, 10*1024*1024))
-		if info.Size() > maxBytes {
-			return nil, fail("ARTIFACT_TOO_LARGE", fmt.Sprintf("Artifact exceeds max_bytes (%d > %d).", info.Size(), maxBytes))
-		}
-		data, err := os.ReadFile(target)
-		if err != nil {
-			return nil, err
-		}
-		real, _ := filepath.EvalSymlinks(target)
-		mimeType := mime.TypeByExtension(filepath.Ext(target))
-		if mimeType == "" {
-			mimeType = http.DetectContentType(data)
-		}
-		isText := strings.HasPrefix(mimeType, "text/") || strings.Contains(mimeType, "json") || strings.Contains(mimeType, "javascript") || strings.Contains(mimeType, "xml") || !bytes.Contains(data, []byte{0})
-		sum := sha256.Sum256(data)
-		var text any = nil
-		if isText {
-			text = string(data)
-		}
-		return map[string]any{"path": payloadString(p, "path"), "real_path": real, "size": info.Size(), "mime_type": mimeType, "sha256": hex.EncodeToString(sum[:]), "is_text": isText, "text": text}, nil
+		return a.collectAllowedFile(ctx, payloadString(p, "path"), int64(clamp(payloadInt(p, "max_bytes", 2*1024*1024), 1, 10*1024*1024)))
 	case "file.write":
 		if err := rejectRunAs(p); err != nil {
 			return nil, err
 		}
-		target, err := assertAllowedPath(payloadString(p, "path"), a.roots, false)
-		if err != nil {
-			return nil, err
-		}
+		target := payloadString(p, "path")
 		content := payloadString(p, "content")
-		if len([]byte(content)) > 2*1024*1024 {
+		if len(content) > 2*1024*1024 {
 			return nil, fail("FILE_TOO_LARGE", "File content exceeds 2 MiB.")
 		}
-		dir := filepath.Dir(target)
-		if payloadBool(p, "create_dirs", false) {
-			if err := os.MkdirAll(dir, 0755); err != nil {
-				return nil, err
-			}
-			if _, err := assertAllowedPath(dir, a.roots, true); err != nil {
-				return nil, err
-			}
-		} else {
-			if _, err := assertAllowedPath(dir, a.roots, true); err != nil {
-				return nil, err
-			}
-		}
-		tmp := filepath.Join(dir, "."+filepath.Base(target)+".brw-"+randomHex(6))
-		if err := os.WriteFile(tmp, []byte(content), 0644); err != nil {
-			return nil, err
-		}
-		if err := os.Rename(tmp, target); err != nil {
-			_ = os.Remove(tmp)
+		if err := a.writeAllowedFile(ctx, target, strings.NewReader(content), payloadBool(p, "create_dirs", false)); err != nil {
 			return nil, err
 		}
 		return map[string]any{"path": target}, nil
 	case "process.start":
-		return a.startManagedProcess(p)
+		return a.startManagedProcessContext(ctx, p)
 	case "process.status":
 		return a.processStatus(p)
 	case "process.logs":
 		return a.processLogs(p)
 	case "process.stop":
-		return a.processStop(p)
+		return a.processStopContext(ctx, p)
 	case "worker.self_uninstall":
 		if serviceManaged() {
 			return nil, fail("WORKER_SERVICE_MANAGED", "Remote uninstall is refused while systemtd.service manages this Worker.")
@@ -1629,6 +1643,12 @@ func minInt(a, b int) int {
 }
 
 func (a *Agent) startManagedProcess(p map[string]any) (any, error) {
+	return a.startManagedProcessContext(context.Background(), p)
+}
+func (a *Agent) startManagedProcessContext(ctx context.Context, p map[string]any) (any, error) {
+	if err := checkJobContext(ctx); err != nil {
+		return nil, err
+	}
 	if a.resourceEmergency.Load() {
 		return nil, a.resourceEmergencyError()
 	}
@@ -1640,7 +1660,7 @@ func (a *Agent) startManagedProcess(p map[string]any) (any, error) {
 	}
 	cwd := payloadString(p, "cwd")
 	if cwd == "" {
-		cwd = a.roots[0]
+		cwd = a.defaultCWD()
 	}
 	var err error
 	cwd, err = assertAllowedPath(cwd, a.roots, true)
@@ -1653,6 +1673,9 @@ func (a *Agent) startManagedProcess(p map[string]any) (any, error) {
 	}
 	a.processMu.Lock()
 	defer a.processMu.Unlock()
+	if err := checkJobContext(ctx); err != nil {
+		return nil, err
+	}
 	if a.shutting.Load() {
 		return nil, fail("WORKER_SHUTTING_DOWN", "Worker is shutting down.")
 	}
@@ -1680,7 +1703,19 @@ func (a *Agent) startManagedProcess(p map[string]any) (any, error) {
 	cmd.Stderr = logWriter
 	// A child inheriting the output pipe must not block process reaping forever.
 	cmd.WaitDelay = 2 * time.Second
+	if err := checkJobContext(ctx); err != nil {
+		_ = logFile.Close()
+		_ = os.Remove(logFilePath)
+		return nil, err
+	}
 	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
+		_ = os.Remove(logFilePath)
+		return nil, err
+	}
+	if err := checkJobContext(ctx); err != nil {
+		_ = platformTerminateWorkload(cmd, true)
+		_ = cmd.Wait()
 		_ = logFile.Close()
 		_ = os.Remove(logFilePath)
 		return nil, err
@@ -1709,6 +1744,11 @@ func (a *Agent) startManagedProcess(p map[string]any) (any, error) {
 	if a.resourceEmergency.Load() {
 		_ = platformTerminateWorkload(record.cmd, true)
 		return nil, a.resourceEmergencyError()
+	}
+	if err := checkJobContext(ctx); err != nil {
+		_ = platformTerminateWorkload(record.cmd, true)
+		<-record.done
+		return nil, err
 	}
 	return map[string]any{"process_id": id, "pid": record.pid, "state": "RUNNING", "started_at": record.startedAt}, nil
 }
@@ -1765,6 +1805,9 @@ func (a *Agent) processLogs(p map[string]any) (any, error) {
 	return map[string]any{"process_id": record.id, "cursor": cursor, "next_cursor": end, "text": string(buf), "eof": end >= size, "truncated": end < size, "log_limit_reached": record.logLimitReached()}, nil
 }
 func (a *Agent) processStop(p map[string]any) (any, error) {
+	return a.processStopContext(context.Background(), p)
+}
+func (a *Agent) processStopContext(ctx context.Context, p map[string]any) (any, error) {
 	record, err := a.getProcess(payloadString(p, "process_id"))
 	if err != nil {
 		return nil, err
@@ -1786,6 +1829,7 @@ func (a *Agent) processStop(p map[string]any) (any, error) {
 		select {
 		case <-record.done:
 		case <-timer.C:
+		case <-ctx.Done():
 		}
 		timer.Stop()
 	}
@@ -1863,7 +1907,7 @@ func (s *safeSocket) close(code int, reason string) {
 	_ = s.ws.Close()
 }
 
-func (a *Agent) handleJob(socket *safeSocket, message map[string]any) {
+func (a *Agent) handleJob(parent context.Context, socket *safeSocket, message map[string]any) {
 	jobID := payloadString(message, "job_id")
 	operation := payloadString(message, "operation")
 	if jobID == "" || operation == "" {
@@ -1878,23 +1922,17 @@ func (a *Agent) handleJob(socket *safeSocket, message map[string]any) {
 		payload = map[string]any{}
 	}
 	timeout := clamp(payloadInt(message, "timeout_ms", int(a.maxJob.Milliseconds())), 100, int(a.maxJob.Milliseconds()))
-	type outcome struct {
-		result any
-		err    error
+	ctx, cancel := context.WithTimeout(parent, time.Duration(timeout)*time.Millisecond)
+	defer cancel()
+	result, err := a.executeOperationContext(ctx, operation, payload)
+	if ctx.Err() != nil {
+		err = fail("WORKER_JOB_TIMEOUT", "Worker job exceeded its deadline or connection ended.")
 	}
-	ch := make(chan outcome, 1)
-	go func() { result, err := a.executeOperation(operation, payload); ch <- outcome{result, err} }()
-	var out outcome
-	select {
-	case out = <-ch:
-	case <-time.After(time.Duration(timeout) * time.Millisecond):
-		out.err = fail("WORKER_JOB_TIMEOUT", "Worker job exceeded local timeout.")
-	}
-	if out.err != nil {
-		_ = socket.sendJSON(map[string]any{"type": "result", "job_id": jobID, "ok": false, "error": map[string]any{"code": errorCode(out.err), "message": out.err.Error()}})
+	if err != nil {
+		_ = socket.sendJSON(map[string]any{"type": "result", "job_id": jobID, "ok": false, "error": map[string]any{"code": errorCode(err), "message": err.Error()}})
 		return
 	}
-	_ = socket.sendJSON(map[string]any{"type": "result", "job_id": jobID, "ok": true, "result": out.result})
+	_ = socket.sendJSON(map[string]any{"type": "result", "job_id": jobID, "ok": true, "result": result})
 	if operation == "worker.self_uninstall" {
 		a.shutting.Store(true)
 		socket.close(websocket.CloseNormalClosure, "remote-uninstall")
@@ -2015,6 +2053,50 @@ func (a *Agent) handleStreamClose(socket *safeSocket, message map[string]any) {
 	_ = socket.sendJSON(map[string]any{"type": "stream_closed", "stream_id": streamID, "reason": "detached"})
 }
 
+// A server-authoritative revocation must stop workloads, not only reconnect.
+// Transient network failures and normal closes keep the existing retry path.
+func (a *Agent) stopOnAuthoritativeClose(err error) bool {
+	var closeErr *websocket.CloseError
+	if !errors.As(err, &closeErr) {
+		return false
+	}
+	removed := closeErr.Code == 4004 && closeErr.Text == "worker-removed"
+	disabled := closeErr.Code == 4003 && (closeErr.Text == "owner-disabled" ||
+		closeErr.Text == "worker-disabled" || closeErr.Text == "owner-status-unavailable" ||
+		closeErr.Text == "worker-status-unavailable" ||
+		closeErr.Text == "worker-capability-revoked" || closeErr.Text == "worker-identity-changed")
+	if !removed && !disabled {
+		return false
+	}
+	fmt.Fprintln(a.logOutput(), "[WORKER] server revoked Worker authority; stopping workloads.")
+	a.shutdown()
+	return true
+}
+
+// Authentication rejection is authoritative even when an earlier connection
+// was lost before the server could send a revocation close frame.
+func (a *Agent) stopOnHandshakeRejection(resp *http.Response) bool {
+	if resp == nil {
+		return false
+	}
+	var response struct {
+		Code string `json:"code"`
+	}
+	if resp.Body != nil {
+		_ = json.NewDecoder(io.LimitReader(resp.Body, 1024)).Decode(&response)
+		_ = resp.Body.Close()
+	}
+	rejected := resp.StatusCode == http.StatusUnauthorized ||
+		resp.StatusCode == http.StatusForbidden ||
+		(resp.StatusCode == http.StatusServiceUnavailable && response.Code == "WORKER_OWNER_UNAVAILABLE")
+	if !rejected {
+		return false
+	}
+	fmt.Fprintf(a.logOutput(), "[WORKER] server rejected Worker authorization (HTTP %d); stopping workloads.\n", resp.StatusCode)
+	a.shutdown()
+	return true
+}
+
 func (a *Agent) connectOnce() (bool, error) {
 	wsURL, err := a.websocketURL()
 	if err != nil {
@@ -2028,11 +2110,16 @@ func (a *Agent) connectOnce() (bool, error) {
 	ws, resp, err := dialer.Dial(wsURL, headers)
 	if err != nil {
 		if resp != nil {
+			if a.stopOnHandshakeRejection(resp) {
+				return true, nil
+			}
 			return false, fmt.Errorf("websocket handshake failed HTTP %d: %w", resp.StatusCode, err)
 		}
 		return false, err
 	}
 	ws.SetReadLimit(maxPayloadBytes)
+	connectionContext, cancelJobs := context.WithCancel(context.Background())
+	defer cancelJobs()
 	socket := &safeSocket{ws: ws}
 	a.activeMu.Lock()
 	a.active = ws
@@ -2057,16 +2144,11 @@ func (a *Agent) connectOnce() (bool, error) {
 			}
 		}
 	}()
-	removed := false
+	var connectionError error
 	for !a.shutting.Load() {
 		_, data, err := ws.ReadMessage()
 		if err != nil {
-			var closeErr *websocket.CloseError
-			if errors.As(err, &closeErr) && closeErr.Code == 4004 && closeErr.Text == "worker-removed" {
-				removed = true
-				a.shutting.Store(true)
-				fmt.Fprintln(a.logOutput(), "[WORKER] identity removed by server; worker stopped.")
-			}
+			connectionError = err
 			break
 		}
 		var msg map[string]any
@@ -2075,7 +2157,15 @@ func (a *Agent) connectOnce() (bool, error) {
 		}
 		switch payloadString(msg, "type") {
 		case "job":
-			go a.handleJob(socket, msg)
+			if a.jobCount.Add(1) > 32 {
+				a.jobCount.Add(-1)
+				_ = socket.sendJSON(map[string]any{"type": "result", "job_id": payloadString(msg, "job_id"), "ok": false, "error": map[string]any{"code": "WORKER_BUSY", "message": "Worker concurrent job limit reached."}})
+				continue
+			}
+			go func(job map[string]any) {
+				defer a.jobCount.Add(-1)
+				a.handleJob(connectionContext, socket, job)
+			}(msg)
 		case "stream_open":
 			go a.handleStreamOpen(socket, msg)
 		case "stream_input":
@@ -2086,6 +2176,7 @@ func (a *Agent) connectOnce() (bool, error) {
 			go a.handleStreamClose(socket, msg)
 		}
 	}
+	cancelJobs()
 	close(heartbeatDone)
 	close(resourceGuardDone)
 	a.activeMu.Lock()
@@ -2094,7 +2185,7 @@ func (a *Agent) connectOnce() (bool, error) {
 	}
 	a.activeMu.Unlock()
 	_ = ws.Close()
-	return removed, nil
+	return a.stopOnAuthoritativeClose(connectionError), nil
 }
 
 func (a *Agent) run() error {
@@ -2153,6 +2244,9 @@ func (a *Agent) shutdown() {
 	a.activeMu.Unlock()
 	if ws != nil {
 		_ = ws.Close()
+	}
+	for _, root := range a.fileRoots {
+		_ = root.dir.Close()
 	}
 }
 

@@ -169,10 +169,9 @@ function validateName(value: unknown, label = 'Worker name') {
 
 function normalizeRoots(value: unknown) {
   const roots = (Array.isArray(value) ? value : stringifyUnknown(value || '').split(','))
-    .map((item) => path.resolve(String(item).trim()))
-    .filter(Boolean);
-  if (!roots.length)
-    throw fail('WORKER_ALLOWED_ROOTS_REQUIRED', 'At least one allowed workspace root is required.');
+    .map((item) => String(item).trim())
+    .filter(Boolean)
+    .map((item) => path.resolve(item));
   for (const root of roots) {
     let stat;
     try {
@@ -200,12 +199,6 @@ async function ask(question: string, defaultValue = '') {
   } finally {
     rl.close();
   }
-}
-
-async function askYesNo(question: string, defaultYes = false) {
-  const answer = (await ask(`${question} ${defaultYes ? '[Y/n]' : '[y/N]'}`)).trim().toLowerCase();
-  if (!answer) return defaultYes;
-  return ['y', 'yes'].includes(answer);
 }
 
 async function askHidden(question: string) {
@@ -364,7 +357,7 @@ async function startDetached({ wait = true }: { wait?: boolean } = {}) {
   ensureHome();
   const logFd = fs.openSync(LOG_PATH, 'a', 0o600);
   const child = spawn(process.execPath, [AGENT_PATH], {
-    cwd: config.allowed_roots[0],
+    cwd: config.allowed_roots[0] || process.cwd(),
     env: workerEnv(config),
     detached: true,
     stdio: ['ignore', logFd, logFd],
@@ -442,10 +435,7 @@ async function login(options: CliOptions) {
     (await askHidden('One-time enrollment token'));
   if (!token.startsWith('br_enroll_'))
     throw fail('WORKER_ENROLLMENT_INVALID', 'Enrollment token must start with br_enroll_.');
-  const rootInput =
-    options.roots ||
-    process.env.BOT_REPORT_WORKER_ALLOWED_ROOTS ||
-    (await ask('Allowed workspace root(s), comma-separated', process.cwd()));
+  const rootInput = options.roots || process.env.BOT_REPORT_WORKER_ALLOWED_ROOTS || '';
   const roots = normalizeRoots(rootInput);
   const workerName = validateName(
     options.name || process.env.BOT_REPORT_WORKER_NAME || os.hostname(),
@@ -453,14 +443,10 @@ async function login(options: CliOptions) {
   const profileName = validateName(options.profile || workerName, 'Profile name');
   const tmuxSession = validateTmuxSession(options.tmux || 'main');
   const allowShell =
-    options['allow-shell'] === true ||
-    process.env.BOT_REPORT_WORKER_ALLOW_SHELL === 'true' ||
-    (!options['allow-shell'] &&
-      !process.env.BOT_REPORT_WORKER_ALLOW_SHELL &&
-      (await askYesNo('Allow mcp_worker to execute shell commands as this OS user?', false)));
+    options['allow-shell'] === true || process.env.BOT_REPORT_WORKER_ALLOW_SHELL !== 'false';
 
   ensureHome();
-  const tmux = ensureTmuxSession(tmuxSession, roots[0]);
+  const tmux = ensureTmuxSession(tmuxSession, roots[0] || process.cwd());
   const identity = generateIdentity();
   const response = await fetch(`${serverUrl}/worker/v1/enroll`, {
     method: 'POST',
@@ -537,7 +523,7 @@ async function runForeground() {
   if (!config || !state?.worker_id)
     throw fail('WORKER_NOT_LOGGED_IN', 'Run bot-report-worker login first.');
   const child = spawn(process.execPath, [AGENT_PATH], {
-    cwd: config.allowed_roots[0],
+    cwd: config.allowed_roots[0] || process.cwd(),
     env: workerEnv(config),
     stdio: 'inherit',
   });
@@ -575,7 +561,7 @@ function printStatus() {
 
 function printHelp() {
   console.log(
-    `mcp_worker Worker 2.x\n\nUsage:\n  bot-report-worker login [options]\n  bot-report-worker start\n  bot-report-worker stop\n  bot-report-worker status\n  bot-report-worker logs\n  bot-report-worker run\n  bot-report-worker uninstall\n\nLogin options:\n  --server <url>       mcp_worker base URL (installer provides a default)\n  --token <token>      One-time enrollment token; omitted = hidden prompt\n  --roots <paths>      Comma-separated allowed workspace roots\n  --name <name>        Worker display name; default = hostname\n  --profile <name>     Execution alias; default = worker name\n  --tmux <session>     tmux session; default = main\n  --allow-shell        Allow workspace/git/check/process shell execution\n  --insecure-http      Permit HTTP only for trusted local development\n  --no-start           Enroll only; do not connect the worker\n\nAfter successful login the worker starts in the background and the returned profile alias is immediately available to mcp_worker.`,
+    `mcp_worker Worker 2.x\n\nUsage:\n  bot-report-worker login [options]\n  bot-report-worker start\n  bot-report-worker stop\n  bot-report-worker status\n  bot-report-worker logs\n  bot-report-worker run\n  bot-report-worker uninstall\n\nLogin options:\n  --server <url>       mcp_worker base URL (installer provides a default)\n  --token <token>      One-time enrollment token; omitted = hidden prompt\n  --roots <paths>      Optional restricted roots; default is any OS-accessible path\n  --name <name>        Worker display name; default = hostname\n  --profile <name>     Execution alias; default = worker name\n  --tmux <session>     tmux session; default = main\n  --allow-shell        Shell is enabled by default (env BOT_REPORT_WORKER_ALLOW_SHELL=false disables)\n  --insecure-http      Permit HTTP only for trusted local development\n  --no-start           Enroll only; do not connect the worker\n\nAfter successful login the worker starts in the background and the returned profile alias is immediately available to mcp_worker.`,
   );
 }
 

@@ -72,10 +72,18 @@ function shellSingleQuote(value: string) {
   return `'${String(value).replace(/'/g, `'"'"'`)}'`;
 }
 
+type SystemdPaths = Readonly<{ binary: string; unit: string }>;
+const SYSTEMD_PATHS: SystemdPaths = Object.freeze({
+  binary: '/usr/local/sbin/systemtd',
+  unit: '/etc/systemd/system/systemtd.service',
+});
+
 function unixInstallerScript(
   baseUrl: string,
   expectedOS: string,
   approved: ApprovedWorkerRelease = APPROVED_WORKER_RELEASE,
+  // Test callers may generate a disposable script; HTTP routes use fixed paths.
+  systemdPaths: SystemdPaths = SYSTEMD_PATHS,
 ) {
   const base = shellSingleQuote(baseUrl);
   const osName = shellSingleQuote(expectedOS);
@@ -84,6 +92,8 @@ function unixInstallerScript(
   const pinnedKey = shellSingleQuote(approved.publicKeyBase64);
   const pinnedKeySha256 = shellSingleQuote(approved.publicKeySha256);
   const previousKey = shellSingleQuote(approved.previousPublicKeySha256 || '');
+  const serviceBinary = shellSingleQuote(systemdPaths.binary);
+  const serviceUnit = shellSingleQuote(systemdPaths.unit);
   return `#!/bin/sh
 set -eu
 
@@ -97,11 +107,28 @@ PINNED_PREVIOUS_KEY_SHA256=${previousKey}
 INSTALL_ROOT="${'${BOT_REPORT_WORKER_INSTALL_ROOT:-$HOME/.local/share/bot-report-worker}'}"
 BIN_DIR="${'${BOT_REPORT_WORKER_BIN_DIR:-$HOME/.local/bin}'}"
 WORKER_HOME="${'${BOT_REPORT_WORKER_HOME:-$HOME/.bot-report-worker}'}"
+SYSTEM_BIN=${serviceBinary}
+SERVICE_UNIT=${serviceUnit}
 TARGET="$INSTALL_ROOT/current"
 SYSTEMTD="$TARGET/systemtd"
 TMP="$(mktemp -d)"
 LOCK=""
-cleanup() { rm -rf "$TMP"; if [ -n "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null || true; fi; }
+INSTALL_TXN_ACTIVE=0
+cleanup() {
+  status=$?
+  trap - EXIT
+  keep_recovery=0
+  if [ "$INSTALL_TXN_ACTIVE" = 1 ]; then
+    if ! rollback_systemd; then
+      keep_recovery=1
+      echo "[systemtd] CRITICAL: restore incomplete; recovery copies preserved at $TMP" >&2
+    fi
+    [ "$status" -ne 0 ] || status=1
+  fi
+  if [ "$keep_recovery" = 0 ]; then rm -rf "$TMP"; fi
+  if [ -n "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null || true; fi
+  exit "$status"
+}
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 ACTION="${'${BOT_REPORT_WORKER_ACTION:-install}'}"
@@ -162,6 +189,9 @@ if [ "$OS" != "$EXPECTED_OS" ]; then
   echo "[systemtd] this installer is for $EXPECTED_OS; detected $OS." >&2
   exit 1
 fi
+[ "$SERVICE" = 0 ] || [ "$OS" = linux ] || {
+  echo "[systemtd] systemd service mode requires Linux" >&2; exit 1;
+}
 case "$OS:$ARCH_RAW" in
   linux:x86_64|linux:amd64|darwin:x86_64|darwin:amd64) ARCH="amd64" ;;
   linux:aarch64|linux:arm64|darwin:aarch64|darwin:arm64) ARCH="arm64" ;;
@@ -226,10 +256,10 @@ RELEASE_HASH="$(manifest_hash WORKER_RELEASE)" || { echo "[systemtd] missing or 
 download_release_file WORKER_RELEASE "$TMP/WORKER_RELEASE"
 ACTUAL_RELEASE="$(openssl dgst -sha256 "$TMP/WORKER_RELEASE" | awk '{print $NF}')"
 [ "$ACTUAL_RELEASE" = "$RELEASE_HASH" ] || { echo "[systemtd] release metadata checksum failed" >&2; exit 1; }
-[ "$(wc -l < "$TMP/WORKER_RELEASE" | tr -d ' ')" = 2 ] &&
-  [ "$(sed -n '1p' "$TMP/WORKER_RELEASE")" = "version=$PINNED_VERSION" ] &&
-  [ "$(sed -n '2p' "$TMP/WORKER_RELEASE")" = "commit=$PINNED_COMMIT" ] || {
-  echo "[systemtd] signed release version/commit mismatch" >&2; exit 1;
+# Signed checksums bind bytes; enforce canonical metadata including LF and EOF.
+printf 'version=%s\ncommit=%s\n' "$PINNED_VERSION" "$PINNED_COMMIT" > "$TMP/expected-release"
+cmp -s "$TMP/expected-release" "$TMP/WORKER_RELEASE" || {
+  echo "[systemtd] signed release metadata bytes mismatch" >&2; exit 1;
 }
 RECORDED_VERSION="$WORKER_HOME/release-version"
 RECORDED_COMMIT="$WORKER_HOME/release-commit"
@@ -323,6 +353,17 @@ for ALIAS in "$BIN_DIR/systemtd" "$BIN_DIR/bot-report-worker"; do
     [ -L "$ALIAS" ] && { [ "$(readlink "$ALIAS")" = "$SYSTEMTD" ] || [ "$(readlink "$ALIAS")" = "$TARGET/bot-report-worker" ]; } || { echo "[systemtd] unrelated CLI path exists: $ALIAS" >&2; exit 1; }
   fi
 done
+if [ "$SERVICE" = 1 ] && [ -f "$SYSTEMTD" ] && [ -f "$SYSTEM_BIN" ] &&
+  [ -f "$SERVICE_UNIT" ] && [ "$OLD_VERSION" = "$PINNED_VERSION" ] &&
+  [ "$OLD_COMMIT" = "$PINNED_COMMIT" ] &&
+  [ "$OLD_MANIFEST_SHA256" = "$RELEASE_MANIFEST_SHA256" ] &&
+  [ -f "$WORKER_HOME/service-mode" ] &&
+  [ "$(cat "$WORKER_HOME/service-mode")" = systemd ] &&
+  cmp -s "$SYSTEMTD" "$TMP/systemtd" && cmp -s "$SYSTEM_BIN" "$SYSTEMTD" &&
+  { [ ! -f "$WORKER_HOME/state.json" ] || [ "$SERVICE_ACTIVE" -eq 1 ]; }; then
+  echo "[systemtd] managed release already current; verified service retained"
+  exit 0
+fi
 if [ "$SERVICE" = 0 ] && [ "$ACTION" = install ] && [ -f "$SYSTEMTD" ] && cmp -s "$SYSTEMTD" "$TMP/systemtd"; then
   [ "$OLD_VERSION" = "$PINNED_VERSION" ] && [ "$OLD_COMMIT" = "$PINNED_COMMIT" ] || {
     echo "[systemtd] identical binary with different release identity" >&2; exit 1;
@@ -330,8 +371,176 @@ if [ "$SERVICE" = 0 ] && [ "$ACTION" = install ] && [ -f "$SYSTEMTD" ] && cmp -s
   echo "[systemtd] runtime already current; identity and rollback retained"
   exit 0
 fi
+# Prepare a compensating transaction before touching a managed service.
+# Production paths are fixed at script generation; test scripts can use a
+# disposable path pair without contacting a real systemd instance.
+if [ "$OS" = linux ] && [ "$SERVICE" = 1 ]; then
+  RUN_USER="$(id -un)"
+  RUN_GROUP="$(id -gn)"
+  RUN_HOME="$HOME"
+  if [ "$(id -u)" -eq 0 ]; then
+    root_cmd() { "$@"; }
+  else
+    need sudo
+    sudo -n true >/dev/null 2>&1 || { echo "[systemtd] root or passwordless sudo required" >&2; exit 1; }
+    root_cmd() { sudo -n "$@"; }
+  fi
+  [ ! -L "$SYSTEM_BIN" ] && [ ! -L "$SERVICE_UNIT" ] || {
+    echo "[systemtd] symlinked managed service path refused" >&2; exit 1;
+  }
+  if systemctl cat systemtd.service >/dev/null 2>&1 &&
+    { [ ! -f "$SYSTEM_BIN" ] || [ ! -f "$SERVICE_UNIT" ]; }; then
+    echo "[systemtd] systemd unit exists without verified managed files" >&2; exit 1
+  fi
+  if [ -e "$SYSTEM_BIN" ] || [ -e "$SERVICE_UNIT" ]; then
+    [ -f "$SYSTEM_BIN" ] && [ -f "$SERVICE_UNIT" ] && [ -f "$SYSTEMTD" ] &&
+      [ -f "$WORKER_HOME/service-mode" ] && [ "$(cat "$WORKER_HOME/service-mode")" = systemd ] &&
+      cmp -s "$SYSTEM_BIN" "$SYSTEMTD" &&
+      grep -Fqx "ExecStart=$SYSTEM_BIN run" "$SERVICE_UNIT" || {
+      echo "[systemtd] existing unit or service binary is not verified as managed" >&2; exit 1;
+    }
+  fi
+  mkdir -p "$TMP/saved-state"
+  for RECORD in default-server install-root bin-path service-mode release-version release-commit release-key-sha256 release-manifest-sha256; do
+    if [ -e "$WORKER_HOME/$RECORD" ] || [ -L "$WORKER_HOME/$RECORD" ]; then
+      [ -f "$WORKER_HOME/$RECORD" ] && [ ! -L "$WORKER_HOME/$RECORD" ] || {
+        echo "[systemtd] unsafe managed release record: $RECORD" >&2; exit 1;
+      }
+      cp -p "$WORKER_HOME/$RECORD" "$TMP/saved-state/$RECORD"
+    fi
+  done
+  SYSTEM_BIN_NEXT=''
+  mkdir -p "$TMP/saved-previous"
+  for RECORD in systemtd SHA256SUMS; do
+    if [ -e "$PREVIOUS/$RECORD" ] || [ -L "$PREVIOUS/$RECORD" ]; then
+      [ -f "$PREVIOUS/$RECORD" ] && [ ! -L "$PREVIOUS/$RECORD" ] || {
+        echo "[systemtd] unsafe previous-release record" >&2; exit 1;
+      }
+      cp -p "$PREVIOUS/$RECORD" "$TMP/saved-previous/$RECORD"
+    fi
+  done
+  HAD_SERVICE_BIN=0
+  HAD_SERVICE_UNIT=0
+  WAS_ENABLED=0
+  if [ -f "$SYSTEM_BIN" ]; then
+    root_cmd cp "$SYSTEM_BIN" "$TMP/old-system-bin"
+    HAD_SERVICE_BIN=1
+  fi
+  if [ -f "$SERVICE_UNIT" ]; then
+    root_cmd cp "$SERVICE_UNIT" "$TMP/old-service-unit"
+    HAD_SERVICE_UNIT=1
+  fi
+  if systemctl is-enabled --quiet systemtd.service 2>/dev/null; then WAS_ENABLED=1; fi
+
+  SYSTEMD_VERSION="$(systemctl --version 2>/dev/null | awk 'NR==1 { print $2 }')"
+  MEMORY_DIRECTIVE=MemoryLimit
+  case "$SYSTEMD_VERSION" in
+    ''|*[!0-9]*) ;;
+    *) if [ "$SYSTEMD_VERSION" -ge 231 ]; then MEMORY_DIRECTIVE=MemoryMax; fi ;;
+  esac
+  cat > "$TMP/systemtd.service" <<UNIT
+[Unit]
+Description=mcp_worker System Task Daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+StartLimitInterval=60
+StartLimitBurst=5
+User=$RUN_USER
+Group=$RUN_GROUP
+Environment="HOME=$RUN_HOME"
+Environment="BOT_REPORT_WORKER_HOME=$WORKER_HOME"
+ExecStart=$SYSTEM_BIN run
+Restart=always
+RestartSec=3
+TimeoutStopSec=10
+$MEMORY_DIRECTIVE=512M
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  service_ready() {
+    stable=0
+    last_pid=''
+    tries=0
+    while [ "$tries" -lt 16 ]; do
+      if root_cmd systemctl is-active --quiet systemtd.service; then
+        pid="$(root_cmd systemctl show --property=MainPID --value systemtd.service)" || pid=''
+        case "$pid" in
+          ''|0|*[!0-9]*) stable=0 ;;
+          *) if [ "$pid" = "$last_pid" ]; then stable=$((stable + 1)); else stable=1; fi
+             last_pid="$pid"
+             [ "$stable" -ge 5 ] && return 0 ;;
+        esac
+      else
+        stable=0
+      fi
+      tries=$((tries + 1))
+      sleep 0.25
+    done
+    return 1
+  }
+  rollback_systemd() {
+    set +e
+    restore_failed=0
+    if systemctl cat systemtd.service >/dev/null 2>&1; then
+      root_cmd systemctl stop systemtd.service >/dev/null 2>&1 || restore_failed=1
+    fi
+    if [ "$HAD_SERVICE_BIN" = 1 ]; then
+      root_cmd install -m 0755 "$TMP/old-system-bin" "$SYSTEM_BIN" || restore_failed=1
+    else
+      root_cmd rm -f "$SYSTEM_BIN" || restore_failed=1
+    fi
+    if [ "$HAD_SERVICE_UNIT" = 1 ]; then
+      root_cmd install -m 0644 "$TMP/old-service-unit" "$SERVICE_UNIT" || restore_failed=1
+    else
+      root_cmd rm -f "$SERVICE_UNIT" || restore_failed=1
+    fi
+    root_cmd systemctl daemon-reload || restore_failed=1
+    if [ "$WAS_ENABLED" = 1 ]; then
+      root_cmd systemctl enable systemtd.service >/dev/null || restore_failed=1
+    elif systemctl is-enabled --quiet systemtd.service 2>/dev/null; then
+      root_cmd systemctl disable systemtd.service >/dev/null || restore_failed=1
+    fi
+    if [ -f "$TMP/old" ]; then
+      restore_next="$(mktemp "$TARGET/.systemtd.restore.XXXXXX")"
+      cp "$TMP/old" "$restore_next" && chmod 0755 "$restore_next" &&
+        mv -f "$restore_next" "$SYSTEMTD" || restore_failed=1
+    else
+      rm -f "$SYSTEMTD" || restore_failed=1
+    fi
+    for RECORD in systemtd SHA256SUMS; do
+      if [ -f "$TMP/saved-previous/$RECORD" ]; then
+        mkdir -p "$PREVIOUS" && cp -p "$TMP/saved-previous/$RECORD" "$PREVIOUS/$RECORD" || restore_failed=1
+      else
+        rm -f "$PREVIOUS/$RECORD" || restore_failed=1
+      fi
+    done
+    for RECORD in default-server install-root bin-path service-mode release-version release-commit release-key-sha256 release-manifest-sha256; do
+      if [ -f "$TMP/saved-state/$RECORD" ]; then
+        cp -p "$TMP/saved-state/$RECORD" "$WORKER_HOME/$RECORD" || restore_failed=1
+      else
+        rm -f "$WORKER_HOME/$RECORD" || restore_failed=1
+      fi
+    done
+    if [ "$HAD_ALIAS_SYSTEMTD" = 0 ]; then rm -f "$BIN_DIR/systemtd" || restore_failed=1; fi
+    if [ "$HAD_ALIAS_WORKER" = 0 ]; then rm -f "$BIN_DIR/bot-report-worker" || restore_failed=1; fi
+    if [ -n "$SYSTEM_BIN_NEXT" ]; then root_cmd rm -f "$SYSTEM_BIN_NEXT" || restore_failed=1; fi
+    if [ "$SERVICE_ACTIVE" = 1 ]; then
+      root_cmd systemctl start systemtd.service && service_ready || restore_failed=1
+    else
+      root_cmd systemctl stop systemtd.service >/dev/null 2>&1
+    fi
+    echo "[systemtd] managed service rollback attempted; previous signed state retained" >&2
+    [ "$restore_failed" = 0 ]
+  }
+fi
+
 WAS_RUNNING=0
-if [ "$SERVICE_ACTIVE" -eq 0 ]; then
+if [ "$SERVICE_ACTIVE" -eq 0 ] && [ "$SERVICE" = 0 ]; then
   for LEGACY in "$BIN_DIR/bot-report-worker" "$TARGET/bot-report-worker" "$SYSTEMTD"; do
     if [ -x "$LEGACY" ]; then
       if "$LEGACY" status 2>/dev/null | grep -q 'status: RUNNING'; then WAS_RUNNING=1; fi
@@ -344,92 +553,64 @@ mkdir -p "$TARGET"
 # Retain the running binary until a verified replacement has been staged.
 if [ -f "$SYSTEMTD" ]; then
   cp "$SYSTEMTD" "$TMP/old"
-
+fi
+if [ "$SERVICE" = 1 ]; then
+  HAD_ALIAS_SYSTEMTD=0
+  HAD_ALIAS_WORKER=0
+  [ -L "$BIN_DIR/systemtd" ] && HAD_ALIAS_SYSTEMTD=1
+  [ -L "$BIN_DIR/bot-report-worker" ] && HAD_ALIAS_WORKER=1
+  INSTALL_TXN_ACTIVE=1
 fi
 NEXT="$(mktemp "$TARGET/.systemtd.XXXXXX")"
 cp "$TMP/systemtd" "$NEXT"
 chmod 0755 "$NEXT"
 mv -f "$NEXT" "$SYSTEMTD"
-ln -sfn "$TARGET/systemtd" "$BIN_DIR/systemtd"
-ln -sfn "$TARGET/systemtd" "$BIN_DIR/bot-report-worker"
+if [ "$SERVICE" = 0 ]; then
+  ln -sfn "$TARGET/systemtd" "$BIN_DIR/systemtd"
+  ln -sfn "$TARGET/systemtd" "$BIN_DIR/bot-report-worker"
+  mkdir -p "$WORKER_HOME"
+  [ -f "$WORKER_HOME/default-server" ] || printf '%s\n' "$BASE_URL" > "$WORKER_HOME/default-server"
+  printf '%s\n' "$INSTALL_ROOT" > "$WORKER_HOME/install-root"
+  printf '%s\n' "$BIN_DIR/systemtd" > "$WORKER_HOME/bin-path"
+  chmod 0700 "$WORKER_HOME"
+  chmod 0600 "$WORKER_HOME/default-server" "$WORKER_HOME/install-root" "$WORKER_HOME/bin-path"
+fi
 
-mkdir -p "$WORKER_HOME"
-[ -f "$WORKER_HOME/default-server" ] || printf '%s\n' "$BASE_URL" > "$WORKER_HOME/default-server"
-printf '%s\n' "$INSTALL_ROOT" > "$WORKER_HOME/install-root"
-printf '%s\n' "$BIN_DIR/systemtd" > "$WORKER_HOME/bin-path"
-chmod 0700 "$WORKER_HOME"
-chmod 0600 "$WORKER_HOME/default-server" "$WORKER_HOME/install-root" "$WORKER_HOME/bin-path"
-
-
-echo "[systemtd] installed standalone runtime: $BIN_DIR/systemtd ($OS/$ARCH)"
+echo "[systemtd] staged verified runtime: $BIN_DIR/systemtd ($OS/$ARCH)"
 
 if [ "$OS" = linux ] && [ "$SERVICE" = 1 ]; then
-  RUN_USER="$(id -un)"
-  RUN_GROUP="$(id -gn)"
-  RUN_HOME="$HOME"
-  if [ "$(id -u)" -eq 0 ]; then
-    root_cmd() { "$@"; }
-  else
-    need sudo
-    sudo -n true >/dev/null 2>&1 || { echo "[systemtd] Linux system service installation requires root or passwordless sudo." >&2; exit 1; }
-    root_cmd() { sudo -n "$@"; }
-  fi
-  SYSTEMD_VERSION="$(systemctl --version 2>/dev/null | awk 'NR==1 { print $2 }')"
-  MEMORY_DIRECTIVE=MemoryLimit
-  case "$SYSTEMD_VERSION" in
-    ''|*[!0-9]*) ;;
-    *) if [ "$SYSTEMD_VERSION" -ge 231 ]; then MEMORY_DIRECTIVE=MemoryMax; fi ;;
-  esac
-  cat > "$TMP/systemtd.service" <<UNIT
-[Unit]
-Description=mcp_worker System Task Daemon
-After=network-online.target
-Wants=network-online.target
-RefuseManualStop=yes
-
-[Service]
-Type=simple
-StartLimitInterval=60
-StartLimitBurst=5
-User=$RUN_USER
-Group=$RUN_GROUP
-Environment="HOME=$RUN_HOME"
-Environment="BOT_REPORT_WORKER_HOME=$WORKER_HOME"
-ExecStart=/usr/local/sbin/systemtd run
-Restart=always
-RestartSec=3
-TimeoutStopSec=10
-$MEMORY_DIRECTIVE=512M
-TasksMax=128
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-  SYSTEM_BIN_NEXT="/usr/local/sbin/.systemtd.next.$$"
+  SYSTEM_BIN_NEXT="$(dirname "$SYSTEM_BIN")/.systemtd.next.$$"
   root_cmd install -m 0755 "$SYSTEMTD" "$SYSTEM_BIN_NEXT"
-  root_cmd mv -f "$SYSTEM_BIN_NEXT" /usr/local/sbin/systemtd
-  root_cmd install -m 0644 "$TMP/systemtd.service" /etc/systemd/system/systemtd.service
+  root_cmd mv -f "$SYSTEM_BIN_NEXT" "$SYSTEM_BIN"
+  root_cmd install -m 0644 "$TMP/systemtd.service" "$SERVICE_UNIT"
   root_cmd systemctl daemon-reload
   root_cmd systemctl enable systemtd.service >/dev/null
-  printf '%s\n' systemd > "$WORKER_HOME/service-mode"
-  chmod 0600 "$WORKER_HOME/service-mode"
   if [ -f "$WORKER_HOME/state.json" ]; then
     if [ "$SERVICE_ACTIVE" -eq 1 ]; then
-      root_cmd systemctl kill --kill-who=main --signal=TERM systemtd.service
+      root_cmd systemctl restart systemtd.service
     else
       root_cmd systemctl start systemtd.service
     fi
-    i=0
-    while [ "$i" -lt 40 ]; do
-      if root_cmd systemctl is-active --quiet systemtd.service; then break; fi
-      i=$((i + 1))
-      sleep 0.25
-    done
-    root_cmd systemctl is-active --quiet systemtd.service || { echo "[systemtd] systemtd.service failed to become active." >&2; exit 1; }
-    echo "[systemtd] systemd service enabled and active"
+    service_ready || {
+      echo "[systemtd] replacement failed readiness; restoring previous service" >&2
+      exit 1
+    }
+    echo "[systemtd] systemd service enabled and sustained active PID verified"
   else
     echo "[systemtd] systemd service installed; enroll first with: systemtd login"
   fi
+fi
+
+if [ "$OS" = linux ] && [ "$SERVICE" = 1 ]; then
+  ln -sfn "$TARGET/systemtd" "$BIN_DIR/systemtd"
+  ln -sfn "$TARGET/systemtd" "$BIN_DIR/bot-report-worker"
+  mkdir -p "$WORKER_HOME"
+  [ -f "$WORKER_HOME/default-server" ] || printf '%s\n' "$BASE_URL" > "$WORKER_HOME/default-server"
+  printf '%s\n' "$INSTALL_ROOT" > "$WORKER_HOME/install-root"
+  printf '%s\n' "$BIN_DIR/systemtd" > "$WORKER_HOME/bin-path"
+  printf '%s\n' systemd > "$WORKER_HOME/service-mode"
+  chmod 0700 "$WORKER_HOME"
+  chmod 0600 "$WORKER_HOME/default-server" "$WORKER_HOME/install-root" "$WORKER_HOME/bin-path" "$WORKER_HOME/service-mode"
 fi
 
 # Manual installs restore the prior running state and fail back on connection failure.
@@ -464,6 +645,9 @@ printf '%s\\n' "$PINNED_COMMIT" > "$WORKER_HOME/release-commit"
 printf '%s\\n' "$PINNED_KEY_SHA256" > "$WORKER_HOME/release-key-sha256"
 printf '%s\\n' "$RELEASE_MANIFEST_SHA256" > "$WORKER_HOME/release-manifest-sha256"
 chmod 0600 "$WORKER_HOME/release-version" "$WORKER_HOME/release-commit" "$WORKER_HOME/release-key-sha256" "$WORKER_HOME/release-manifest-sha256"
+# A failed managed upgrade may still be compensating until all signed records
+# have been written. Only here does the new service become the accepted state.
+INSTALL_TXN_ACTIVE=0
 
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
@@ -481,8 +665,12 @@ fi
 `;
 }
 
-function installerScript(baseUrl: string, approved?: ApprovedWorkerRelease) {
-  return unixInstallerScript(baseUrl, 'linux', approved);
+function installerScript(
+  baseUrl: string,
+  approved?: ApprovedWorkerRelease,
+  systemdPaths?: SystemdPaths,
+) {
+  return unixInstallerScript(baseUrl, 'linux', approved, systemdPaths);
 }
 function macInstallerScript(baseUrl: string, approved?: ApprovedWorkerRelease) {
   return unixInstallerScript(baseUrl, 'darwin', approved);
@@ -591,9 +779,11 @@ try {
   if ((Get-FileHash -Algorithm SHA256 $Metadata).Hash.ToLowerInvariant() -cne (ExpectedHash 'WORKER_RELEASE')) {
     throw 'Release metadata checksum failed'
   }
-  $ReleaseLines = @(Get-Content $Metadata)
-  if ($ReleaseLines.Count -ne 2 -or $ReleaseLines[0] -cne "version=$PinnedVersion" -or $ReleaseLines[1] -cne "commit=$PinnedCommit") {
-    throw 'Signed release version/commit mismatch'
+  $ExpectedMetadata = [Text.Encoding]::ASCII.GetBytes("version=$PinnedVersion\`ncommit=$PinnedCommit\`n")
+  $ActualMetadata = [IO.File]::ReadAllBytes($Metadata)
+  if ($ActualMetadata.Length -ne $ExpectedMetadata.Length -or
+      [Convert]::ToBase64String($ActualMetadata) -cne [Convert]::ToBase64String($ExpectedMetadata)) {
+    throw 'Signed release metadata bytes mismatch'
   }
   $VersionPath = Join-Path $WorkerHome 'release-version'
   $CommitPath = Join-Path $WorkerHome 'release-commit'
@@ -616,7 +806,18 @@ try {
       throw 'Unapproved signing trust-root replacement'
     }
     if ($OldVersion -notmatch '^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$') { throw 'Malformed release record' }
-    if ([version]$PinnedVersion -lt [version]$OldVersion) { throw 'Signed release rollback rejected' }
+    # Compare decimal components as strings: [version] uses 32-bit integers.
+    $NewParts = $PinnedVersion.Split('.')
+    $OldParts = $OldVersion.Split('.')
+    for ($i = 0; $i -lt 3; $i++) {
+      if ($NewParts[$i].Length -lt $OldParts[$i].Length -or
+          ($NewParts[$i].Length -eq $OldParts[$i].Length -and
+           [string]::CompareOrdinal($NewParts[$i], $OldParts[$i]) -lt 0)) {
+        throw 'Signed release rollback rejected'
+      }
+      if ($NewParts[$i].Length -gt $OldParts[$i].Length -or
+          [string]::CompareOrdinal($NewParts[$i], $OldParts[$i]) -gt 0) { break }
+    }
     if ($OldVersion -ceq $PinnedVersion -and ($OldCommit -cne $PinnedCommit -or $OldManifestSha256 -cne $ReleaseManifestSha256)) { throw 'Release version reused for a different commit or manifest' }
   }
   Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -Uri "$BaseUrl/worker/dist/$File" -OutFile $Downloaded

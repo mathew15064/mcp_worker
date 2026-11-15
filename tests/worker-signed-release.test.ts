@@ -17,7 +17,11 @@ type ApprovedRelease = {
   publicKeySha256: string;
   previousPublicKeySha256?: string;
 };
-type Installer = (baseUrl: string, approval?: ApprovedRelease) => string;
+type Installer = (
+  baseUrl: string,
+  approval?: ApprovedRelease,
+  systemdPaths?: { binary: string; unit: string },
+) => string;
 type WorkerRouteApi = {
   installerScript: Installer;
   macInstallerScript: Installer;
@@ -153,6 +157,11 @@ void test('installer protocols refuse public plaintext and redirect downgrade', 
   const windows = workerRoutes.windowsInstallerPayloadScript('https://worker.example.test');
   assert.match(windows, /HTTPS release origin required/);
   assert.equal((windows.match(/-MaximumRedirection 0/g) ?? []).length, 4);
+  // Source-level checks only: actual PowerShell lifecycle needs native Windows.
+  assert.match(windows, /\[IO\.File\]::ReadAllBytes\(\$Metadata\)/);
+  assert.match(windows, /version=\$PinnedVersion`ncommit=\$PinnedCommit`n/);
+  assert.match(windows, /\[string\]::CompareOrdinal/);
+  assert.doesNotMatch(windows, /if \(\[version\]\$PinnedVersion/);
 });
 
 void test('Railway installer and binary distribution stay HTTP 503 without approval', async () => {
@@ -174,23 +183,29 @@ void test('Railway installer and binary distribution stay HTTP 503 without appro
     });
     const address = server.address();
     assert.ok(address && typeof address !== 'string');
-    for (const endpoint of [
-      '/worker/install.sh',
-      '/worker/install-linux.sh',
-      '/worker/install-macos.sh',
-      '/worker/install.ps1',
-      '/worker/install-windows.ps1',
-      '/worker/dist/SHA256SUMS',
-      '/worker/dist/SHA256SUMS.sig',
-      '/worker/dist/WORKER_RELEASE',
-      '/worker/dist/bot-report-worker-linux-amd64',
-      '/worker/dist/cli.js',
-    ]) {
-      const response: Response = await fetch('http://127.0.0.1:' + address.port + endpoint);
-      assert.equal(response.status, 503, endpoint);
-      assert.equal(response.headers.get('cache-control'), 'no-store', endpoint);
-      const body = (await response.json()) as { code: string };
-      assert.equal(body.code, 'WORKER_SIGNED_RELEASE_PENDING', endpoint);
+    // Any platform flag, including an unset/typo value, must fail closed.
+    // A runtime environment variable is never signed-release authorization.
+    for (const platform of [undefined, '', 'railway', 'RAILWAY', 'railwai', 'local']) {
+      if (platform === undefined) delete process.env.MCP_PLATFORM;
+      else process.env.MCP_PLATFORM = platform;
+      for (const endpoint of [
+        '/worker/install.sh',
+        '/worker/install-linux.sh',
+        '/worker/install-macos.sh',
+        '/worker/install.ps1',
+        '/worker/install-windows.ps1',
+        '/worker/dist/SHA256SUMS',
+        '/worker/dist/SHA256SUMS.sig',
+        '/worker/dist/WORKER_RELEASE',
+        '/worker/dist/bot-report-worker-linux-amd64',
+        '/worker/dist/cli.js',
+      ]) {
+        const response: Response = await fetch('http://127.0.0.1:' + address.port + endpoint);
+        assert.equal(response.status, 503, `${String(platform)}: ${endpoint}`);
+        assert.equal(response.headers.get('cache-control'), 'no-store', endpoint);
+        const body = (await response.json()) as { code: string };
+        assert.equal(body.code, 'WORKER_SIGNED_RELEASE_PENDING', endpoint);
+      }
     }
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -572,6 +587,26 @@ void test(
         await unchanged('metadata tamper', install());
         active = packageA;
       });
+      await t.test('validly signed but noncanonical metadata bytes are rejected', async () => {
+        for (const metadata of [
+          Buffer.from('version=' + VERSION_A + '\r\ncommit=' + COMMIT_A + '\r\n'),
+          Buffer.from('version=' + VERSION_A + '\ncommit=' + COMMIT_A),
+          Buffer.from('version=' + VERSION_A + '\ncommit=' + COMMIT_A + '\n\n'),
+          Buffer.from('version=' + VERSION_A + '\ncommit=' + COMMIT_A + '\n\0'),
+        ]) {
+          const sums = Buffer.from(
+            packageA.sums.toString().replace(hash(packageA.metadata), hash(metadata)),
+          );
+          active = {
+            ...packageA,
+            metadata,
+            sums,
+            signature: crypto.sign('sha256', sums, key.privateKey),
+          };
+          await unchanged('signed metadata bytes', install());
+        }
+        active = packageA;
+      });
       await t.test('valid signature but mismatched release version', async () => {
         active = bundle(key, file, binaryA, VERSION_B, COMMIT_B);
         await unchanged('mismatched pin', install());
@@ -917,6 +952,19 @@ void test(
         sums().replace(/^[0-9a-f]{64}/, '0'.repeat(64)),
       );
       assert.notEqual((await sign(VERSION_A)).code, 0, 'tampered checksum accepted');
+      for (const badMetadata of [
+        'version=' + VERSION_A + '\r\ncommit=' + approvedCommit + '\r\n',
+        'version=' + VERSION_A + '\ncommit=' + approvedCommit,
+        'version=' + VERSION_A + '\ncommit=' + approvedCommit + '\n\n',
+      ]) {
+        fs.writeFileSync(path.join(bin, 'WORKER_RELEASE'), badMetadata);
+        fs.writeFileSync(path.join(bin, 'SHA256SUMS'), sums());
+        assert.notEqual((await sign(VERSION_A)).code, 0, 'noncanonical metadata signed');
+      }
+      fs.writeFileSync(
+        path.join(bin, 'WORKER_RELEASE'),
+        'version=' + VERSION_A + '\ncommit=' + approvedCommit + '\n',
+      );
       fs.writeFileSync(path.join(bin, 'SHA256SUMS'), sums());
       assert.equal((await sign(VERSION_A)).code, 0, 'signed candidate failed');
       const manifest = fs.readFileSync(path.join(bin, 'SHA256SUMS'));
@@ -930,6 +978,251 @@ void test(
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
       fs.rmSync(privateDir, { recursive: true, force: true });
+    }
+  },
+);
+
+void test(
+  'disposable systemd upgrade restores binary, unit, aliases and signed records on failure',
+  {
+    skip: process.platform !== 'linux' ? 'systemd shell simulation requires Linux' : false,
+    timeout: 180000,
+  },
+  async (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-systemd-transaction-'));
+    const key = signer();
+    const file = 'bot-report-worker-linux-' + (process.arch === 'arm64' ? 'arm64' : 'amd64');
+    const target = path.join(root, 'install', 'current', 'systemtd');
+    const serviceBinary = path.join(root, 'fake-systemd', 'sbin', 'systemtd');
+    const serviceUnit = path.join(root, 'fake-systemd', 'units', 'systemtd.service');
+    const workerHome = path.join(root, 'identity');
+    const mockState = path.join(root, 'mock-state');
+    const mockBin = path.join(root, 'mock-bin');
+    const aliasBin = path.join(root, 'aliases');
+    const metadataPaths = [
+      'release-version',
+      'release-commit',
+      'release-key-sha256',
+      'release-manifest-sha256',
+      'service-mode',
+      'default-server',
+      'install-root',
+      'bin-path',
+    ];
+    for (const dir of [
+      path.dirname(serviceBinary),
+      path.dirname(serviceUnit),
+      workerHome,
+      mockState,
+      mockBin,
+      aliasBin,
+    ])
+      fs.mkdirSync(dir, { recursive: true });
+    function binary(version: string, commit: string) {
+      return Buffer.from(
+        [
+          '#!/bin/sh',
+          'case "$1" in',
+          ' version) echo "systemtd ' +
+            version +
+            ' commit=' +
+            commit +
+            ' runtime=stub linux/amd64";;',
+          ' status) echo "status: RUNNING";;',
+          ' start|stop) exit 0;;',
+          ' *) exit 0;;',
+          'esac',
+          '',
+        ].join('\n'),
+      );
+    }
+    const commitC = 'aabbccddeeff00112233445566778899aabbccdd';
+    const packageA = bundle(key, file, binary(VERSION_A, COMMIT_A), VERSION_A, COMMIT_A);
+    const packageB = bundle(key, file, binary(VERSION_B, COMMIT_B), VERSION_B, COMMIT_B);
+    const packageC = bundle(key, file, binary('2.3.6', commitC), '2.3.6', commitC);
+    let active = packageA;
+    const systemctlMock = [
+      '#!/bin/sh',
+      'set -eu',
+      'STATE="$MOCK_SYSTEMCTL_STATE"',
+      'case "$1" in',
+      ' --version) echo "systemd 252";;',
+      ' cat) [ -f "$MOCK_SERVICE_UNIT" ];;',
+      ' is-enabled) [ -f "$STATE/enabled" ];;',
+      ' is-active) [ -f "$STATE/active" ];;',
+      ' daemon-reload) exit 0;;',
+      ' enable) touch "$STATE/enabled";;',
+      ' disable) rm -f "$STATE/enabled";;',
+      ' stop) rm -f "$STATE/active";;',
+      ' start|restart)',
+      '   echo "$1" >> "$STATE/starts"',
+      '   if [ -f "$STATE/fail-start" ] && grep -Fq "systemtd 2.3.5 commit=" "$MOCK_SERVICE_BINARY"; then',
+      '     rm -f "$STATE/active"; exit 9',
+      '   fi',
+      '   touch "$STATE/active";;',
+      ' show)',
+      '   if [ -f "$STATE/fail-ready" ] && grep -Fq "systemtd 2.3.6 commit=" "$MOCK_SERVICE_BINARY"; then',
+      '     echo 0',
+      '   else',
+      '     echo 4321',
+      '   fi;;',
+      ' *) echo "Unexpected mock systemctl command: $*" >&2; exit 2;;',
+      'esac',
+      '',
+    ].join('\n');
+    fs.writeFileSync(path.join(mockBin, 'systemctl'), systemctlMock, { mode: 0o755 });
+    fs.writeFileSync(
+      path.join(mockBin, 'id'),
+      '#!/bin/sh\nif [ "$1" = "-u" ]; then echo 0; else exec /usr/bin/id "$@"; fi\n',
+      { mode: 0o755 },
+    );
+    const server = http.createServer((req, res) => {
+      const contents =
+        req.url === '/worker/dist/' + file
+          ? active.binary
+          : req.url === '/worker/dist/WORKER_RELEASE'
+            ? active.metadata
+            : req.url === '/worker/dist/SHA256SUMS'
+              ? active.sums
+              : req.url === '/worker/dist/SHA256SUMS.sig'
+                ? active.signature
+                : null;
+      if (!contents) {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+      res.end(contents);
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(0, '127.0.0.1', resolve);
+      });
+      const addr = server.address();
+      assert.ok(addr && typeof addr !== 'string');
+      const base = 'http://127.0.0.1:' + addr.port;
+      const env = {
+        ...process.env,
+        HOME: root,
+        PATH: mockBin + ':' + process.env.PATH,
+        BOT_REPORT_WORKER_INSTALL_ROOT: path.join(root, 'install'),
+        BOT_REPORT_WORKER_HOME: workerHome,
+        BOT_REPORT_WORKER_BIN_DIR: aliasBin,
+        BOT_REPORT_WORKER_SYSTEMD: '1',
+        BOT_REPORT_WORKER_SKIP_SERVICE: '0',
+        MOCK_SYSTEMCTL_STATE: mockState,
+        MOCK_SERVICE_BINARY: serviceBinary,
+        MOCK_SERVICE_UNIT: serviceUnit,
+      };
+      const approval = (version: string, commit: string): ApprovedRelease => ({
+        version,
+        commit,
+        publicKeyBase64: key.publicKeyBase64,
+        publicKeySha256: key.fingerprint,
+      });
+      async function install(version: string, commit: string) {
+        const script = workerRoutes.installerScript(base, approval(version, commit), {
+          binary: serviceBinary,
+          unit: serviceUnit,
+        });
+        const filename = path.join(root, 'install.sh');
+        fs.writeFileSync(filename, script);
+        return execute('sh', [filename], env, root);
+      }
+      function signedState(expected: Package, version: string, commit: string, isActive: boolean) {
+        assert.deepEqual(fs.readFileSync(target), expected.binary, 'local verified runtime');
+        assert.deepEqual(fs.readFileSync(serviceBinary), expected.binary, 'systemd runtime');
+        assert.equal(
+          fs.readFileSync(path.join(workerHome, 'release-version'), 'utf8'),
+          version + '\n',
+        );
+        assert.equal(
+          fs.readFileSync(path.join(workerHome, 'release-commit'), 'utf8'),
+          commit + '\n',
+        );
+        assert.equal(
+          fs.readFileSync(path.join(workerHome, 'release-key-sha256'), 'utf8'),
+          key.fingerprint + '\n',
+        );
+        assert.equal(
+          fs.readFileSync(path.join(workerHome, 'release-manifest-sha256'), 'utf8'),
+          hash(expected.sums) + '\n',
+        );
+        assert.equal(fs.existsSync(path.join(mockState, 'active')), isActive);
+        assert.equal(fs.readlinkSync(path.join(aliasBin, 'systemtd')), target);
+      }
+      const first = await install(VERSION_A, COMMIT_A);
+      assert.equal(first.code, 0, 'fresh managed installation: ' + first.output);
+      signedState(packageA, VERSION_A, COMMIT_A, false);
+      fs.writeFileSync(path.join(workerHome, 'state.json'), 'test-only-enrollment');
+      const initialUnit = fs.readFileSync(serviceUnit);
+      const initialRecords = metadataPaths.map((name) =>
+        fs.readFileSync(path.join(workerHome, name)),
+      );
+      active = packageB;
+      await t.test(
+        'activation failure compensates to previous inactive verified state',
+        async () => {
+          fs.writeFileSync(path.join(mockState, 'fail-start'), '');
+          const failed = await install(VERSION_B, COMMIT_B);
+          assert.notEqual(failed.code, 0, failed.output);
+          assert.match(failed.output, /rollback attempted/);
+          fs.rmSync(path.join(mockState, 'fail-start'));
+          signedState(packageA, VERSION_A, COMMIT_A, false);
+          assert.deepEqual(fs.readFileSync(serviceUnit), initialUnit);
+          metadataPaths.forEach((name, i) =>
+            assert.deepEqual(fs.readFileSync(path.join(workerHome, name)), initialRecords[i], name),
+          );
+        },
+      );
+      await t.test('retry activates and identical reinstallation is idempotent', async () => {
+        const ok = await install(VERSION_B, COMMIT_B);
+        assert.equal(ok.code, 0, ok.output);
+        signedState(packageB, VERSION_B, COMMIT_B, true);
+        const starts = fs.readFileSync(path.join(mockState, 'starts'));
+        const retry = await install(VERSION_B, COMMIT_B);
+        assert.equal(retry.code, 0, retry.output);
+        assert.deepEqual(
+          fs.readFileSync(path.join(mockState, 'starts')),
+          starts,
+          'idempotent retry restarted an active verified service',
+        );
+      });
+      await t.test(
+        'readiness timeout restores active prior service and prior signed records',
+        async () => {
+          fs.appendFileSync(serviceUnit, '# retained prior unit marker\n');
+          const priorUnit = fs.readFileSync(serviceUnit);
+          const priorRecords = metadataPaths.map((name) =>
+            fs.readFileSync(path.join(workerHome, name)),
+          );
+          const previous = fs.readFileSync(path.join(root, 'install', 'previous', 'systemtd'));
+          active = packageC;
+          fs.writeFileSync(path.join(mockState, 'fail-ready'), '');
+          const failed = await install('2.3.6', commitC);
+          assert.notEqual(failed.code, 0, failed.output);
+          assert.match(failed.output, /readiness|restore/i);
+          fs.rmSync(path.join(mockState, 'fail-ready'));
+          signedState(packageB, VERSION_B, COMMIT_B, true);
+          assert.deepEqual(fs.readFileSync(serviceUnit), priorUnit, 'original systemd unit');
+          assert.deepEqual(
+            fs.readFileSync(path.join(root, 'install', 'previous', 'systemtd')),
+            previous,
+            'previous rollback slot retained',
+          );
+          metadataPaths.forEach((name, i) =>
+            assert.deepEqual(fs.readFileSync(path.join(workerHome, name)), priorRecords[i], name),
+          );
+          const retried = await install('2.3.6', commitC);
+          assert.equal(retried.code, 0, retried.output);
+          signedState(packageC, '2.3.6', commitC, true);
+        },
+      );
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      fs.rmSync(root, { recursive: true, force: true });
     }
   },
 );

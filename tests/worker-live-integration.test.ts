@@ -193,25 +193,32 @@ void test(
       });
     }
     const initialGuide = await getPage('/admin/onboarding');
-    assert.match(initialGuide, /Next step: 4/);
+    assert.match(initialGuide, /data-onboarding-status="blocked"/);
+    assert.match(initialGuide, /Blocked: signed Worker release not approved/);
+    assert.match(initialGuide, /data-chatgpt-verification="unverified"/);
     assert.match(initialGuide, /data-onboarding-step="2" data-complete="true"/);
     assert.match(initialGuide, /Loopback HTTP/);
     assert.doesNotMatch(initialGuide, /br_sec_|br_enroll_/);
 
     await runtimeSettings.set('mcp.enabled', 'false');
-    assert.match(await getPage('/admin/onboarding'), /Next step: 3/);
+    assert.match(
+      await getPage('/admin/onboarding'),
+      /data-onboarding-step="3" data-complete="false"/,
+    );
     await runtimeSettings.set('mcp.enabled', 'true');
     const workersHtml = await getPage('/admin/workers');
-    assert.equal(
-      (await submit('/admin/workers/enrollment', { _csrf: csrf(workersHtml), ttl_seconds: '600' }))
-        .status,
-      302,
-    );
-    const enrollmentPage = await getPage('/admin/workers');
-    const enrollment = {
-      token: enrollmentPage.match(/id="worker-enrollment-token"[^>]*>([^<]+)/)?.[1] || '',
-    };
+    const blockedEnrollment = await submit('/admin/workers/enrollment', {
+      _csrf: csrf(workersHtml),
+      ttl_seconds: '600',
+    });
+    assert.equal(blockedEnrollment.status, 503, 'Unapproved public enrollment must remain closed');
+    assert.equal(blockedEnrollment.headers.get('cache-control'), 'no-store');
     assert.doesNotMatch(await getPage('/admin/workers'), /id="worker-enrollment-token"/);
+
+    // Generate only a disposable database fixture token; do not open public issuance.
+    const enrollment = {
+      token: (await workerRepo.createEnrollmentToken({ ttlSeconds: 600 })).token,
+    };
 
     // E2E starts a trusted, locally compiled Go test fixture in disposable Docker.
     // Public unsigned download is forbidden; the dedicated signed-release suite
@@ -316,7 +323,7 @@ void test(
     const terminal = await terminalMcpService.read('Live Worker Profile', 30);
     assert.match(terminal.text, /direct-shell-worker-ok/);
 
-    assert.match(await getPage('/admin/onboarding'), /Next step: 5/);
+    assert.match(await getPage('/admin/onboarding'), /data-onboarding-status="blocked"/);
     const clientsHtml = await getPage('/admin/clients?first_call=local');
     assert.match(clientsHtml, /http:\/\/127\.0\.0\.1:43871\/callback/);
     assert.doesNotMatch(clientsHtml, /value="bot_report.terminal" checked/);
@@ -332,7 +339,10 @@ void test(
     const firstId = oneTime.match(/id="new-client-id"[^>]*>([^<]+)/)?.[1] || '';
     const firstSecret = oneTime.match(/id="new-client-secret"[^>]*>([^<]+)/)?.[1] || '';
     assert.doesNotMatch(await getPage('/admin/clients'), /id="new-client-secret"/);
-    assert.match(await getPage('/admin/onboarding'), /Next step: 6/);
+    assert.match(
+      await getPage('/admin/onboarding'),
+      /data-onboarding-step="5" data-complete="true"/,
+    );
     const first = spawn(
       process.execPath,
       [path.resolve(__dirname, '../scripts/first-mcp-call.js'), baseUrl],
@@ -379,9 +389,14 @@ void test(
     assert.equal(await finished, 0, 'first-call helper failed');
     assert.match(firstOutput, /PASS runtime_info/);
     assert.ok(!firstOutput.includes(firstSecret));
-    await waitFor(async () =>
-      (await getPage('/admin/onboarding')).includes('All six steps complete'),
-    );
+    await waitFor(async () => {
+      const guide = await getPage('/admin/onboarding');
+      return (
+        guide.includes('data-onboarding-step="6" data-complete="true"') &&
+        guide.includes('data-onboarding-status="blocked"') &&
+        guide.includes('data-chatgpt-verification="unverified"')
+      );
+    });
     console.log(
       'ONBOARDING PASS: admin login, live Worker, one-time client secret, browser consent, PKCE callback, first MCP call, audit progress',
     );
@@ -500,16 +515,17 @@ void test(
     const binaryBefore = fs.readFileSync(currentBinary);
     await waitFor(() => workerBroker.isOnline(worker.id));
     const scriptPath = path.join(dir, 'unapproved-public-install.sh');
+    const installerResponse = await fetch(baseUrl + '/worker/install.sh');
+    assert.equal(installerResponse.status, 503, 'Unapproved installer must be unavailable');
+    assert.equal(installerResponse.headers.get('cache-control'), 'no-store');
     const download = await runCommand(
       'curl',
       ['-fsSL', baseUrl + '/worker/install.sh', '-o', scriptPath],
       { cwd: workRoot, env: cliEnv },
     );
-    assert.equal(download.status, 0, download.stderr);
+    assert.equal(download.status, 22, 'curl must reject HTTP 503, not download a script');
+    assert.equal(fs.existsSync(scriptPath), false);
     await waitFor(() => workerBroker.isOnline(worker.id));
-    const blocked = await runCommand('sh', [scriptPath], { cwd: workRoot, env: cliEnv });
-    assert.notEqual(blocked.status, 0, 'unapproved installer changed running Worker');
-    assert.match(blocked.stderr, /signed release not approved/i);
     await waitFor(() => workerBroker.isOnline(worker.id));
     assert.deepEqual(fs.readFileSync(currentBinary), binaryBefore);
     assert.deepEqual(fs.readFileSync(statePath), identityBefore);

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 func BenchmarkManagedProcessStatusLargeLog(b *testing.B) {
@@ -189,6 +191,70 @@ func TestWorkerShutdownStopsWorkspaceAndManagedProcess(t *testing.T) {
 	}
 	if _, err := a.runShell("printf should-not-run", root, time.Second, 1024); errorCode(err) != "WORKER_SHUTTING_DOWN" {
 		t.Fatalf("expected shutdown guard, got %v", err)
+	}
+}
+
+func TestServerRevocationStopsManagedWorkloadsWithoutRetry(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix process-group fixture; Windows requires native test")
+	}
+	for _, tc := range []struct {
+		name string
+		code int
+		text string
+	}{
+		{"owner-disabled", 4003, "owner-disabled"},
+		{"worker-disabled", 4003, "worker-disabled"},
+		{"owner-db-unavailable", 4003, "owner-status-unavailable"},
+		{"worker-db-unavailable", 4003, "worker-status-unavailable"},
+		{"worker-capability-revoked", 4003, "worker-capability-revoked"},
+		{"worker-identity-changed", 4003, "worker-identity-changed"},
+		{"worker-removed", 4004, "worker-removed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TMPDIR", t.TempDir())
+			root := t.TempDir()
+			a := &Agent{
+				cfg: Config{AllowShell: true}, roots: []string{root},
+				processes: map[string]*managedProcess{}, commands: map[int]*exec.Cmd{},
+			}
+			started, err := a.startManagedProcess(map[string]any{
+				"cwd": root, "command": "sleep 10",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			id := started.(map[string]any)["process_id"].(string)
+			record, err := a.getProcess(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !a.stopOnAuthoritativeClose(&websocket.CloseError{Code: tc.code, Text: tc.text}) {
+				t.Fatal("revocation must stop reconnect")
+			}
+			if !a.shutting.Load() {
+				t.Fatal("revocation must shut down the agent")
+			}
+			select {
+			case <-record.done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("revocation left a managed process running")
+			}
+		})
+	}
+}
+
+func TestOrdinaryDisconnectDoesNotStopWorker(t *testing.T) {
+	a := &Agent{processes: map[string]*managedProcess{}, commands: map[int]*exec.Cmd{}}
+	for _, closeErr := range []error{
+		fmt.Errorf("network disconnected"),
+		&websocket.CloseError{Code: websocket.CloseNormalClosure, Text: "test-done"},
+		&websocket.CloseError{Code: 4003, Text: "unexpected-reason"},
+		&websocket.CloseError{Code: 4004, Text: "unexpected-reason"},
+	} {
+		if a.stopOnAuthoritativeClose(closeErr) || a.shutting.Load() {
+			t.Fatalf("unexpected retry suppression on %v", closeErr)
+		}
 	}
 }
 

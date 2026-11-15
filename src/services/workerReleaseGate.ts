@@ -11,7 +11,10 @@
  * runtime setting cannot authorize installation or public distribution.
  */
 export function railwayWorkerDistributionBlocked(): boolean {
-  return process.env.MCP_PLATFORM === 'railway';
+  // Release trust is a source-reviewed decision, never a runtime platform flag.
+  // Until an independently approved signed release exists, deny distribution
+  // on Railway, local servers, and unrecognized/missing platform values alike.
+  return true;
 }
 
 /**

@@ -29,9 +29,9 @@ cd "$ROOT/worker/bin"
 test -f SHA256SUMS && test ! -L SHA256SUMS && test -f WORKER_RELEASE && test ! -L WORKER_RELEASE || {
   echo 'Manifest and release metadata must be regular non-symlink files' >&2; exit 1;
 }
-[ "$(wc -l < WORKER_RELEASE | tr -d ' ')" = 2 ] || { echo 'Invalid metadata length' >&2; exit 1; }
-[ "$(sed -n '1p' WORKER_RELEASE)" = "version=$WORKER_RELEASE_EXPECTED_VERSION" ] || { echo 'Release version mismatch' >&2; exit 1; }
-[ "$(sed -n '2p' WORKER_RELEASE)" = "commit=$WORKER_RELEASE_EXPECTED_COMMIT" ] || { echo 'Release commit mismatch' >&2; exit 1; }
+printf 'version=%s\ncommit=%s\n' "$WORKER_RELEASE_EXPECTED_VERSION" "$WORKER_RELEASE_EXPECTED_COMMIT" | cmp -s - WORKER_RELEASE || {
+  echo 'Release metadata must match exact canonical LF-terminated bytes' >&2; exit 1;
+}
 # Reproduce manifest canonically: rejects missing/extra paths and duplicated hashes.
 set -- \
   bot-report-worker-darwin-amd64 bot-report-worker-darwin-arm64 \

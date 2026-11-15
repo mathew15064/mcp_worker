@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { SchemaBuilder } from './schemaBuilder';
+import { MysqlAdapter } from './adapters/mysqlAdapter';
 import type { DatabaseAdapter } from './contracts';
 interface Migration {
   up(schema: SchemaBuilder): Promise<void>;
@@ -60,6 +61,81 @@ export class MigrationRunner {
     );
   }
 
+  private async assertMysqlSchema() {
+    const required: Record<string, string[]> = {
+      system_settings: ['key', 'value', 'updated_at'],
+      terminal_profiles: ['id', 'credential_envelope'],
+      terminal_connection_audit: ['id', 'terminal_profile_id'],
+      mcp_oauth_clients: ['id', 'client_id', 'allowed_scopes_json', 'owner_user_id'],
+      mcp_oauth_authorization_codes: ['id', 'code_hash', 'client_id'],
+      mcp_oauth_access_tokens: ['id', 'token_hash', 'client_id', 'revoked_at'],
+      mcp_oauth_refresh_tokens: ['id', 'token_hash', 'client_id', 'revoked_at'],
+      mcp_request_audit: ['id', 'request_payload', 'response_payload'],
+      workers: ['id', 'owner_user_id'],
+      worker_enrollment_tokens: ['id', 'owner_user_id'],
+      worker_profiles: ['id', 'worker_id'],
+      users: ['id', 'username', 'session_version'],
+    };
+    const columns = await this.adapter.queryAll<{ TABLE_NAME: string; COLUMN_NAME: string }>(
+      'SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.columns WHERE table_schema = DATABASE()',
+    );
+    const found = new Map<string, Set<string>>();
+    for (const column of columns) {
+      if (!found.has(column.TABLE_NAME)) found.set(column.TABLE_NAME, new Set());
+      found.get(column.TABLE_NAME)?.add(column.COLUMN_NAME);
+    }
+    for (const [table, names] of Object.entries(required)) {
+      if (names.some((column) => !found.get(table)?.has(column))) {
+        throw Object.assign(
+          new Error(`MySQL source schema is missing required columns: ${table}`),
+          {
+            code: 'MYSQL_SCHEMA_INCOMPATIBLE',
+          },
+        );
+      }
+    }
+    const indexed = await this.adapter.queryAll<{ TABLE_NAME: string; INDEX_NAME: string }>(
+      'SELECT DISTINCT TABLE_NAME, INDEX_NAME FROM information_schema.statistics WHERE table_schema = DATABASE()',
+    );
+    const indexes = new Set(indexed.map((row) => `${row.TABLE_NAME}.${row.INDEX_NAME}`));
+    for (const [table, index] of [
+      ['mcp_oauth_clients', 'idx_mcp_clients_owner_user'],
+      ['workers', 'idx_workers_owner_user'],
+      ['worker_enrollment_tokens', 'idx_worker_enrollment_owner_user'],
+      ['mcp_oauth_access_tokens', 'idx_mcp_access_tokens_client'],
+      ['mcp_oauth_refresh_tokens', 'idx_mcp_refresh_tokens_client'],
+    ]) {
+      if (!indexes.has(`${table}.${index}`)) {
+        throw Object.assign(new Error(`MySQL source schema is missing index ${table}.${index}`), {
+          code: 'MYSQL_SCHEMA_INCOMPATIBLE',
+        });
+      }
+    }
+    const references = await this.adapter.queryAll<{
+      TABLE_NAME: string;
+      REFERENCED_TABLE_NAME: string;
+      COLUMN_NAME: string;
+    }>(
+      `SELECT TABLE_NAME, REFERENCED_TABLE_NAME, COLUMN_NAME
+       FROM information_schema.key_column_usage WHERE table_schema = DATABASE()
+       AND REFERENCED_TABLE_NAME IS NOT NULL`,
+    );
+    for (const table of ['mcp_oauth_clients', 'workers', 'worker_enrollment_tokens']) {
+      if (
+        !references.some(
+          (row) =>
+            row.TABLE_NAME === table &&
+            row.COLUMN_NAME === 'owner_user_id' &&
+            row.REFERENCED_TABLE_NAME === 'users',
+        )
+      ) {
+        throw Object.assign(new Error(`MySQL source schema is missing ownership FK: ${table}`), {
+          code: 'MYSQL_SCHEMA_INCOMPATIBLE',
+        });
+      }
+    }
+  }
+
   async inspectSource() {
     const files = migrationFiles();
     const table = await this.adapter.queryOne(
@@ -80,6 +156,7 @@ export class MigrationRunner {
     );
     const ran = new Set(executed.map((row) => String(row.migration)));
     const pending = files.map(migrationName).filter((name) => !ran.has(name));
+    if (files.length > 0 && pending.length === 0) await this.assertMysqlSchema();
     return {
       initialized: files.length > 0 && pending.length === 0,
       migrationTable: true,
@@ -105,6 +182,17 @@ export class MigrationRunner {
   }
 
   async migrate() {
+    // MySQL DDL commits independently of the ledger. Serialize every startup
+    // on one pinned connection and recheck the ledger *inside* that lock.
+    if (this.adapter instanceof MysqlAdapter) {
+      return this.adapter.withMigrationLock((locked) =>
+        new MigrationRunner(locked).migrateUnlocked(),
+      );
+    }
+    return this.migrateUnlocked();
+  }
+
+  private async migrateUnlocked() {
     await this.ensureTable();
     const ran = new Set((await this.executed()).map((row) => row.migration));
     const pending = migrationFiles().filter((file) => !ran.has(migrationName(file)));

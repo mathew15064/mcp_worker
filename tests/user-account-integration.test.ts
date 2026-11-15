@@ -197,23 +197,37 @@ void test(
     assert.equal(aliceClient.profile_id, alice.profile_id);
     assert.deepEqual(
       aliceClient.allowed_scopes.sort(),
-      ['bot_report.read', 'bot_report.terminal', 'offline_access'].sort(),
+      ['bot_report.read', 'bot_report.terminal'].sort(),
     );
 
     const workerRepo = (await import('../src/repositories/workerRepository.js')).default;
     const aliceWorkersPage = await pageWithCsrf(base, '/account/workers', aliceLogin.cookie);
     assert.equal(aliceWorkersPage.response.status, 200);
-    assert.match(aliceWorkersPage.html, /Generate Enrollment Token/);
+    assert.match(aliceWorkersPage.html, /Signed Worker release approval pending/);
+    assert.doesNotMatch(aliceWorkersPage.html, /Generate Enrollment Token/);
     const createEnrollment = await fetch(`${base}/account/workers/enrollment`, {
       method: 'POST',
       redirect: 'manual',
       headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: aliceLogin.cookie },
       body: new URLSearchParams({ _csrf: aliceWorkersPage.csrf, ttl_seconds: '600' }).toString(),
     });
-    assert.equal(createEnrollment.status, 302);
+    assert.equal(
+      createEnrollment.status,
+      503,
+      'No public enrollment while signed release is pending',
+    );
+    assert.equal(createEnrollment.headers.get('cache-control'), 'no-store');
     const enrollmentPage = await pageWithCsrf(base, '/account/workers', aliceLogin.cookie);
-    const enrollmentToken = enrollmentPage.html.match(/br_enroll_[A-Za-z0-9_-]+/)?.[0];
-    assert.ok(enrollmentToken);
+    assert.doesNotMatch(enrollmentPage.html, /br_enroll_[A-Za-z0-9_-]+/);
+
+    // The local integration fixture creates a token directly in its disposable
+    // database, so the existing Worker ownership tests remain independent of
+    // the protected public enrollment-creation endpoint.
+    const fixtureEnrollment = await workerRepo.createEnrollmentToken({
+      ttlSeconds: 600,
+      ownerUserId: alice.id,
+    });
+    const enrollmentToken = fixtureEnrollment.token;
     const identity = crypto.generateKeyPairSync('ed25519');
     const publicKey = identity.publicKey.export({ type: 'spki', format: 'pem' }).toString();
     const enrollWorker = await fetch(`${base}/worker/v1/enroll`, {

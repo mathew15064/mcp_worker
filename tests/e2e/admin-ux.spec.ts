@@ -44,12 +44,27 @@ test('Getting Started exposes database readiness and six guided steps', async ({
     .click();
   await expect(page.getByRole('heading', { name: 'Getting Started' })).toBeVisible();
   await expect(page.locator('[data-onboarding-step]')).toHaveCount(6);
-  await expect(page.getByText('Next step: 2')).toBeVisible();
+  await expect(page.locator('[data-onboarding-step="2"]')).toHaveAttribute('data-state', 'pending');
+  await expect(page.locator('[data-onboarding-status]')).toHaveAttribute(
+    'data-onboarding-status',
+    'blocked',
+  );
   await expect(page.getByRole('link', { name: 'Database settings', exact: true })).toBeVisible();
 });
 
 test('Getting Started stays externally unverified on desktop and mobile', async ({ page }) => {
   const errors = captureConsoleErrors(page);
+  const unexpectedResponses: string[] = [];
+  const blockedInstallerResponses: string[] = [];
+  page.on('response', (response) => {
+    if (response.status() < 400) return;
+    const pathname = new URL(response.url()).pathname;
+    if (response.status() === 503 && pathname === '/worker/install.sh') {
+      blockedInstallerResponses.push(pathname);
+    } else {
+      unexpectedResponses.push(`${response.status()} ${pathname}`);
+    }
+  });
   await login(page);
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 844 });
@@ -67,7 +82,15 @@ test('Getting Started stays externally unverified on desktop and mobile', async 
     }));
     expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
   }
-  expect(errors).toEqual([]);
+  expect(blockedInstallerResponses.length).toBeGreaterThan(0);
+  expect(unexpectedResponses).toEqual([]);
+  expect(
+    errors.filter(
+      (message) =>
+        message !==
+        'Failed to load resource: the server responded with a status of 503 (Service Unavailable)',
+    ),
+  ).toEqual([]);
 });
 
 test('OAuth discovery mismatch blocks endpoint readiness without granting scopes', async ({
@@ -343,7 +366,7 @@ test('Worker-only execution targets replace SSH profiles and browser consoles', 
   }
 });
 
-test('Workers use one-time enrollment tokens and worker profiles without SSH credentials', async ({
+test('Workers block unapproved enrollment while profiles remain manageable without SSH', async ({
   page,
 }) => {
   await login(page);
@@ -378,26 +401,18 @@ test('Workers use one-time enrollment tokens and worker profiles without SSH cre
   await expect(page.getByText('No matching workers.')).toBeVisible();
   await workerSearch.fill('');
 
-  await page.getByRole('button', { name: 'Generate Enrollment Token' }).click();
-  const enrollmentDialog = page.getByRole('dialog', { name: 'One-time Enrollment Token' });
-  await expect(enrollmentDialog).toBeVisible();
-  await expect(enrollmentDialog.locator('#worker-install-linux-command')).toContainText(
-    'curl -fsSL http://127.0.0.1:3399/worker/install-linux.sh | sh',
-  );
-  await expect(enrollmentDialog.locator('#worker-install-macos-command')).toContainText(
-    'curl -fsSL http://127.0.0.1:3399/worker/install-macos.sh | sh',
-  );
-  await expect(enrollmentDialog.locator('#worker-install-windows-command')).toContainText(
-    'irm http://127.0.0.1:3399/worker/install.ps1 | iex',
-  );
-  await expect(enrollmentDialog.getByText('systemtd login', { exact: true })).toBeVisible();
-  const enrollment =
-    (await enrollmentDialog.locator('#worker-enrollment-token').textContent())?.trim() || '';
-  expect(enrollment).toMatch(/^br_enroll_/);
-  await enrollmentDialog.getByRole('button', { name: "I've saved the token" }).click();
-  await expect(enrollmentDialog).toBeHidden();
+  await expect(page.getByText('Signed Worker release approval pending')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Generate Enrollment Token' })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'One-time Enrollment Token' })).toHaveCount(0);
+  const csrf = await page.locator('input[name="_csrf"]').first().inputValue();
+  const blockedEnrollment = await page.request.post('/admin/workers/enrollment', {
+    form: { _csrf: csrf, ttl_seconds: '600' },
+    maxRedirects: 0,
+  });
+  expect(blockedEnrollment.status()).toBe(503);
+  expect(blockedEnrollment.headers()['cache-control']).toBe('no-store');
   await page.reload();
-  await expect(page.getByText(enrollment)).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'One-time Enrollment Token' })).toHaveCount(0);
 
   await expect(page.getByRole('link', { name: 'SSH Profiles' })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Execution Targets' })).toBeVisible();
@@ -564,6 +579,51 @@ test('mobile navigation behaves like a drawer and tables do not create page-leve
   }));
   expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
   await expect(page.getByRole('heading', { name: 'Workers', level: 1 })).toBeVisible();
+});
+
+test('mobile dialog and drawer isolate background focus at 320/390px and respect reduced motion', async ({
+  page,
+}) => {
+  await login(page);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 750 });
+    await page.goto('/admin/clients');
+    const sidebar = page.locator('#admin-sidebar');
+    await expect(sidebar).toHaveJSProperty('inert', true);
+    const menu = page.locator('[data-mobile-menu]');
+    await menu.click();
+    await expect(page.locator('.main')).toHaveJSProperty('inert', true);
+    await expect(sidebar).toHaveJSProperty('inert', false);
+    await expect(sidebar.getByRole('link', { name: 'Overview' })).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(sidebar.locator(':focus')).toHaveCount(1);
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeFocused();
+    await expect(page.locator('.main')).toHaveJSProperty('inert', false);
+    await expect(sidebar).toHaveJSProperty('inert', true);
+
+    const trigger = page.getByRole('button', { name: 'New Client' }).first();
+    await trigger.click();
+    await expect(page.getByRole('dialog', { name: 'New OAuth Client' })).toBeVisible();
+    await expect(page.locator('.topbar-global')).toHaveJSProperty('inert', true);
+    await page.keyboard.press('Tab');
+    await expect(page.locator('#client-create-modal :focus')).toHaveCount(1);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.topbar-global')).toHaveJSProperty('inert', false);
+    await expect(trigger).toBeFocused();
+
+    const result = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      width: document.documentElement.clientWidth,
+      transition: getComputedStyle(document.querySelector('.btn') || document.body)
+        .transitionDuration,
+    }));
+    expect(result.scrollWidth).toBeLessThanOrEqual(result.width);
+    expect(result.transition.split(',').every((duration) => parseFloat(duration) <= 0.001)).toBe(
+      true,
+    );
+  }
 });
 
 test('theme preference persists and all admin pages render on desktop/mobile without browser errors', async ({

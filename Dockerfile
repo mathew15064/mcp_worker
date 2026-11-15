@@ -1,13 +1,13 @@
 # ==============================================================================
 # Multi-Stage Production Dockerfile for mcp_worker
-# Runtime: configurable Node.js Alpine (musl libc); default Node 26.13.0
+# Runtime: configurable Node.js Alpine (musl libc); default pinned Node 22.22.3
 # Architecture: Single non-root container listening on 0.0.0.0:80
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
 # Stage 1: Native Dependency Builder
 # ------------------------------------------------------------------------------
-ARG BOT_REPORT_NODE_IMAGE=node:26.13.0-alpine@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216
+ARG BOT_REPORT_NODE_IMAGE=node:22.22.3-alpine@sha256:e58326d0d441090181ac150dc2078d3e2cf6a0d42e809aebba3ef5880935ffdd
 FROM ${BOT_REPORT_NODE_IMAGE} AS builder
 
 WORKDIR /app
@@ -62,9 +62,15 @@ RUN set -eux; cd /tmp; npm pack npm@11.21.2 --silent; \
 # Optional build provenance. Deploy tooling injects these; direct/manual builds may leave them as unknown.
 ARG BOT_REPORT_GIT_SHA=unknown
 ARG BOT_REPORT_BUILD_TIME=unknown
+ARG BOT_REPORT_TREE_SHA=unknown
 ARG BOT_REPORT_NODE_IMAGE
 LABEL org.opencontainers.image.revision="${BOT_REPORT_GIT_SHA}" \
       org.opencontainers.image.created="${BOT_REPORT_BUILD_TIME}" \
+      org.opencontainers.image.source="https://github.com/mathew15064/mcp_worker" \
+      org.bot-report.source-tree="${BOT_REPORT_TREE_SHA}" \
+      org.bot-report.image-flavor="standalone" \
+      org.bot-report.build-origin="local-pc-only" \
+      org.bot-report.go-base="golang:1.26.10-alpine@sha256:87c65a688975c0b1d4585d204874c45ca78354670e3a5f11368c5a492303d696" \
       org.bot-report.node-base="${BOT_REPORT_NODE_IMAGE}"
 
 # Set production bootstrap defaults. MySQL connection details are configured from
@@ -95,9 +101,9 @@ COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Ensure data directory exists and assign ownership to non-root node user (UID: 1000, GID: 1000)
-RUN mkdir -p /app/data && chown -R node:node /app
+RUN apk upgrade --no-cache && mkdir -p /app/data && chown -R node:node /app
 
-# Switch to standard non-root user provided by node:26.13.0-alpine
+# Switch to standard non-root user provided by node:22.22.3-alpine
 USER node
 
 # Health check targeting internal HTTP port 80 using Node.js built-in fetch

@@ -2,6 +2,7 @@ import { stringifyUnknown } from '../utils/stringifyUnknown';
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import userRepository from '../repositories/userRepository';
+import workerBroker from './workerConnectionBroker';
 type User = NonNullable<Awaited<ReturnType<typeof userRepository.findById>>>;
 type UserRepo = Pick<
   typeof userRepository,
@@ -63,7 +64,10 @@ function publicUser(user: User | null) {
 }
 
 class UserService {
-  constructor(public repo: UserRepo = userRepository) {}
+  constructor(
+    public repo: UserRepo = userRepository,
+    private broker: Pick<typeof workerBroker, 'disconnectOwner'> = workerBroker,
+  ) {}
 
   async createUser({
     username,
@@ -167,6 +171,7 @@ class UserService {
     const current = await this.repo.findById(userId);
     if (!current) throw validationError('USER_NOT_FOUND', 'User not found.');
     await this.repo.setStatus(userId, status);
+    if (status === STATUS_DISABLED) this.broker.disconnectOwner(userId);
     return publicUser(await this.repo.findById(userId));
   }
 

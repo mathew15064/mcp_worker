@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { WebSocket } from 'ws';
 
 import workerAuthService from '../src/services/workerAuthService';
@@ -12,10 +13,13 @@ const { WorkerAuthService, canonicalConnectMessage } = workerAuthService;
 import workerConnectionBroker from '../src/services/workerConnectionBroker';
 const { WorkerConnectionBroker } = workerConnectionBroker;
 import workerExecutionService from '../src/services/workerExecutionService';
+import userServiceModule from '../src/services/userService';
+const { UserService } = userServiceModule;
 const { WorkerExecutionService } = workerExecutionService;
 import terminalMcpService from '../src/services/terminalMcpService';
 const { TerminalMcpService } = terminalMcpService;
 import lifecycle from '../worker/lifecycle';
+import localWorkerCLI from '../worker/cli';
 import { stringifyUnknown as appStringifyUnknown } from '../src/utils/stringifyUnknown';
 const { buildCleanupPlan, applyCleanupPlan } = lifecycle;
 
@@ -183,6 +187,95 @@ void test('worker enrollment normalizes capabilities and signed handshake reject
   );
 });
 
+void test('signed Worker handshake rejects disabled or missing owner after signature validation', async () => {
+  const pair = crypto.generateKeyPairSync('ed25519');
+  const workerId = 'owned-worker-fixture';
+  const worker = fixtureWorker({
+    id: workerId,
+    enabled: true,
+    owner_user_id: 'user-owner-a',
+    public_key: pair.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+    capabilities: ['workspace.exec'],
+  });
+  const repository = {
+    findWorkerById: (id: string) => Promise.resolve(id === workerId ? worker : null),
+    consumeEnrollmentToken: () => Promise.reject(new Error('enrollment not involved')),
+    createWorker: () => Promise.reject(new Error('creation not involved')),
+  };
+  const now = 1_800_000_000_000;
+  let ownerState: string | null = 'disabled';
+  let storageFails = false;
+  let ownerLookups = 0;
+  const service = new WorkerAuthService({
+    repository,
+    now: () => now,
+    ownerStatusLookup: (id: string) => {
+      assert.equal(id, 'user-owner-a');
+      ownerLookups++;
+      if (storageFails) return Promise.reject(new Error('test-only storage unavailable'));
+      return Promise.resolve(ownerState);
+    },
+  });
+  function signedHeaders(nonce: string) {
+    const timestamp = String(now);
+    return {
+      'x-br-worker-id': workerId,
+      'x-br-worker-timestamp': timestamp,
+      'x-br-worker-nonce': nonce,
+      'x-br-worker-signature': crypto
+        .sign(
+          null,
+          Buffer.from(canonicalConnectMessage({ workerId, timestamp, nonce })),
+          pair.privateKey,
+        )
+        .toString('base64'),
+    };
+  }
+  const invalidSignature = {
+    ...signedHeaders('nonce_owner_invalid_012345'),
+    'x-br-worker-signature': Buffer.alloc(64).toString('base64'),
+  };
+  await assert.rejects(
+    service.authenticateConnect(invalidSignature),
+    (error: unknown) =>
+      error instanceof Error && 'code' in error && error.code === 'WORKER_AUTH_INVALID',
+  );
+  assert.equal(ownerLookups, 0, 'Do not disclose owner state before signature verification');
+
+  await assert.rejects(
+    service.authenticateConnect(signedHeaders('nonce_owner_disabled_012345')),
+    (error: unknown) =>
+      error instanceof Error && 'code' in error && error.code === 'WORKER_OWNER_DISABLED',
+  );
+  ownerState = null;
+  await assert.rejects(
+    service.authenticateConnect(signedHeaders('nonce_owner_missing_012345')),
+    (error: unknown) =>
+      error instanceof Error && 'code' in error && error.code === 'WORKER_OWNER_DISABLED',
+  );
+  storageFails = true;
+  await assert.rejects(
+    service.authenticateConnect(signedHeaders('nonce_owner_dberror_012345')),
+    (error: unknown) =>
+      error instanceof Error && 'code' in error && error.code === 'WORKER_OWNER_UNAVAILABLE',
+  );
+  storageFails = false;
+  ownerState = 'active';
+  assert.equal(
+    (await service.authenticateConnect(signedHeaders('nonce_owner_active_012345'))).id,
+    workerId,
+  );
+  // NULL ownership denotes an administrator-owned Worker, not a missing user.
+  worker.owner_user_id = null;
+  storageFails = true;
+  const previousLookups = ownerLookups;
+  assert.equal(
+    (await service.authenticateConnect(signedHeaders('nonce_admin_owned_012345'))).id,
+    workerId,
+  );
+  assert.equal(ownerLookups, previousLookups);
+});
+
 void test('worker broker dispatch correlates typed result and fails closed on missing capability', async () => {
   const workerId = crypto.randomUUID();
   const workerRecord = fixtureWorker({
@@ -201,7 +294,7 @@ void test('worker broker dispatch correlates typed result and fails closed on mi
   };
   const ws = socketDouble({
     workerId,
-    worker: { id: workerId, capabilities: ['workspace.exec'] },
+    worker: workerRecord,
     readyState: WebSocket.OPEN,
     send(text: string) {
       dispatched.value = parseDispatchedJob(text);
@@ -237,7 +330,7 @@ void test('worker broker dispatch correlates typed result and fails closed on mi
   broker.close();
 });
 
-void test('worker heartbeat skips redundant capabilities writes but preserves presence updates', async () => {
+void test('worker heartbeat cannot grant capabilities and preserves presence updates', async () => {
   const workerId = crypto.randomUUID();
   const writes: Array<{ id: string; capabilities: string[] }> = [];
   let presenceTouches = 0;
@@ -277,7 +370,8 @@ void test('worker heartbeat skips redundant capabilities writes but preserves pr
   );
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(presenceTouches, 4);
-  assert.deepEqual(writes, [{ id: workerId, capabilities: ['file.write', 'workspace.exec'] }]);
+  assert.deepEqual(writes, [], 'A Worker heartbeat is not a grant authority');
+  assert.deepEqual(ws.worker.capabilities, ['workspace.exec']);
   broker.close();
 });
 
@@ -364,6 +458,51 @@ void test('late close and result from a replaced Worker socket cannot affect the
     }),
   );
   assert.deepEqual(await current, { current: true });
+  broker.close();
+});
+
+void test('stale heartbeat expires an established connection and pending job', async () => {
+  const workerId = crypto.randomUUID();
+  const worker = fixtureWorker({ id: workerId, enabled: true, capabilities: ['workspace.exec'] });
+  const statuses: string[] = [];
+  const broker = createBroker({
+    repository: {
+      findWorkerById: () => Promise.resolve(worker),
+      updateWorkerPresence(_id: string, status: string) {
+        statuses.push(status);
+        return Promise.resolve();
+      },
+    },
+  });
+  const ws = socketDouble({
+    readyState: Number(WebSocket.OPEN),
+    workerId,
+    worker: { ...worker },
+    lastHeartbeatAt: 0,
+    closeCode: 0,
+    on() {},
+    send() {},
+    close(code: number) {
+      this.closeCode = code;
+      this.readyState = WebSocket.CLOSED;
+    },
+  });
+  broker.handleConnection(ws, requestDouble(worker));
+  const pending = broker.dispatch(workerId, 'workspace.exec', {}, { timeoutMs: 1_000 });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(broker.pending.size, 1);
+  const elapsed = Date.now();
+  ws.lastHeartbeatAt = elapsed - 76_000;
+  broker.expireStaleConnections(elapsed);
+  await assert.rejects(
+    pending,
+    (error: unknown) =>
+      error instanceof Error && 'code' in error && error.code === 'WORKER_DISCONNECTED',
+  );
+  assert.equal(ws.closeCode, 4002);
+  assert.equal(broker.isOnline(workerId), false);
+  assert.deepEqual(statuses, ['online', 'offline']);
+  assert.equal(broker.pending.size, 0);
   broker.close();
 });
 
@@ -530,6 +669,7 @@ void test('worker broker forwards authenticated memory emergency alerts to the O
     worker: { id: workerId, name: 'VPS Worker', capabilities: [], enabled: true },
     readyState: WebSocket.OPEN,
   });
+  broker.connections.set(workerId, ws);
   broker.handleMessage(
     ws,
     JSON.stringify({
@@ -609,6 +749,79 @@ void test('worker execution service maps the existing execution interface to typ
   assert.equal(calls[1].payload.cwd, '/work');
 });
 
+void test('Worker local roots default to unrestricted but explicit roots remain supported', () => {
+  assert.deepEqual(localWorkerCLI.normalizeRoots(''), []);
+  assert.deepEqual(localWorkerCLI.normalizeRoots('   '), []);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-cli-roots-'));
+  try {
+    assert.deepEqual(localWorkerCLI.normalizeRoots(root), [root]);
+    assert.deepEqual(localWorkerCLI.normalizeRoots(`${root},${root}`), [root]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+void test('Node Worker honors OS-permitted file and shell paths without configured roots', () => {
+  if (process.platform === 'win32') return;
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-unrestricted-'));
+  const restrictedRoot = path.join(base, 'restricted');
+  const outsideRoot = path.join(base, 'outside');
+  fs.mkdirSync(restrictedRoot);
+  fs.mkdirSync(outsideRoot);
+  const target = path.join(outsideRoot, 'new', 'note.txt');
+  const script = `
+    const agent = require(process.env.FIXTURE_AGENT_MODULE);
+    (async () => {
+      await agent.executeOperation('file.write', {
+        path: process.env.FIXTURE_TARGET, content: 'OS-allowed-file', create_dirs: true
+      });
+      const file = await agent.executeOperation('artifact.collect', {
+        path: process.env.FIXTURE_TARGET
+      });
+      const shell = await agent.executeOperation('workspace.exec', {
+        command: 'printf OS-allowed-shell', cwd: process.env.FIXTURE_CWD
+      });
+      process.stdout.write(JSON.stringify({ file: file.text, stdout: shell.stdout, code: shell.exit_code }));
+    })().catch(error => {
+      process.stdout.write(JSON.stringify({ error: error.code || String(error) }));
+    });
+  `;
+  try {
+    const agentPath = require.resolve('../worker/agent');
+    const env = {
+      ...process.env,
+      BOT_REPORT_WORKER_ALLOWED_ROOTS: '',
+      BOT_REPORT_WORKER_ALLOW_SHELL: 'true',
+      FIXTURE_AGENT_MODULE: agentPath,
+      FIXTURE_TARGET: target,
+      FIXTURE_CWD: outsideRoot,
+    };
+    const success = spawnSync(process.execPath, ['-e', script], {
+      cwd: base,
+      env,
+      encoding: 'utf8',
+      timeout: 15_000,
+    });
+    assert.equal(success.status, 0, success.stderr);
+    assert.deepEqual(JSON.parse(success.stdout), {
+      file: 'OS-allowed-file',
+      stdout: 'OS-allowed-shell',
+      code: 0,
+    });
+    const restricted = spawnSync(process.execPath, ['-e', script], {
+      cwd: base,
+      env: { ...env, BOT_REPORT_WORKER_ALLOWED_ROOTS: restrictedRoot },
+      encoding: 'utf8',
+      timeout: 15_000,
+    });
+    assert.equal(restricted.status, 0, restricted.stderr);
+    assert.deepEqual(JSON.parse(restricted.stdout), { error: 'WORKER_PATH_DENIED' });
+    assert.equal(fs.readFileSync(target, 'utf8'), 'OS-allowed-file');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 void test('local worker uninstall removes only verified installer-managed files', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-report-worker-cleanup-'));
   const installRoot = path.join(dir, 'share', 'bot-report-worker');
@@ -684,6 +897,65 @@ void test('MCP execution profile routes worker profiles without decrypting an SS
   assert.equal(status.status, 'READY');
   const result = await service.workspaceExec('Worker Dev', 'printf ok', { cwd: '/work' });
   assert.equal(result.stdout, 'ok');
+});
+
+void test('dispatch and stream reject a socket replaced after owner verification', async () => {
+  const worker = fixtureWorker({
+    id: 'owner-verify-socket-race',
+    owner_user_id: 'owner-a',
+    enabled: true,
+    capabilities: ['workspace.exec', 'shell.attach'],
+  });
+  for (const operation of ['dispatch', 'stream'] as const) {
+    let finishOwnerLookup: ((status: string) => void) | undefined;
+    let sentToOldSocket = 0;
+    const broker = createBroker({
+      repository: { findWorkerById: () => Promise.resolve(worker) },
+      ownerStatusLookup: () =>
+        new Promise<string>((resolve) => {
+          finishOwnerLookup = resolve;
+        }),
+    });
+    const makeSocket = (old: boolean) =>
+      socketDouble({
+        workerId: worker.id,
+        worker,
+        readyState: Number(WebSocket.OPEN),
+        on() {},
+        close() {},
+        send(raw: string) {
+          const message = JSON.parse(raw) as { type?: string };
+          if (old && ['job', 'stream_open'].includes(message.type || '')) {
+            sentToOldSocket++;
+            throw new Error('stale socket was sent a command');
+          }
+        },
+      });
+    const first = makeSocket(true);
+    const second = makeSocket(false);
+    broker.handleConnection(first, requestDouble(worker));
+    const inFlight =
+      operation === 'dispatch'
+        ? broker.dispatch(worker.id, 'workspace.exec', {})
+        : broker.openStream(worker.id, 'shell.attach', {});
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.ok(finishOwnerLookup, 'owner verification must be pending');
+
+    finishOwnerLookup('active');
+    // The owner check resumes before this replacement; the caller resumes after it.
+    queueMicrotask(() =>
+      queueMicrotask(() => broker.handleConnection(second, requestDouble(worker))),
+    );
+    await assert.rejects(
+      inFlight,
+      (error: unknown) =>
+        error instanceof Error && 'code' in error && error.code === 'WORKER_DISCONNECTED',
+      `superseded socket must reject ${operation}`,
+    );
+    assert.equal(sentToOldSocket, 0, `no ${operation} may reach the replaced socket`);
+    assert.equal(broker.isOnline(worker.id), true, 'replacement socket stays connected');
+    broker.close();
+  }
 });
 
 void test('dispatch rejects a socket replaced during asynchronous Worker lookup', async () => {
@@ -764,6 +1036,460 @@ void test('openStream rejects a socket replaced during asynchronous Worker looku
   );
   assert.equal(sent, 0);
   assert.equal(broker.streams.size, 0);
+  broker.close();
+});
+
+void test('disabling a user evicts their live Worker sockets and in-flight jobs only after persistence', async () => {
+  const ownerId = 'fixture-owner-a';
+  let ownerStatus = 'active';
+  const rows = [
+    fixtureWorker({
+      id: 'owned-a-1',
+      owner_user_id: ownerId,
+      enabled: true,
+      capabilities: ['workspace.exec'],
+    }),
+    fixtureWorker({
+      id: 'owned-b-1',
+      owner_user_id: 'fixture-owner-b',
+      enabled: true,
+      capabilities: ['workspace.exec'],
+    }),
+    fixtureWorker({
+      id: 'admin-owned-1',
+      owner_user_id: null,
+      enabled: true,
+      capabilities: ['workspace.exec'],
+    }),
+  ];
+  const broker = createBroker({
+    repository: {
+      findWorkerById: (id: string) => Promise.resolve(rows.find((row) => row.id === id) ?? null),
+    },
+    ownerStatusLookup: (id: string) => Promise.resolve(id === ownerId ? ownerStatus : 'active'),
+  });
+  const sockets = rows.map((worker) => {
+    const ws = socketDouble({
+      workerId: worker.id,
+      worker,
+      readyState: Number(WebSocket.OPEN),
+      closeCode: 0,
+      sent: [] as string[],
+      send(data: string) {
+        this.sent.push(data);
+      },
+      on() {},
+      close(code: number) {
+        this.closeCode = code;
+        this.readyState = WebSocket.CLOSED;
+      },
+    });
+    broker.handleConnection(ws, requestDouble(worker));
+    return ws;
+  });
+  const pending = broker.dispatch(rows[0].id, 'workspace.exec', {}, { timeoutMs: 1000 });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(broker.pending.size, 1);
+
+  const userRecord = { id: ownerId, status: 'active', password_hash: 'fixture-only' };
+  const repo = {
+    findById: () => Promise.resolve(userRecord),
+    setStatus: (_id: string, status: string) => {
+      ownerStatus = status;
+      userRecord.status = status;
+      assert.equal(broker.isOnline(rows[0].id), true, 'revocation must follow persisted disable');
+      return Promise.resolve();
+    },
+  } as unknown as ConstructorParameters<typeof UserService>[0];
+  const userService = new UserService(repo, broker);
+  await userService.setStatus(ownerId, 'disabled');
+  await assert.rejects(
+    pending,
+    (error: unknown) =>
+      error instanceof Error && 'code' in error && error.code === 'WORKER_DISCONNECTED',
+  );
+  assert.equal(sockets[0].closeCode, 4003);
+  assert.equal(broker.isOnline(rows[0].id), false);
+  assert.equal(broker.pending.size, 0);
+  assert.equal(broker.isOnline(rows[1].id), true, "other owner's Worker remains online");
+  assert.equal(broker.isOnline(rows[2].id), true, 'admin-owned Worker remains online');
+  broker.close();
+});
+
+void test('a live WSS connection is evicted when an external owner status check fails closed', async () => {
+  const worker = fixtureWorker({
+    id: 'owned-background-check',
+    owner_user_id: 'fixture-owner-c',
+    enabled: true,
+    capabilities: ['workspace.exec', 'shell.attach'],
+  });
+  let status: string | null = 'active';
+  let lookupFails = false;
+  const broker = createBroker({
+    repository: { findWorkerById: () => Promise.resolve(worker) },
+    ownerStatusLookup: () =>
+      lookupFails
+        ? Promise.reject(new Error('temporary fixture DB outage'))
+        : Promise.resolve(status),
+  });
+  function makeSocket() {
+    return socketDouble({
+      workerId: worker.id,
+      worker,
+      readyState: Number(WebSocket.OPEN),
+      closeCode: 0,
+      jobsSent: 0,
+      on() {},
+      send(data: string) {
+        const parsed = JSON.parse(data) as { type?: string };
+        if (parsed.type === 'job') this.jobsSent++;
+      },
+      close(code: number) {
+        this.closeCode = code;
+        this.readyState = WebSocket.CLOSED;
+      },
+    });
+  }
+  const first = makeSocket();
+  broker.handleConnection(first, requestDouble(worker));
+  status = 'disabled'; // Another instance updated the DB, bypassing UserService.
+  await broker.revalidateOwners();
+  assert.equal(first.closeCode, 4003);
+  assert.equal(broker.isOnline(worker.id), false);
+
+  const second = makeSocket();
+  broker.handleConnection(second, requestDouble(worker));
+  await assert.rejects(
+    broker.dispatch(worker.id, 'workspace.exec', {}, { timeoutMs: 100 }),
+    (error: unknown) =>
+      error instanceof Error && 'code' in error && error.code === 'WORKER_OWNER_DISABLED',
+  );
+  assert.equal(second.jobsSent, 0, 'no operation can start under a disabled owner');
+
+  status = 'active';
+  lookupFails = true;
+  const third = makeSocket();
+  broker.handleConnection(third, requestDouble(worker));
+  await assert.rejects(
+    broker.openStream(worker.id, 'shell.attach', {}),
+    (error: unknown) =>
+      error instanceof Error && 'code' in error && error.code === 'WORKER_OWNER_UNAVAILABLE',
+  );
+  assert.equal(third.closeCode, 4003, 'unavailable owner DB must not leave a live socket');
+  assert.equal(broker.streams.size, 0);
+  broker.close();
+});
+
+void test('external Worker disable, removal, reassignment and storage errors revoke live sockets', async () => {
+  const identity = fixtureWorker({
+    id: 'fixture-external-identity',
+    owner_user_id: 'owner-original',
+    enabled: true,
+    capabilities: ['workspace.exec'],
+  });
+  for (const scenario of [
+    { name: 'unchanged', state: 'active', closeCode: 0, closeReason: '' },
+    { name: 'disabled', state: 'disabled', closeCode: 4003, closeReason: 'worker-disabled' },
+    { name: 'removed', state: 'removed', closeCode: 4004, closeReason: 'worker-removed' },
+    {
+      name: 'capability-revoked',
+      state: 'capability-revoked',
+      closeCode: 4003,
+      closeReason: 'worker-capability-revoked',
+    },
+    { name: 'capability-added', state: 'capability-added', closeCode: 0, closeReason: '' },
+    {
+      name: 'reassigned',
+      state: 'reassigned',
+      closeCode: 4003,
+      closeReason: 'worker-identity-changed',
+    },
+    {
+      name: 'key-rotated',
+      state: 'key-rotated',
+      closeCode: 4003,
+      closeReason: 'worker-identity-changed',
+    },
+    {
+      name: 'database-unavailable',
+      state: 'unavailable',
+      closeCode: 4003,
+      closeReason: 'worker-status-unavailable',
+    },
+  ] as const) {
+    let current: WorkerRow | null = identity;
+    if (scenario.state === 'disabled') current = { ...identity, enabled: false };
+    if (scenario.state === 'removed') current = null;
+    if (scenario.state === 'reassigned') current = { ...identity, owner_user_id: 'new-owner' };
+    if (scenario.state === 'key-rotated') current = { ...identity, public_key: 'rotated-key' };
+    if (scenario.state === 'capability-revoked') current = { ...identity, capabilities: [] };
+    if (scenario.state === 'capability-added')
+      current = { ...identity, capabilities: ['workspace.exec', 'file.read'] };
+    const broker = createBroker({
+      repository: {
+        findWorkerById: () =>
+          scenario.state === 'unavailable'
+            ? Promise.reject(new Error('fixture database unavailable'))
+            : Promise.resolve(current),
+      },
+    });
+    const ws = socketDouble({
+      workerId: identity.id,
+      worker: identity,
+      readyState: Number(WebSocket.OPEN),
+      closeCode: 0,
+      closeReason: '',
+      on() {},
+      send() {},
+      close(code: number, reason: string) {
+        this.closeCode = code;
+        this.closeReason = reason;
+        this.readyState = WebSocket.CLOSED;
+      },
+    });
+    broker.handleConnection(ws, requestDouble(identity));
+    await broker.revalidateWorkerIdentities();
+    assert.equal(ws.closeCode, scenario.closeCode, scenario.name);
+    assert.equal(ws.closeReason, scenario.closeReason, scenario.name);
+    assert.equal(
+      broker.isOnline(identity.id),
+      scenario.state === 'active' || scenario.state === 'capability-added',
+      scenario.name,
+    );
+    if (scenario.state === 'capability-added') {
+      assert.deepEqual(ws.authorizedCapabilities, ['workspace.exec'], 'new grants need reconnect');
+    }
+    broker.close();
+  }
+});
+
+void test('fresh dispatch and stream reject sessions whose persisted identity or grants changed', async () => {
+  const original = fixtureWorker({
+    id: 'fixture-stale-session',
+    owner_user_id: 'owner-a',
+    public_key: 'test-key-a',
+    enabled: true,
+    capabilities: ['workspace.exec', 'shell.attach'],
+  });
+  for (const { label, current, reason } of [
+    {
+      label: 'owner-reassigned',
+      current: { ...original, owner_user_id: 'owner-b' },
+      reason: 'worker-identity-changed',
+    },
+    {
+      label: 'public-key-rotated',
+      current: { ...original, public_key: 'test-key-b' },
+      reason: 'worker-identity-changed',
+    },
+    {
+      label: 'capability-revoked',
+      current: { ...original, capabilities: ['workspace.exec'] },
+      reason: 'worker-capability-revoked',
+    },
+  ]) {
+    for (const operation of ['dispatch', 'stream'] as const) {
+      const broker = createBroker({
+        repository: { findWorkerById: () => Promise.resolve(current) },
+      });
+      const sent: string[] = [];
+      const ws = socketDouble({
+        workerId: original.id,
+        worker: original,
+        readyState: Number(WebSocket.OPEN),
+        closeCode: 0,
+        closeReason: '',
+        on() {},
+        send(raw: string) {
+          if ((JSON.parse(raw) as { type?: string }).type !== 'connected') sent.push(raw);
+        },
+        close(code: number, text: string) {
+          this.closeCode = code;
+          this.closeReason = text;
+          this.readyState = WebSocket.CLOSED;
+        },
+      });
+      broker.handleConnection(ws, requestDouble(original));
+      await assert.rejects(
+        operation === 'dispatch'
+          ? broker.dispatch(original.id, 'workspace.exec', {})
+          : broker.openStream(original.id, 'shell.attach', {}),
+        (error: unknown) =>
+          error instanceof Error && 'code' in error && error.code === 'WORKER_SESSION_REVOKED',
+        `${label} ${operation}`,
+      );
+      assert.equal(ws.closeCode, 4003, `${label} ${operation}`);
+      assert.equal(ws.closeReason, reason, `${label} ${operation}`);
+      assert.equal(broker.isOnline(original.id), false);
+      assert.deepEqual(sent, [], 'stale credentials cannot send jobs or streams');
+      broker.close();
+    }
+  }
+});
+
+void test('dispatch and stream immediately revoke disabled, removed or unverifiable Worker identity', async () => {
+  const initial = fixtureWorker({
+    id: 'fixture-revoked-on-dispatch',
+    enabled: true,
+    capabilities: ['workspace.exec', 'shell.attach'],
+  });
+  for (const scenario of [
+    {
+      name: 'disabled',
+      state: 'disabled',
+      code: 'WORKER_DISABLED',
+      closeCode: 4003,
+      reason: 'worker-disabled',
+    },
+    {
+      name: 'removed',
+      state: 'removed',
+      code: 'WORKER_NOT_FOUND',
+      closeCode: 4004,
+      reason: 'worker-removed',
+    },
+    {
+      name: 'database unavailable',
+      state: 'unavailable',
+      code: 'WORKER_STATUS_UNAVAILABLE',
+      closeCode: 4003,
+      reason: 'worker-status-unavailable',
+    },
+  ] as const) {
+    for (const operation of ['dispatch', 'stream'] as const) {
+      const broker = createBroker({
+        repository: {
+          findWorkerById: () =>
+            scenario.state === 'unavailable'
+              ? Promise.reject(new Error('fixture unavailable'))
+              : Promise.resolve(
+                  scenario.state === 'removed' ? null : { ...initial, enabled: false },
+                ),
+        },
+      });
+      const sent: string[] = [];
+      const ws = socketDouble({
+        workerId: initial.id,
+        worker: initial,
+        readyState: Number(WebSocket.OPEN),
+        closeCode: 0,
+        closeReason: '',
+        on() {},
+        send(raw: string) {
+          const message = JSON.parse(raw) as { type?: string };
+          if (message.type !== 'connected') sent.push(raw);
+        },
+        close(code: number, reason: string) {
+          this.closeCode = code;
+          this.closeReason = reason;
+          this.readyState = WebSocket.CLOSED;
+        },
+      });
+      broker.handleConnection(ws, requestDouble(initial));
+      await assert.rejects(
+        operation === 'dispatch'
+          ? broker.dispatch(initial.id, 'workspace.exec', {})
+          : broker.openStream(initial.id, 'shell.attach', {}),
+        (error: unknown) =>
+          error instanceof Error && 'code' in error && error.code === scenario.code,
+        `${scenario.name}: ${operation}`,
+      );
+      assert.equal(ws.closeCode, scenario.closeCode);
+      assert.equal(ws.closeReason, scenario.reason);
+      assert.equal(broker.isOnline(initial.id), false);
+      assert.deepEqual(sent, [], 'no request can reach an unauthorized Worker');
+      broker.close();
+    }
+  }
+});
+
+void test('late Worker identity lookup failure does not revoke a replacement socket', async () => {
+  const worker = fixtureWorker({
+    id: 'fixture-replaced-during-identity-read',
+    enabled: true,
+    capabilities: ['workspace.exec'],
+  });
+  let rejectLookup: ((reason: Error) => void) | undefined;
+  const broker = createBroker({
+    repository: {
+      findWorkerById: () =>
+        new Promise<WorkerRow | null>((_resolve, reject) => {
+          rejectLookup = reject;
+        }),
+    },
+  });
+  const makeSocket = () =>
+    socketDouble({
+      workerId: worker.id,
+      worker,
+      readyState: Number(WebSocket.OPEN),
+      closeCode: 0,
+      on() {},
+      send() {},
+      close(code: number) {
+        this.closeCode = code;
+        this.readyState = WebSocket.CLOSED;
+      },
+    });
+  const first = makeSocket();
+  broker.handleConnection(first, requestDouble(worker));
+  const pending = broker.dispatch(worker.id, 'workspace.exec', {});
+  assert.ok(rejectLookup);
+  const second = makeSocket();
+  broker.handleConnection(second, requestDouble(worker));
+  rejectLookup(new Error('fixture database disconnected'));
+  await assert.rejects(
+    pending,
+    (error: unknown) =>
+      error instanceof Error && 'code' in error && error.code === 'WORKER_STATUS_UNAVAILABLE',
+  );
+  assert.equal(second.closeCode, 0, 'late error must not close new authenticated session');
+  assert.equal(broker.isOnline(worker.id), true);
+  broker.close();
+});
+
+void test('delayed external identity check cannot close a replacement Worker socket', async () => {
+  const worker = fixtureWorker({
+    id: 'fixture-identity-socket-race',
+    enabled: true,
+    capabilities: ['workspace.exec'],
+  });
+  let releaseLookup: ((value: WorkerRow | null) => void) | undefined;
+  const broker = createBroker({
+    repository: {
+      findWorkerById: () =>
+        new Promise<WorkerRow | null>((resolve) => {
+          releaseLookup = resolve;
+        }),
+    },
+  });
+  const makeSocket = () =>
+    socketDouble({
+      workerId: worker.id,
+      worker,
+      readyState: Number(WebSocket.OPEN),
+      closeCode: 0,
+      on() {},
+      send() {},
+      close(code: number) {
+        this.closeCode = code;
+        this.readyState = WebSocket.CLOSED;
+      },
+    });
+  const oldSocket = makeSocket();
+  broker.handleConnection(oldSocket, requestDouble(worker));
+  const checking = broker.revalidateWorkerIdentities();
+  assert.ok(releaseLookup);
+  const currentSocket = makeSocket();
+  broker.handleConnection(currentSocket, requestDouble(worker));
+  releaseLookup(null);
+  await checking;
+  assert.equal(
+    currentSocket.closeCode,
+    0,
+    'late status from old socket must not revoke new socket',
+  );
+  assert.equal(broker.isOnline(worker.id), true);
   broker.close();
 });
 

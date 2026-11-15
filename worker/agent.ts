@@ -167,11 +167,6 @@ function requireConfig() {
   }
   if (!workerName || workerName.length > 100)
     throw fail('WORKER_NAME_INVALID', 'BOT_REPORT_WORKER_NAME must be 1-100 characters.');
-  if (!allowedRoots.length)
-    throw fail(
-      'WORKER_ALLOWED_ROOTS_REQUIRED',
-      'BOT_REPORT_WORKER_ALLOWED_ROOTS must contain at least one local workspace root.',
-    );
 }
 
 function ensureStateDir() {
@@ -234,6 +229,10 @@ function assertAllowedPath(input: unknown, { mustExist = false }: { mustExist?: 
   if (typeof input !== 'string' || !input.trim() || /[\x00-\x1f\x7f]/.test(input))
     throw fail('WORKER_PATH_INVALID', 'Path is invalid.');
   const resolved = path.resolve(input);
+  if (!allowedRoots.length) {
+    if (mustExist) fs.statSync(resolved);
+    return resolved;
+  }
   if (!allowedRoots.some((root) => isWithinRoot(resolved, root)))
     throw fail('WORKER_PATH_DENIED', `Path '${resolved}' is outside worker allowed roots.`);
   let verified;
@@ -275,7 +274,7 @@ function runShell(
   { cwd, timeoutMs = 30_000, maxOutputBytes = 1024 * 1024 }: RunShellOptions = {},
 ) {
   requireShell();
-  const safeCwd = assertAllowedPath(cwd || allowedRoots[0], { mustExist: true });
+  const safeCwd = assertAllowedPath(cwd || allowedRoots[0] || process.cwd(), { mustExist: true });
   const timeout = Math.max(100, Math.min(Number(timeoutMs) || 30_000, maxJobMs));
   return new Promise<{
     exit_code: number;
@@ -544,7 +543,9 @@ async function executeOperation(
     case 'process.start': {
       rejectRunAs(payload.run_as);
       requireShell();
-      const cwd = assertAllowedPath(payload.cwd || allowedRoots[0], { mustExist: true });
+      const cwd = assertAllowedPath(payload.cwd || allowedRoots[0] || process.cwd(), {
+        mustExist: true,
+      });
       const command = String(payload.command || '');
       if (!command.trim() || command.length > 32_000 || command.includes('\0'))
         throw fail('INVALID_COMMAND', 'Command is invalid.');

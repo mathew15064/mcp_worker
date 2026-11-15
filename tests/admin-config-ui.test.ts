@@ -286,6 +286,16 @@ void test('Admin manages Worker execution targets from the Workers page', async 
   assert.match(html, /UI-Admin-Worker/);
   assert.match(html, /id="worker-profile-modal"/);
   assert.match(html, /New Execution Target/);
+  assert.match(html, /Signed Worker release approval pending/);
+  assert.doesNotMatch(html, /Generate Enrollment Token/);
+  const pendingEnrollment = await fetch(`${baseUrl}/admin/workers/enrollment`, {
+    method: 'POST',
+    redirect: 'manual',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', cookie },
+    body: new URLSearchParams({ _csrf: csrf, ttl_seconds: '600' }).toString(),
+  });
+  assert.equal(pendingEnrollment.status, 503);
+  assert.equal(pendingEnrollment.headers.get('cache-control'), 'no-store');
   assert.doesNotMatch(html, /name="host"|name="port"|name="username"|name="password"/);
   assert.doesNotMatch(html, /Attach Shell|Test Shell|SSH Profiles/);
 });

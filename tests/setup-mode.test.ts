@@ -12,6 +12,7 @@ import store from '../src/db/bootstrapConfigStore';
 import databaseManager from '../src/db/databaseManager';
 import runtimeSettings from '../src/services/runtimeSettingsService';
 import app from '../src/app';
+import { railwayWorkerDistributionBlocked } from '../src/services/workerReleaseGate';
 import helper from './helper';
 const { setupEnv, cleanup } = helper;
 
@@ -75,7 +76,14 @@ void test('fresh install stays administrable without a database and blocks data 
   assert.equal(onboarding.status, 200);
   assert.equal(onboarding.headers.get('cache-control'), 'no-store');
   const guide = await onboarding.text();
-  assert.match(guide, /Next step: 2/);
+  if (railwayWorkerDistributionBlocked()) {
+    assert.match(guide, /data-onboarding-status="blocked"/);
+    assert.match(guide, /Blocked: signed Worker release not approved/);
+  } else {
+    // Historical source fixture while T1's fail-closed gate is on another
+    // isolated branch; the integrated source must take the blocked path.
+    assert.match(guide, /Next step: 2/);
+  }
   assert.match(guide, /UNCONFIGURED/);
   assert.match(guide, /data-onboarding-step="2" data-complete="false"/);
   assert.doesNotMatch(guide, /br_sec_|br_enroll_/);

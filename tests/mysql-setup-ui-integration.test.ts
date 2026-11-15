@@ -191,14 +191,19 @@ void test(
       headers: { 'content-type': 'application/x-www-form-urlencoded', cookie },
       body: new URLSearchParams({ _csrf: csrf, ttl_seconds: '600' }).toString(),
     });
-    assert.equal(enrollmentResponse.status, 302);
-    assert.equal(enrollmentResponse.headers.get('location'), '/admin/workers');
+    assert.equal(enrollmentResponse.status, 503, 'Unapproved signed release must block enrollment');
+    assert.equal(enrollmentResponse.headers.get('cache-control'), 'no-store');
     const workersWithToken = await fetch(`${base}/admin/workers`, { headers: { cookie } });
     assert.equal(workersWithToken.status, 200);
     const workersHtml = await workersWithToken.text();
-    const enrollmentToken = workersHtml.match(/br_enroll_[A-Za-z0-9_-]+/)?.[0];
-    assert.ok(enrollmentToken);
+    assert.match(workersHtml, /Signed Worker release approval pending/);
+    assert.doesNotMatch(workersHtml, /br_enroll_[A-Za-z0-9_-]+/);
     assert.match(workersHtml, /Outbound execution agents/);
+
+    // This disposable MySQL fixture creates its own internal token so the
+    // repository/Worker UI flow can be tested without enabling public issuance.
+    const workerRepo = (await import('../src/repositories/workerRepository.js')).default;
+    const enrollmentToken = (await workerRepo.createEnrollmentToken({ ttlSeconds: 600 })).token;
 
     const pair = crypto.generateKeyPairSync('ed25519');
     const enrolled = await fetch(`${base}/worker/v1/enroll`, {

@@ -79,6 +79,24 @@ class McpOAuthService {
     return crypto.createHash('sha256').update(String(data)).digest('hex');
   }
 
+  isSafeRedirectUri(uri: string) {
+    try {
+      // Check the original authority/fragment as URL normalization can erase
+      // an empty userinfo or fragment marker.
+      const authority = /^https?:\/\/([^/?#]*)/i.exec(uri)?.[1];
+      if (!authority || authority.includes('@') || uri.includes('#')) return false;
+      const parsed = new URL(uri);
+      const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname);
+      return (
+        (parsed.protocol === 'https:' || (parsed.protocol === 'http:' && loopback)) &&
+        !parsed.username &&
+        !parsed.password
+      );
+    } catch {
+      return false;
+    }
+  }
+
   timingSafeCompare(a: unknown, b: unknown) {
     if (typeof a !== 'string' || typeof b !== 'string') return false;
     const bufA = Buffer.from(a);
@@ -147,19 +165,10 @@ class McpOAuthService {
       );
     }
     for (const uri of cleanedUris) {
-      try {
-        const parsed = new URL(uri);
-        if (
-          parsed.protocol !== 'https:' &&
-          parsed.hostname !== 'localhost' &&
-          parsed.hostname !== '127.0.0.1'
-        ) {
-          throw new Error('Redirect URI must use HTTPS (or localhost for local development)');
-        }
-      } catch (err) {
+      if (!this.isSafeRedirectUri(uri)) {
         throw new OAuthError(
           'invalid_client_metadata',
-          `Invalid redirect URI '${uri}': ${err instanceof Error ? err.message : String(err)}`,
+          `Invalid redirect URI '${uri}': use HTTPS (or HTTP loopback), without userinfo or fragments.`,
         );
       }
     }
@@ -167,7 +176,7 @@ class McpOAuthService {
     const scopes = Array.isArray(allowedScopes) ? allowedScopes : [allowedScopes];
     const cleanedScopes = scopes.filter((s) => this.config.supportedScopes.includes(s));
     if (cleanedScopes.length === 0) {
-      cleanedScopes.push('bot_report.read', 'bot_report.terminal');
+      cleanedScopes.push('bot_report.read');
     }
 
     const rawClientSecret = `br_sec_${crypto.randomBytes(32).toString('base64url')}`;
@@ -274,8 +283,8 @@ class McpOAuthService {
     if (!redirectUri) {
       throw new OAuthError('invalid_request', 'Missing required parameter: redirect_uri');
     }
-    if (!client.redirect_uris.includes(redirectUri)) {
-      throw new OAuthError('invalid_request', `redirect_uri does not match client allowlist.`);
+    if (!this.isSafeRedirectUri(redirectUri) || !client.redirect_uris.includes(redirectUri)) {
+      throw new OAuthError('invalid_request', 'redirect_uri is unsafe or not allowlisted.');
     }
 
     if (responseType !== 'code') {
@@ -294,6 +303,9 @@ class McpOAuthService {
         `code_challenge_method must be 'S256'. 'plain' is forbidden.`,
       );
     }
+    if (!/^[A-Za-z0-9_-]{43}$/.test(codeChallenge)) {
+      throw new OAuthError('invalid_request', 'Invalid PKCE S256 code_challenge.');
+    }
 
     const canonicalResource = this.config.resourceUrl;
     if (!resource) {
@@ -311,7 +323,7 @@ class McpOAuthService {
       requestedScopes = scope.trim().split(/\s+/).filter(Boolean);
     }
     if (requestedScopes.length === 0) {
-      requestedScopes = ['bot_report.read', 'bot_report.terminal'];
+      requestedScopes = ['bot_report.read'];
     }
 
     const allowedScopes = requestedScopes.filter((s) => client.allowed_scopes.includes(s));
@@ -593,19 +605,31 @@ class McpOAuthService {
 
     const tokenHash = this.hash(token);
 
+    // The storage-side UPDATE must include client_id. A lookup followed by
+    // hash-only mutation is not an authorization boundary (TOCTOU), and an
+    // unknown or omitted hint must never revoke another client's token.
+    // This port is provided by T4's exclusive-owned repository implementation.
+    type ClientBoundRevokePort = {
+      revokeAccessTokenForClient: (hash: string, ownerClientId: string) => Promise<unknown>;
+      revokeRefreshTokenForClient: (hash: string, ownerClientId: string) => Promise<unknown>;
+    };
+    const scoped = this.repo as OAuthRepositoryContract & Partial<ClientBoundRevokePort>;
+    if (
+      typeof scoped.revokeAccessTokenForClient !== 'function' ||
+      typeof scoped.revokeRefreshTokenForClient !== 'function'
+    ) {
+      // Fail closed if the corresponding T4 repository patch is missing.
+      throw new OAuthError('server_error', 'Client-scoped token revocation is unavailable.', 503);
+    }
+
     if (tokenTypeHint === 'refresh_token') {
-      const rf = await this.repo.findRefreshTokenByHash(tokenHash);
-      if (rf && rf.client_id === clientId) {
-        await this.repo.revokeRefreshToken(tokenHash);
-      }
+      await scoped.revokeRefreshTokenForClient(tokenHash, clientId);
     } else if (tokenTypeHint === 'access_token') {
-      const at = await this.repo.findAccessTokenByHash(tokenHash);
-      if (at && at.client_id === clientId) {
-        await this.repo.revokeAccessToken(tokenHash);
-      }
+      await scoped.revokeAccessTokenForClient(tokenHash, clientId);
     } else {
-      await this.repo.revokeAccessToken(tokenHash);
-      await this.repo.revokeRefreshToken(tokenHash);
+      // RFC 7009: an unknown hint is not proof of token type.
+      await scoped.revokeAccessTokenForClient(tokenHash, clientId);
+      await scoped.revokeRefreshTokenForClient(tokenHash, clientId);
     }
 
     return true;

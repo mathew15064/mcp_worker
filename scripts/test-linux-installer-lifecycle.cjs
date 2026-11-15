@@ -11,12 +11,16 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
+// Reuse the production installer generator, but inject only ephemeral test trust.
+// This does not change or approve the fail-closed release distribution routes.
+const { installerScript } = require('../dist/src/routes/workerRoutes');
+
 async function execute(command, args, opts = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { ...opts, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     let err = '';
-    const timer = setTimeout(() => child.kill('SIGKILL'), 60000);
+    const timer = setTimeout(() => child.kill('SIGKILL'), opts.timeoutMs || 60000);
     child.stdout.on('data', chunk => { out += chunk.toString(); });
     child.stderr.on('data', chunk => { err += chunk.toString(); });
     child.once('error', error => { clearTimeout(timer); reject(error); });
@@ -34,10 +38,8 @@ function fingerprint(data) {
 async function main() {
   if (process.platform !== 'linux' || process.arch !== 'x64')
     throw new Error('Only supported on native Linux x64');
-  const origin = new URL(process.env.BOT_REPORT_LIFECYCLE_TEST_ORIGIN || 'http://127.0.0.1:13337');
-  if (origin.hostname !== '127.0.0.1' || origin.protocol !== 'http:' ||
-      origin.pathname !== '/' || origin.search || origin.hash)
-    throw new Error('Refusing non-loopback or unexpected source origin');
+  if (process.env.BOT_REPORT_LIFECYCLE_TEST_ORIGIN)
+    throw new Error('External staging origin is no longer used; this fixture serves its own test-only loopback release');
 
   const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ts63-linux-worker-lifecycle-'));
   const uid = process.getuid() === 0 ? 65534 : process.getuid();
@@ -53,48 +55,88 @@ async function main() {
     fs.mkdirSync(home, { recursive: true });
     if (process.getuid() === 0) fs.chownSync(home, uid, gid);
 
-    const [installerResponse, binaryResponse] = await Promise.all([
-      fetch(new URL('/worker/install-linux.sh', origin)),
-      fetch(new URL('/worker/dist/bot-report-worker-linux-amd64', origin)),
-    ]);
-    assert.equal(installerResponse.status, 200, 'installer source not available');
-    assert.equal(binaryResponse.status, 200, 'worker binary not available');
-    const template = await installerResponse.text();
-    const binaryA = Buffer.from(await binaryResponse.arrayBuffer());
-    assert.match(template, /^BASE_URL='http:\/\/127\.0\.0\.1:[0-9]+'$/m);
-    assert.ok(binaryA.length > 100000, 'Unexpected worker binary size');
-    // Trailing ELF padding produces a *different*, still-executable test-only
-    // build without contacting a real release repository or changing binaries.
-    const binaryB = Buffer.concat([binaryA, Buffer.from('\nTS63_FIXTURE_ONLY_DISTINCT_ELF\n')]);
-    assert.notEqual(fingerprint(binaryA), fingerprint(binaryB));
+    // Produce two real, identity-distinct, native Go Worker binaries with no
+    // network access or signing material outside this disposable test root.
+    const commits = {
+      A: '0123456789abcdef0123456789abcdef01234567',
+      B: '1122334455667788990011223344556677889900',
+    };
+    const versions = { A: '2.3.4', B: '2.3.5' };
+    const binaries = {};
+    const goBin = process.env.GO_BIN || 'go';
+    const goVersion = await execute(goBin, ['version'], { timeoutMs: 15000 });
+    assert.equal(goVersion.code, 0, 'offline Go toolchain is required');
+    assert.match(goVersion.out, /go1[.]24[.]/, 'test-only signed fixture requires Go 1.24');
+    for (const variantName of ['A', 'B']) {
+      const output = path.join(testRoot, 'fixture-worker-' + variantName);
+      const build = await execute(goBin, [
+        'build', '-buildvcs=false', '-trimpath',
+        '-ldflags', '-s -w -X main.version=' + versions[variantName] +
+          ' -X main.commit=' + commits[variantName],
+        '-o', output, '.',
+      ], {
+        cwd: path.resolve(__dirname, '../worker-go'),
+        env: { ...process.env, GOTOOLCHAIN: 'local', GOPROXY: 'off', CGO_ENABLED: '0' },
+        timeoutMs: 120000,
+      });
+      assert.equal(build.code, 0, 'offline test-only Go ' + variantName + ': ' + build.err.slice(0, 1000));
+      binaries[variantName] = fs.readFileSync(output);
+      assert.ok(binaries[variantName].length > 100000, 'unexpected native Worker binary size');
+    }
+    const binaryA = binaries.A;
+    const binaryB = binaries.B;
+    assert.notEqual(fingerprint(binaryA), fingerprint(binaryB), 'upgrade fixture must actually differ');
 
-    // Exercise the exact opt-in verified-download path with an ephemeral key.
-    // No release signing key or signing material is persisted or published.
+    // Generate test-only SPKI, sign the canonical nine-entry manifest, and pin
+    // its independent SHA-256 DER fingerprint in the generated shell installer.
     const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
     const publicKeyBase64 = Buffer.from(publicKey.export({ type: 'spki', format: 'pem' })).toString('base64');
+    const publicKeySha256 = fingerprint(publicKey.export({ type: 'spki', format: 'der' }));
+    const files = [
+      'bot-report-worker-darwin-amd64',
+      'bot-report-worker-darwin-arm64',
+      'bot-report-worker-linux-386',
+      'bot-report-worker-linux-amd64',
+      'bot-report-worker-linux-arm64',
+      'bot-report-worker-linux-armv7',
+      'bot-report-worker-windows-amd64.exe',
+      'bot-report-worker-windows-arm64.exe',
+      'WORKER_RELEASE',
+    ];
     let variant = 'A';
     let badChecksum = false;
     let badSignature = false;
     let missingSignature = false;
     let tamperedManifest = false;
     let releaseVersionOverride = '';
-    function releaseVersion() { return releaseVersionOverride || (variant === 'A' ? '2.3.4' : '2.3.5'); }
-    function releaseCommit() { return variant === 'A' ? '0123456789ab' : '112233445566'; }
-    function metadata() { return 'version=' + releaseVersion() + '\ncommit=' + releaseCommit() + '\n'; }
-    function manifest() {
-      const file = variant === 'A' ? binaryA : binaryB;
-      return (badChecksum ? '0'.repeat(64) : fingerprint(file)) +
-        '  bot-report-worker-linux-amd64\n' +
-        fingerprint(metadata()) + '  WORKER_RELEASE\n';
+    function releaseVersion() { return versions[variant]; }
+    function releaseCommit() { return commits[variant]; }
+    function metadata() {
+      return 'version=' + (releaseVersionOverride || releaseVersion()) +
+        '\ncommit=' + releaseCommit() + '\n';
     }
+    function manifest() {
+      const binary = binaries[variant];
+      return files.map(file => {
+        const data = file === 'WORKER_RELEASE' ? metadata()
+          : file === 'bot-report-worker-linux-amd64' ? binary
+          : 'test-only-placeholder:' + file;
+        const checksum = badChecksum && file === 'bot-report-worker-linux-amd64'
+          ? '0'.repeat(64) : fingerprint(data);
+        return checksum + '  ' + file + '\n';
+      }).join('');
+    }
+    assert.equal(manifest().trimEnd().split('\n').length, 9);
     server = http.createServer((req, res) => {
-      const file = variant === 'A' ? binaryA : binaryB;
+      const file = binaries[variant];
       if (req.url === '/worker/dist/bot-report-worker-linux-amd64') {
         res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
         res.end(file);
       } else if (req.url === '/worker/dist/SHA256SUMS') {
+        const sums = manifest();
+        const corrupted = sums[0] === 'f' ? 'e' : 'f';
         res.writeHead(200, { 'Content-Type': 'text/plain' });
-        res.end(tamperedManifest ? manifest().replace(/^./, 'f') : manifest());
+        res.end(tamperedManifest ? corrupted + sums.slice(1) : sums);
       } else if (req.url === '/worker/dist/WORKER_RELEASE') {
         res.writeHead(200, { 'Content-Type': 'text/plain' });
         res.end(metadata());
@@ -113,14 +155,17 @@ async function main() {
     });
     const localOrigin = 'http://127.0.0.1:' + server.address().port;
     const installer = path.join(testRoot, 'install-linux.sh');
-    function writeApprovedInstaller(keyBase64 = publicKeyBase64) {
-      const patched = template.replace(/^BASE_URL='[^']+'$/m, "BASE_URL='" + localOrigin + "'")
-        .replace(/^PINNED_VERSION=''$/m, "PINNED_VERSION='" + releaseVersion() + "'")
-        .replace(/^PINNED_COMMIT=''$/m, "PINNED_COMMIT='" + releaseCommit() + "'")
-        .replace(/^PINNED_PUBLIC_KEY_B64=''$/m, "PINNED_PUBLIC_KEY_B64='" + keyBase64 + "'");
-      assert.ok(patched.includes("BASE_URL='" + localOrigin + "'"));
-      assert.ok(patched.includes("PINNED_PUBLIC_KEY_B64='" + keyBase64 + "'"));
-      fs.writeFileSync(installer, patched, { mode: 0o644 });
+    function writeApprovedInstaller(keyBase64 = publicKeyBase64, keySha256 = publicKeySha256) {
+      const rendered = installerScript(localOrigin, {
+        version: releaseVersion(),
+        commit: releaseCommit(),
+        publicKeyBase64: keyBase64,
+        publicKeySha256: keySha256,
+      });
+      assert.match(rendered, /^PINNED_COMMIT='[0-9a-f]{40}'$/m);
+      assert.ok(rendered.includes("PINNED_PUBLIC_KEY_SHA256='" + keySha256 + "'"));
+      fs.writeFileSync(installer, rendered, { mode: 0o644 });
+      fs.chmodSync(installer, 0o644); // umask 077 in PC runner must not hide script from test UID
     }
     writeApprovedInstaller();
 
@@ -181,12 +226,23 @@ async function main() {
     console.log('PASS altered SHA256SUMS rejected');
 
     const mismatchedKey = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 }).publicKey;
-    writeApprovedInstaller(Buffer.from(mismatchedKey.export({ type: 'spki', format: 'pem' })).toString('base64'));
+    writeApprovedInstaller(
+      Buffer.from(mismatchedKey.export({ type: 'spki', format: 'pem' })).toString('base64'),
+      fingerprint(mismatchedKey.export({ type: 'spki', format: 'der' })),
+    );
     const wrongKey = await run(['sh', installer]);
     assert.notEqual(wrongKey.code, 0, 'Mismatched public key accepted');
     assert.equal(fingerprint(fs.readFileSync(current)), fingerprint(binaryA));
     writeApprovedInstaller();
     console.log('PASS wrong pinned public key rejected');
+
+    writeApprovedInstaller(publicKeyBase64, '0'.repeat(64));
+    const badSpki = await run(['sh', installer]);
+    assert.notEqual(badSpki.code, 0, 'Bad pinned SPKI fingerprint accepted');
+    assert.match(badSpki.err + badSpki.out, /fingerprint/i);
+    assert.equal(fingerprint(fs.readFileSync(current)), fingerprint(binaryA));
+    writeApprovedInstaller();
+    console.log('PASS mismatched pinned SPKI digest rejected');
 
     releaseVersionOverride = '9.9.9';
     const mismatchedVersion = await run(['sh', installer]);
@@ -241,7 +297,7 @@ async function main() {
     assert.ok(!fs.existsSync(state), 'Worker state not removed');
     assert.ok(!fs.existsSync(path.join(bin, 'systemtd')), 'CLI symlink not removed');
     assert.ok(!fs.existsSync(path.join(bin, 'bot-report-worker')), 'Legacy CLI symlink not removed');
-    console.log('PASS test data isolated to ' + path.basename(testRoot) + ' and cleaned up');
+    console.log('PASS native Linux test-only signed lifecycle with nine-entry manifest; no production signer or server used');
   } finally {
     if (server) await new Promise(resolve => server.close(resolve));
     fs.rmSync(testRoot, { recursive: true, force: true });

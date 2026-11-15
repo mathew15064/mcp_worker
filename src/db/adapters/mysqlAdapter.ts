@@ -177,6 +177,42 @@ export class MysqlAdapter implements DatabaseAdapter {
     }
   }
 
+  /**
+   * MySQL DDL auto-commits, so a transaction cannot protect migration ledger
+   * writes. Pin one connection and hold a server-side advisory lock across
+   * schema inspection, DDL and ledger recording, including startup races.
+   */
+  async withMigrationLock<T>(work: (adapter: MysqlAdapter) => Promise<T>): Promise<T> {
+    if (!isPool(this._db)) {
+      throw new Error('MySQL migrations require a dedicated pooled connection.');
+    }
+    const connection = await this._db.getConnection();
+    let locked = false;
+    try {
+      const [rows] = await connection.execute<mysql.RowDataPacket[]>(
+        'SELECT GET_LOCK(?, 30) AS acquired',
+        ['mcp_worker_schema_migrations'],
+      );
+      if (Number(rows[0]?.acquired) !== 1) {
+        throw Object.assign(new Error('Timed out waiting for the MySQL migration lock.'), {
+          code: 'MYSQL_MIGRATION_LOCK_UNAVAILABLE',
+        });
+      }
+      locked = true;
+      return await work(new MysqlAdapter(connection));
+    } finally {
+      if (locked) {
+        try {
+          await connection.execute('SELECT RELEASE_LOCK(?)', ['mcp_worker_schema_migrations']);
+        } catch {
+          // Dropping the connection releases the lock on disconnect.
+          connection.destroy();
+        }
+      }
+      connection.release();
+    }
+  }
+
   async close() {
     if (this._ownsPool && this._db?.end) await this._db.end();
   }

@@ -1,6 +1,22 @@
 # Railway one-click beta — owner GO / NO-GO checklist (T5)
 
-**Current decision: NO-GO for public launch or a claim of full readiness.** The pinned local base for this checklist is `ae588a1a56f2561ca2323457463e5b9e203de509` (2026-11-13). This is an owner approval worksheet, **not** permission to push, sign, deploy, spend, publish or accept OAuth grants for anyone. Local sandbox tests are not live deployment evidence.
+**Current decision: NO-GO for public release.** The combined T1–T5 code and security fixes are in the single PC checkout /root/mcpw_v200_full5_integration_test_20261114. Identify a release candidate by its actual reviewed Git HEAD/tree after source freeze; the older 48473a3 baseline and T5 handoff below are historical. On 2026-11-15, local pre-freeze verification passed Node 183/193 (0 failed; 10 environment skips), disposable MySQL 5/5, localhost OAuth/WSS/Go Worker 3/3, Chromium 16/16, typed quality/build, Go unit/race/vet and non-root recovery. Fresh npm audit found 0 production vulnerabilities and 9 moderate dev-tool advisories (0 high/critical); the preliminary source token-pattern scan found no matching candidate secrets. Clean-source OCI provenance, production signing, external HTTPS/ChatGPT, native OS and offsite recovery remain separate gates. Local sandbox tests are not public deployment evidence. Remote push, signing, spending, deployment and publication still require independent approval.
+
+## Earlier T5 PC coverage, 2026-11-14 (historical)
+
+An independently pinned T5 Wave3 local verification on 2026-11-14
+passed test-only signed Linux install/upgrade/tamper/downgrade cases;
+Node 22 quality/build, signed-release and Railway SQLite tests; cached
+Go 1.24 unit/race/vet; loopback Go/WSS and two Worker isolation; and
+15 real Chromium Playwright tests. Its **full QA summary is NO_GO,
+exit code 3**, because required MySQL, exact clean-source OCI builds,
+fresh npm audit/Trivy/SBOM, native platforms, off-platform recovery and
+live services were **NOT_TESTED**. A root-sensitive recovery subtest
+reported one TAP SKIP. Absent Chromium is a counted optional TAP SKIP,
+never substitute for mandatory Playwright acceptance. Historical
+GitHub CI/Trivy results on older source/images do not satisfy this
+current source's gates. See [Wave3 PC runbook](RELEASE_ENGINEERING.md)
+and [current checklist](RELEASE_CHECKLIST.md).
 
 ## GO gates — each requires explicit owner review
 
@@ -27,7 +43,7 @@ Record a reviewer, dated decision, immutable evidence link and **PASS / FAIL / N
 2. **Admin** — open the approved HTTPS domain, enter setup key *in* `/setup`, choose a different strong Admin password, sign in. Confirm Getting Started opens without SQL, SSH, Docker or hand editing `.env`.
 3. **Endpoint** — verify volume, canonical HTTPS issuer/discovery and certificate from an external network; copy `/mcp`. Browser same-origin discovery is *not* external connectivity evidence.
 4. **OAuth** — in ChatGPT capture its callback URI, create a client with only `bot_report.read` enabled, securely store the one-time ID/secret in the connector form; record explicit consent, denial/callback/PKCE failure tests.
-5. **Signed Worker** — while unsigned, expect 503 and STOP. Only with separately signed release approval, install on a personally controlled machine, generate a short-lived enrollment token, choose explicit allowed roots, connect outbound WSS and confirm an enabled online Worker profile. Do **not** grant terminal permissions for a read-only first call.
+5. **Signed Worker** — while unsigned, expect 503 and STOP. Only with separately signed release approval, install on a personally controlled machine, generate a short-lived enrollment token, use the owner-approved OS-account permissions (optional restricted roots), connect outbound WSS and confirm an enabled online Worker profile. Do **not** grant terminal permissions for a read-only first call.
 6. **ChatGPT** — connect using ChatGPT's own UI, explicitly approve the minimum scopes, invoke `runtime_info` with `{}`, match the authenticated Admin-owned audit event to the trial time/client, and check the actual ChatGPT connection status independently. Record success/failure and time spent by the pilot participant.
 
 ## Manual actions that cannot be removed safely

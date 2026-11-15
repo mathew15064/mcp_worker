@@ -8,14 +8,19 @@ command -v curl >/dev/null
 command -v node >/dev/null
 docker info >/dev/null
 
-image="${1:-mcp-worker-t3-local:$(git rev-parse --short=12 HEAD)}"
+image="${1:-mcp-worker-t5-local:$(git rev-parse --short=12 HEAD)}"
 if [[ "$#" -eq 0 ]]; then
-  docker build --progress=plain -f Dockerfile.railway \
-    --build-arg "BOT_REPORT_GIT_SHA=$(git rev-parse HEAD)" -t "$image" .
+  [[ "${T5_ALLOW_DOCKER_BUILD:-0}" == 1 ]] || { echo 'NOT_TESTED: explicit T5_ALLOW_DOCKER_BUILD=1 required; never pull images implicitly' >&2; exit 3; }
+  [[ -z "$(git status --porcelain)" ]] || { echo 'NOT_TESTED: OCI source must be clean/committed for exact provenance' >&2; exit 3; }
+  docker build --pull=false --network=none --progress=plain -f Dockerfile.railway \
+    --build-arg "BOT_REPORT_GIT_SHA=$(git rev-parse HEAD)" \
+    --build-arg "BOT_REPORT_TREE_SHA=$(git rev-parse HEAD^{tree})" \
+    --build-arg "BOT_REPORT_BUILD_TIME=$(git show -s --format=%cI HEAD)" -t "$image" .
   echo "DOCKER_BUILD_PASS image=$image"
 else
   docker image inspect "$image" >/dev/null
 fi
+bash scripts/verify-oci-image-local.sh "$image" railway
 
 prefix="mcp-t3-$(node -e "process.stdout.write(require('node:crypto').randomBytes(7).toString('hex'))")"
 container="$prefix-app"

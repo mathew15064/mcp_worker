@@ -47,8 +47,13 @@ public tag, GitHub Release, installer, binary, deployment or key creation.
   owner-reviewed link is **unauthorized replacement**, not rotation.
   Key compromise is a security incident: revoke distribution, investigate
   identity and artifacts, and obtain a separate owner-approved recovery plan.
-- Unix installer semantic versions are compared as exact decimal-component
-  strings, avoiding floating-point rounding of large version components.
+- Unix **and Windows** installer semantic versions are compared as exact
+  decimal-component strings, avoiding floating-point, JavaScript number, or
+  Windows `[version]` integer limits for large version components. The signer
+  and both installer implementations compare the **exact canonical
+  `WORKER_RELEASE` bytes** (`version=x.y.z\ncommit=<40-hex>\n`) including
+  LF endings and EOF; two visually equivalent lines with CRLF, missing final
+  newline, extra newline or trailing NUL are not accepted even when resigned.
   Manual rollback (even with a locally saved checksum) remains forbidden.
   Automatic restoration of the previous binary following failed start is
   operational recovery only; it does not authorize installation of an older
@@ -133,17 +138,15 @@ HTTP header, user input or self-signed manifest as authority to change roots.
 ## Read-only status contract for Admin/onboarding consumers (T5)
 
 Use `workerSignedReleaseReadiness()` for an immutable NO_GO contract,
-`WORKER_SIGNED_RELEASE_PENDING` and anticipated Railway HTTP 503;
+`WORKER_SIGNED_RELEASE_PENDING` and HTTP 503;
 use `railwayWorkerDistributionBlocked()` for route suppression. Both are
-exported from `src/services/workerReleaseGate.ts`. A `true` value is a hard **NO-GO** and must suppress public
-installation instructions; it is not an installer-token or signing API. On
-non-Railway local development this function can be `false` even when the
-shipped installer has empty release pins and refuses execution: consumers
-must **never** infer production approval or a verified signed artifact solely
-from `false`. The HTTP routes remain the authoritative boundary and emit
-503 / `WORKER_SIGNED_RELEASE_PENDING` on Railway until the separately
-approved source-controlled release and distribution change. No runtime
-environment variable authorizes a key, trust-root change, or public release.
+exported from `src/services/workerReleaseGate.ts`. The gate is **always true**
+until a separately approved source change, regardless of unset, local,
+Railway, or unrecognized `MCP_PLATFORM` values. Every `/worker/install*`
+and `/worker/dist/*` route responds 503 with `Cache-Control: no-store`.
+Do not infer approval from any runtime flag, HTTP HEAD response, local build,
+or connected Worker. No environment variable authorizes signing, a trust-root
+change, or public release.
 
 ## Verification and separation of duties
 
@@ -155,11 +158,16 @@ uses disposable in-process cryptographic fixtures on loopback, and deletes
 all temporary Go test binaries. It refuses to run if a signature already
 exists in `worker/bin` and never publishes a release.
 
-On the present **Linux/amd64 PC**, the shell installer lifecycle with a
-**test-only signed stub** and a separate temporary real Go binary identity
-check can be marked PASS after successful runs. Actual systemd service-mode
-installation and recovery require a privileged disposable Linux host before
-release; these are **NOT_TESTED** in this verifier.
+On the present **Linux/amd64 PC**, a shell installer lifecycle with a
+**test-only signed stub** and disposable synthetic `systemctl` and `id`
+commands exercises activation failure, sustained MainPID readiness failure,
+exact unit/binary/signed-state restoration, and idempotent retries **without**
+writing or controlling real systemd files. This is an **unprivileged
+simulation**, not native privileged systemd evidence. Actual service
+installation, sudo boundary, kernel process behavior, reboot and recovery
+require a disposable privileged Linux VM and remain **NOT_TESTED**.
+Windows PowerShell parsing and large-component semver need native Windows
+execution evidence; static source review is not a substitute.
 Cross-compiling macOS and Windows variants (when enabled) establishes only
 compilation, not native execution. Until actually exercised on those operating
 systems with local test evidence, macOS/Windows native installer and service
@@ -236,6 +244,17 @@ Railway /worker/install* and /worker/dist/* returning HTTP 503, preserve
 cryptographic evidence, notify operators and revoke affected endpoints.
 Never bypass with env flags, unsigned artifacts or unreviewed public keys.
 
+For a managed systemd upgrade, the installer captures the previous local and
+service-installed binaries, unit bytes, enabled/running state, CLI alias
+existence, prior rollback slot and signed identity/metadata records before
+mutation. It then stages the signed binary and new unit, performs
+daemon-reload/enable/start or restart, and requires a stable nonzero MainPID
+across repeated active checks when enrolled. A failed activation, readiness
+check or signed-state write triggers compensation restoring the captured
+files, records and prior running/enabled state; incomplete compensation is
+reported as critical and leaves recovery copies for the operator.
+This is an operational rollback of a failed transaction, **not** authorization
+to install an older signed release. Manual rollback remains forbidden.
 An automatic failed-start recovery may restore the _previous verified local_
 binary while retaining its old version, full commit, key fingerprint and
 manifest digest. Manual downgrade remains prohibited. To recover from a

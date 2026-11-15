@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import type { IncomingHttpHeaders } from 'node:http';
 import type { WorkerConnectRequest } from './workerProtocol';
 import workerRepository from '../repositories/workerRepository';
+import userRepository from '../repositories/userRepository';
 import type { WorkerIdentityRepositoryContract } from './contracts/repositoryContracts';
 const { workerError } = workerRepository;
 
@@ -36,16 +37,21 @@ function canonicalConnectMessage({ workerId, timestamp, nonce }: WorkerConnectRe
 
 class WorkerAuthService {
   repository: WorkerIdentityRepositoryContract;
+  ownerStatusLookup: (ownerUserId: string) => Promise<string | null>;
   now: () => number;
   seenNonces: Map<string, number>;
   constructor({
     repository = workerRepository,
+    ownerStatusLookup = async (ownerUserId: string) =>
+      (await userRepository.findById(ownerUserId))?.status ?? null,
     now = () => Date.now(),
   }: {
     repository?: WorkerIdentityRepositoryContract;
+    ownerStatusLookup?: (ownerUserId: string) => Promise<string | null>;
     now?: () => number;
   } = {}) {
     this.repository = repository;
+    this.ownerStatusLookup = ownerStatusLookup;
     this.now = now;
     this.seenNonces = new Map<string, number>();
   }
@@ -159,6 +165,25 @@ class WorkerAuthService {
     );
     if (!valid)
       throw workerError('WORKER_AUTH_INVALID', 'Worker signature verification failed.', 401);
+
+    // A valid Worker signature does not override its owning user's status.
+    // Admin-owned Workers (NULL owner_user_id) keep their existing semantics.
+    // Missing/disabled users and unavailable ownership storage fail closed.
+    if (worker.owner_user_id) {
+      let ownerStatus: string | null;
+      try {
+        ownerStatus = await this.ownerStatusLookup(worker.owner_user_id);
+      } catch {
+        throw workerError(
+          'WORKER_OWNER_UNAVAILABLE',
+          'Worker owner authorization is temporarily unavailable.',
+          503,
+        );
+      }
+      if (ownerStatus !== 'active') {
+        throw workerError('WORKER_OWNER_DISABLED', 'Worker owner is not active.', 403);
+      }
+    }
 
     this.seenNonces.set(replayKey, this.now() + MAX_CLOCK_SKEW_MS * 2);
     return worker;

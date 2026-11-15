@@ -22,9 +22,11 @@ import type { AddressInfo } from 'node:net';
 import { WebSocket } from 'ws';
 import workerBrokerModule from '../src/services/workerConnectionBroker';
 import workerAuthModule from '../src/services/workerAuthService';
+import userServiceModule from '../src/services/userService';
 
 const { WorkerConnectionBroker } = workerBrokerModule;
 const { WorkerAuthService, canonicalConnectMessage } = workerAuthModule;
+const { UserService } = userServiceModule;
 
 function certificate(root: string) {
   const key = path.join(root, 'loopback.key');
@@ -214,7 +216,10 @@ void test('loopback WSS signs identity, rejects forgery, enforces capacity, and 
   const probe = await broker.probeConnection(workerId, { timeoutMs: 1000 });
   assert.equal(probe.ok, true);
   socket.send(JSON.stringify({ type: 'heartbeat', capabilities: ['shell.inspect'] }));
-  await waitUntil(() => heartbeatCount > 0 && record.capabilities.length === 1);
+  await waitUntil(
+    () => heartbeatCount > 0 && broker.connections.get(workerId)?.worker?.capabilities.length === 1,
+  );
+  assert.deepEqual(record.capabilities, ['workspace.exec', 'shell.inspect']);
   await assert.rejects(
     () => broker.dispatch(workerId, 'workspace.exec', {}),
     codeIs('WORKER_CAPABILITY_DENIED'),
@@ -222,10 +227,18 @@ void test('loopback WSS signs identity, rejects forgery, enforces capacity, and 
   socket.send(
     JSON.stringify({
       type: 'heartbeat',
-      capabilities: ['shell.inspect', 'workspace.exec'],
+      capabilities: ['shell.inspect', 'workspace.exec', 'file.write'],
     }),
   );
-  await waitUntil(() => record.capabilities.includes('workspace.exec'));
+  await waitUntil(
+    () =>
+      broker.connections.get(workerId)?.worker?.capabilities.includes('workspace.exec') === true,
+  );
+  assert.deepEqual(record.capabilities, ['workspace.exec', 'shell.inspect']);
+  await assert.rejects(
+    () => broker.dispatch(workerId, 'file.write', {}),
+    codeIs('WORKER_CAPABILITY_DENIED'),
+  );
 
   autoReply = false;
   const interrupted = broker.dispatch(workerId, 'workspace.exec', { command: 'no-replay' });
@@ -272,6 +285,150 @@ void test('loopback WSS signs identity, rejects forgery, enforces capacity, and 
   assert.equal(broker.connections.size, 0);
 });
 
+void test('owner disable revokes an established signed loopback WSS connection and denies reconnect', async (t) => {
+  if (spawnSync('openssl', ['version'], { stdio: 'ignore' }).status !== 0) {
+    t.skip('OpenSSL is required for disposable local WSS TLS');
+    return;
+  }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'p1-owner-revocation-wss-'));
+  const tls = certificate(root);
+  const keys = crypto.generateKeyPairSync('ed25519');
+  const ownerId = 'fixture-owner-revoke';
+  const workerId = crypto.randomUUID();
+  let ownerStatus = 'active';
+  let ownerLookupUnavailable = false;
+  const record = {
+    id: workerId,
+    owner_user_id: ownerId,
+    name: 'Owned test Worker',
+    enabled: true,
+    public_key: keys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+    capabilities: ['workspace.exec'],
+  };
+  const workerRepo = {
+    findWorkerById: (id: string) => Promise.resolve(id === workerId ? record : null),
+    updateWorkerPresence: () => Promise.resolve(),
+    touchWorker: () => Promise.resolve(),
+    updateWorkerCapabilities: () => Promise.resolve(),
+  };
+  const ownerStatusLookup = (id: string) =>
+    ownerLookupUnavailable
+      ? Promise.reject(new Error('disposable owner DB unavailable'))
+      : Promise.resolve(id === ownerId ? ownerStatus : null);
+  const auth = new WorkerAuthService({
+    repository: workerRepo as never,
+    ownerStatusLookup,
+  });
+  const broker = new WorkerConnectionBroker({
+    repository: workerRepo as never,
+    authService: auth,
+    ownerStatusLookup,
+  });
+  const server = https.createServer({ key: tls.key, cert: tls.cert });
+  broker.attach(server);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const url =
+    'wss://127.0.0.1:' + String((server.address() as AddressInfo).port) + '/worker/v1/connect';
+  const clients: WebSocket[] = [];
+  t.after(async () => {
+    broker.close();
+    for (const client of clients) client.terminate();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  const headers = () => {
+    const timestamp = String(Date.now());
+    const nonce = crypto.randomBytes(18).toString('base64url');
+    return {
+      'x-br-worker-id': workerId,
+      'x-br-worker-timestamp': timestamp,
+      'x-br-worker-nonce': nonce,
+      'x-br-worker-signature': crypto
+        .sign(
+          null,
+          Buffer.from(canonicalConnectMessage({ workerId, timestamp, nonce })),
+          keys.privateKey,
+        )
+        .toString('base64'),
+    };
+  };
+  const client = new WebSocket(url, { ca: tls.cert, headers: headers() });
+  clients.push(client);
+  await once(client, 'open');
+  assert.equal(broker.isOnline(workerId), true);
+  const closeEvent = once(client, 'close');
+  const ownerUser = { id: ownerId, password_hash: 'fixture-only', status: ownerStatus };
+  const userRepo = {
+    findById: () => Promise.resolve(ownerUser),
+    setStatus: (_id: string, status: string) => {
+      ownerStatus = status;
+      ownerUser.status = status;
+      return Promise.resolve();
+    },
+  } as unknown as ConstructorParameters<typeof UserService>[0];
+  await new UserService(userRepo, broker).setStatus(ownerId, 'disabled');
+  const [code] = (await closeEvent) as [number, Buffer];
+  assert.equal(code, 4003);
+  assert.equal(broker.isOnline(workerId), false);
+
+  const rejected = new WebSocket(url, { ca: tls.cert, headers: headers() });
+  clients.push(rejected);
+  const httpResponse = await new Promise<{ status: number; code: string }>((resolve, reject) => {
+    rejected.on('unexpected-response', (_request, response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk: string) => {
+        body += chunk;
+      });
+      response.on('end', () => {
+        try {
+          resolve({
+            status: response.statusCode || 0,
+            code: (JSON.parse(body) as { code: string }).code,
+          });
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
+      response.on('error', reject);
+    });
+    rejected.on('error', reject);
+    rejected.on('open', () => reject(new Error('Disabled owner was reconnected')));
+  });
+  assert.deepEqual(httpResponse, { status: 403, code: 'WORKER_OWNER_DISABLED' });
+
+  ownerStatus = 'active';
+  ownerLookupUnavailable = true;
+  const unavailable = new WebSocket(url, { ca: tls.cert, headers: headers() });
+  clients.push(unavailable);
+  const unavailableResponse = await new Promise<{ status: number; code: string }>(
+    (resolve, reject) => {
+      unavailable.on('unexpected-response', (_request, response) => {
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk: string) => {
+          body += chunk;
+        });
+        response.on('end', () => {
+          try {
+            resolve({
+              status: response.statusCode || 0,
+              code: (JSON.parse(body) as { code: string }).code,
+            });
+          } catch (error) {
+            reject(error instanceof Error ? error : new Error(String(error)));
+          }
+        });
+        response.on('error', reject);
+      });
+      unavailable.on('error', reject);
+      unavailable.on('open', () => reject(new Error('Owner storage outage accepted reconnect')));
+    },
+  );
+  assert.deepEqual(unavailableResponse, { status: 503, code: 'WORKER_OWNER_UNAVAILABLE' });
+});
+
 /**
  * Full E2E is opt-in outside CI because it spawns a real local Worker.
  * Reproduce on a disposable Linux VM/container with Go >= 1.24:
@@ -296,9 +453,11 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 't04-railway-go-'));
   const volume = path.join(root, 'volume');
   const workspace = path.join(root, 'workspace');
+  const outsideWorkspace = path.join(root, 'outside-workspace');
   const workerHome = path.join(root, 'go-worker-identity');
   fs.mkdirSync(volume, { recursive: true });
   fs.mkdirSync(workspace, { recursive: true });
+  fs.mkdirSync(outsideWorkspace, { recursive: true });
   fs.mkdirSync(workerHome, { recursive: true, mode: 0o700 });
   const saved = new Map<string, string | undefined>();
   const vars: Record<string, string> = {
@@ -456,13 +615,10 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
         secure,
         '--token',
         enrollment.token,
-        '--roots',
-        workspace,
         '--name',
         'T04-Worker',
         '--profile',
         'T04-Sandbox',
-        '--allow-shell',
         '--no-start',
       ],
       { cwd: workspace, env: goEnv, stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 },
@@ -475,6 +631,12 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
     command.once('close', (code) => resolve({ status: code ?? 1, stderr }));
   });
   assert.equal(enrolled.status, 0, 'Ephemeral enrollment failed: ' + enrolled.stderr);
+  const config = JSON.parse(fs.readFileSync(path.join(workerHome, 'config.json'), 'utf8')) as {
+    allowed_roots: string[];
+    allow_shell: boolean;
+  };
+  assert.deepEqual(config.allowed_roots, [], 'new enrollment must not limit OS-visible paths');
+  assert.equal(config.allow_shell, true, 'new enrollment must enable shell for its OS user');
   const state = JSON.parse(fs.readFileSync(path.join(workerHome, 'state.json'), 'utf8')) as {
     worker_id: string;
   };
@@ -567,7 +729,13 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
     'PKCE authorization code must be single-use',
   );
 
-  const request = (accessToken: string, id: number, name: string, command: string) =>
+  const request = (
+    accessToken: string,
+    id: number,
+    name: string,
+    command: string,
+    cwd = workspace,
+  ) =>
     fetch(base + '/mcp', {
       method: 'POST',
       headers: {
@@ -580,7 +748,7 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
         jsonrpc: '2.0',
         id,
         method: 'tools/call',
-        params: { name, arguments: { profile: 'T04-Sandbox', command, cwd: workspace } },
+        params: { name, arguments: { profile: 'T04-Sandbox', command, cwd } },
       }),
     });
   const invalid = await request('br_at_invalid_t04', 1, 'workspace_exec', 'true');
@@ -598,6 +766,33 @@ void test('fresh Railway SQLite owner and OAuth S256 drive a sandbox-built Go Wo
   assert.equal(payload.result?.isError, undefined, bodyText);
   assert.equal(payload.result?.structuredContent?.exit_code, 0, bodyText);
   assert.match(payload.result?.structuredContent?.stdout || '', /T04_GO_WORKER_OK/);
+
+  // Real signed WSS -> OAuth MCP -> Go Worker, without enrollment --roots/--allow-shell.
+  const outsideExec = await request(
+    token,
+    6,
+    'workspace_exec',
+    'printf T04_OS_ACCOUNT_ACCESS_OK',
+    outsideWorkspace,
+  );
+  assert.equal(outsideExec.status, 200);
+  assert.match(await outsideExec.text(), /T04_OS_ACCOUNT_ACCESS_OK/);
+  const outsideFile = path.join(outsideWorkspace, 'nested', 'record.txt');
+  assert.deepEqual(
+    await broker.dispatch(state.worker_id, 'file.write', {
+      path: outsideFile,
+      content: 'outside-workspace-write',
+      create_dirs: true,
+    }),
+    { path: outsideFile },
+  );
+  const outsideArtifact = await broker.dispatch<{ text: string }>(
+    state.worker_id,
+    'artifact.collect',
+    { path: outsideFile },
+  );
+  assert.equal(outsideArtifact.text, 'outside-workspace-write');
+  assert.equal(fs.readFileSync(outsideFile, 'utf8'), 'outside-workspace-write');
 
   const marker = path.join(workspace, 'non-idempotent-marker');
   const onceCommand = 'printf once >> ' + JSON.stringify(marker);

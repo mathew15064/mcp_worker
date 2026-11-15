@@ -30,6 +30,7 @@ interface ApiError {
     root: ParentNode | null | undefined = document,
   ): T[] => Array.from(root?.querySelectorAll<T>(selector) || []);
   const modalOpeners = new WeakMap<HTMLElement, HTMLElement>();
+  const modalBackground = new WeakMap<HTMLElement, HTMLElement[]>();
   const focusableSelector = [
     'a[href]',
     'button:not([disabled])',
@@ -78,6 +79,22 @@ interface ApiError {
     backdrop.classList.add('open');
     backdrop.setAttribute('aria-hidden', 'false');
     document.body.classList.add('modal-open');
+    // Isolate sibling content at each ancestor. Some dialogs live inside
+    // <main>, so making the whole shell inert would also disable the dialog.
+    const inerted: HTMLElement[] = [];
+    let current: HTMLElement | null = backdrop;
+    while (current && current !== document.body) {
+      const parent: HTMLElement | null = current.parentElement;
+      if (!parent) break;
+      for (const sibling of Array.from(parent.children)) {
+        if (sibling !== current && sibling instanceof HTMLElement && !sibling.inert) {
+          sibling.inert = true;
+          inerted.push(sibling);
+        }
+      }
+      current = parent;
+    }
+    modalBackground.set(backdrop, inerted);
     const first = focusables(backdrop)[0];
     if (first) requestAnimationFrame(() => first.focus());
   }
@@ -89,6 +106,8 @@ interface ApiError {
     if (!backdrop) return;
     backdrop.classList.remove('open');
     backdrop.setAttribute('aria-hidden', 'true');
+    for (const sibling of modalBackground.get(backdrop) || []) sibling.inert = false;
+    modalBackground.delete(backdrop);
     if (!$('.modal-backdrop.open')) document.body.classList.remove('modal-open');
     if (backdrop.id === 'confirm-modal') pendingForm = null;
     const opener = modalOpeners.get(backdrop);
@@ -104,12 +123,17 @@ interface ApiError {
   );
   $$('[data-auto-open="true"]').forEach((backdrop) => openModal(backdrop.id, null));
 
-  function trapModalFocus(event: KeyboardEvent, backdrop: HTMLElement) {
+  function trapFocus(event: KeyboardEvent, container: HTMLElement) {
     if (event.key !== 'Tab') return false;
-    const items = focusables(backdrop);
+    const items = focusables(container);
     if (!items.length) return false;
     const first = items[0];
     const last = items[items.length - 1];
+    if (!container.contains(document.activeElement)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+      return true;
+    }
     if (event.shiftKey && document.activeElement === first) {
       event.preventDefault();
       last.focus();
@@ -523,11 +547,18 @@ interface ApiError {
 
   function setSidebar(open: boolean) {
     if (!sidebar || !mobileMenu) return;
-    sidebar.classList.toggle('open', open);
-    sidebarScrim?.classList.toggle('open', open);
-    mobileMenu.setAttribute('aria-expanded', String(open));
-    mobileMenu.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
-    document.body.classList.toggle('sidebar-open', open);
+    const expanded = open && window.matchMedia('(max-width: 780px)').matches;
+    const restoreFocus = !expanded && sidebar.contains(document.activeElement);
+    sidebar.classList.toggle('open', expanded);
+    sidebarScrim?.classList.toggle('open', expanded);
+    mobileMenu.setAttribute('aria-expanded', String(expanded));
+    mobileMenu.setAttribute('aria-label', expanded ? 'Close navigation' : 'Open navigation');
+    document.body.classList.toggle('sidebar-open', expanded);
+    sidebar.inert = window.matchMedia('(max-width: 780px)').matches && !expanded;
+    const main = $('.main');
+    if (main) main.inert = expanded;
+    if (expanded) focusables(sidebar)[0]?.focus();
+    else if (restoreFocus) mobileMenu.focus();
   }
 
   function setSidebarCollapsed(collapsed: boolean, { persist = true }: { persist?: boolean } = {}) {
@@ -544,21 +575,24 @@ interface ApiError {
 
   const savedSidebarCollapsed = localStorage.getItem(sidebarCollapseKey) === 'true';
   setSidebarCollapsed(savedSidebarCollapsed, { persist: false });
+  setSidebar(false);
   mobileMenu?.addEventListener('click', () => setSidebar(!sidebar?.classList.contains('open')));
   sidebarScrim?.addEventListener('click', () => setSidebar(false));
   sidebarCollapse?.addEventListener('click', () =>
     setSidebarCollapsed(!sidebar?.classList.contains('collapsed')),
   );
-  window.addEventListener('resize', () =>
-    setSidebarCollapsed(localStorage.getItem(sidebarCollapseKey) === 'true', { persist: false }),
-  );
+  window.addEventListener('resize', () => {
+    setSidebarCollapsed(localStorage.getItem(sidebarCollapseKey) === 'true', { persist: false });
+    setSidebar(false);
+  });
   $$('.nav-link', sidebar || document).forEach((link) =>
     link.addEventListener('click', () => setSidebar(false)),
   );
 
   document.addEventListener('keydown', (event) => {
     const modal = $('.modal-backdrop.open');
-    if (modal && trapModalFocus(event, modal)) return;
+    if (modal && trapFocus(event, modal)) return;
+    if (!modal && sidebar?.classList.contains('open') && trapFocus(event, sidebar)) return;
     if (event.key !== 'Escape') return;
     if (modal) {
       if (modal.dataset.static !== 'true') closeModal(modal);

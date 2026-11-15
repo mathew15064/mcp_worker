@@ -16,7 +16,11 @@ The legacy Node Worker source remains in `worker/` only as a rollback/compatibil
 
 ## Install
 
-Generate a one-time enrollment token from **Workers**, then use the installer for the target OS.
+**Signed Worker distribution and new enrollment are not currently approved.**
+The commands below document the future owner-approved release process; do not
+execute them against the current server. Existing Workers remain manageable.
+After a signed release has been independently approved, generate a one-time
+enrollment token from **Workers**, then use the installer for the target OS.
 
 Linux:
 
@@ -55,10 +59,20 @@ A stale .install-lock after interruption requires manual inspection.
 
 Linux systemd is advanced opt-in:
 `curl .../worker/install-linux.sh | BOT_REPORT_WORKER_SYSTEMD=1 sh`.
-Managed service rollback/uninstall needs explicit administrative maintenance;
-the manual installer refuses to operate on an existing systemd identity.
+For a managed upgrade, the installer saves the previous installed binary,
+root-owned unit, active/enabled status, local aliases, and signed release records
+before changing the service. It installs the verified replacement, reloads the
+unit and starts/restarts it; enrolled installations require a stable active
+systemd MainPID before signed state is committed. Failure triggers automatic
+restoration of the previous files, records and service state. Failed compensation
+requires administrator recovery; recovery copies are retained and reported.
+An identical healthy signed release is a no-op. Manual downgrades and manual
+systemd rollback/uninstall still require separately reviewed administrative
+maintenance; the manual installer refuses an existing systemd identity.
+The local test uses an unprivileged disposable systemctl simulation; privileged
+real systemd activation, reboot and recovery remain **NOT_TESTED**.
 Do not run service installation against an unrelated existing service.
-User-mode Workers should be run by a dedicated low-privilege OS user; running the installer/login as root still gives the Worker root authority.
+Under the owner-selected full-OS-account policy, the Worker inherits the privileges of the account running it (including root/Administrator if used). Installation and service accounts can differ; check the actual service identity before enabling remote execution.
 macOS/Windows use manual mode; OS-native lifecycle tests remain a release gate.
 
 ## Signed release artifacts — approval required
@@ -66,17 +80,18 @@ macOS/Windows use manual mode; OS-native lifecycle tests remain a release gate.
 The normative owner-operated RC checklist, key custody and root-rotation
 policy are in [Signed Worker release and trust policy](../docs/WORKER_SIGNED_RELEASE_POLICY.md).
 
-**Current state: no production Worker release is approved.** Railway returns
-`503 WORKER_SIGNED_RELEASE_PENDING` for every installer and binary endpoint.
-Non-Railway installer templates also fail closed without a review-pinned signing
-key, release version and commit. Do **not** work around this by setting an
+**Current state: no production Worker release is approved.** All server
+environments return `503 WORKER_SIGNED_RELEASE_PENDING` for installer and
+binary distribution endpoints, including missing/misspelled `MCP_PLATFORM`.
+The installer templates also fail closed without an independently approved
+signing key, release version and commit. Do **not** work around this by setting an
 environment variable or disabling signature verification. The `curl | sh`
 and PowerShell examples above are for an *approved future release*, not current
 Railway deployment instructions.
 
 All eight Linux/macOS/Windows Go binaries and `WORKER_RELEASE` are listed in
 `SHA256SUMS`. `WORKER_RELEASE` has exactly two lines:
-`version=x.y.z` and `commit=<git SHA prefix>`. A detached
+`version=x.y.z` and `commit=<full 40-character lowercase Git SHA>`. A detached
 `SHA256SUMS.sig` signs the exact manifest using RSA/SHA-256. The installer
 contains an independently reviewed, pinned RSA public verification key
 (in base64 PEM form) and expected release version/commit. It verifies the
@@ -91,7 +106,7 @@ unverified downloaded PowerShell payload.
 Release candidate procedure (offline, only after human approval):
 
 1. Build from an immutable reviewed commit with
-   `VERSION=x.y.z COMMIT=<12-character-hex-commit> ./scripts/build-worker-go.sh`.
+   `VERSION=x.y.z COMMIT=<full-40-character-lowercase-commit> ./scripts/build-worker-go.sh`.
    Independently inspect `worker/bin/WORKER_RELEASE` and run
    `(cd worker/bin && sha256sum -c SHA256SUMS)`.
 2. In an authorized offline signer environment, provide the **private**
@@ -99,7 +114,7 @@ Release candidate procedure (offline, only after human approval):
    to logs, or the Docker image. The key must be a non-symlink regular file at
    an absolute path outside the checkout, with mode 0400 or 0600. CI never signs
    or uploads candidate binaries. Run
-   `WORKER_RELEASE_EXPECTED_VERSION=x.y.z WORKER_RELEASE_EXPECTED_COMMIT=<commit> ./scripts/sign-worker-manifest.sh /absolute/private.pem`.
+   `WORKER_RELEASE_EXPECTED_VERSION=x.y.z WORKER_RELEASE_EXPECTED_COMMIT=<full-40-character-commit> WORKER_RELEASE_EXPECTED_PUBLIC_KEY_SHA256=<independently-verified-SPKI-SHA256> ./scripts/sign-worker-manifest.sh /absolute/private.pem`.
    This tool refuses noncanonical or incomplete manifests and verifies its
    detached signature locally. It does **not** publish or approve a release.
 3. Verify the signature independently with
@@ -152,15 +167,26 @@ Interactive login asks for the one-time enrollment token and allowed workspace r
 
 Interactive shell PTYs are created on demand per profile and run as the OS account that started the Worker. No tmux session or inbound SSH connection is required.
 
+When the server disables the owner/Worker, removes a persisted capability,
+changes the Worker's authenticated owner or public key, cannot verify owner/Worker
+status, or removes the Worker identity, an authenticated WebSocket revocation
+stops the daemon and Worker-managed jobs,
+processes and PTYs. It does **not** automatically reconnect;
+restart deliberately only after the owner/identity is authorized again. Ordinary
+network disconnects retain the normal reconnect behavior. If an offline Worker
+receives HTTP 401/403 on its next authenticated handshake, or HTTP 503 with
+WORKER_OWNER_UNAVAILABLE, it also stops managed workloads and does not retry.
+Generic transient 502/503 failures still retry. Owner or Worker identity changes
+made through another server instance are detected on the server's periodic
+revalidation rather than instantaneously.
+
 Non-interactive example:
 
 ```bash
 systemtd login \
   --token 'br_enroll_...' \
-  --roots '/home/me/work,/srv/projects' \
   --name 'Dev Laptop' \
-  --profile 'Dev Laptop' \
-  --allow-shell
+  --profile 'Dev Laptop'
 ```
 
 ## Runtime commands
@@ -221,10 +247,10 @@ server_url             required mcp_worker HTTPS base URL
 worker_name            worker identity display name
 profile_name           MCP execution alias created during enrollment
 tmux_session           terminal session used by terminal_* operations
-allowed_roots          local workspace roots accepted by path-bearing operations
-allow_shell            explicit local opt-in for shell/git/check/process execution
+allowed_roots          [] by default: any OS-accessible path; optional list restricts paths
+allow_shell            true by default: shell/git/check/process as running OS account
 allow_insecure_http    local/dev only; production should remain HTTPS/WSS
 max_job_ms             local job timeout ceiling, max 300000
 ```
 
-The server cannot remotely expand allowed roots, enable shell execution, or obtain the Worker private key. `allow_shell=true` grants mcp_worker the same shell authority as the OS account running the Worker, so use a dedicated low-privilege account or OS/container sandbox when stronger isolation is required.
+The owner selected unrestricted OS-account access for newly enrolled Workers. No `--roots` or `--allow-shell` flags are required: paths are governed by OS permissions and local shell execution is enabled. To intentionally restrict a Worker, supply `--roots` at enrollment; `BOT_REPORT_WORKER_ALLOW_SHELL=false` disables local shell execution. Existing installed Workers retain their saved settings until explicitly changed: set `allowed_roots` to `[]` and `allow_shell` to `true` in the local `config.json`, then restart the Worker. Running as Administrator/root grants that account's authority, including the ability to modify sensitive OS files. This choice does **not** disable owner authentication, Worker capabilities, OAuth scopes, key verification, or revocation.

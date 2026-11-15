@@ -347,3 +347,343 @@ void test(
     }
   },
 );
+
+void test(
+  'MySQL survives ledger failure after ALTER, restart and concurrent migration startup',
+  { skip: !enabled },
+  async (t) => {
+    const { MysqlAdapter } = await import('../src/db/adapters/mysqlAdapter.js');
+    const { MigrationRunner } = await import('../src/db/migrationRunner.js');
+    let adapter = MysqlAdapter.create(mysqlConfig());
+    t.after(async () => {
+      try {
+        await new MigrationRunner(adapter).fresh({ allowDestructive: true });
+      } finally {
+        await adapter.close();
+      }
+    });
+    await adapter.ping();
+    const runner = new MigrationRunner(adapter);
+    await runner.fresh({ allowDestructive: true });
+    const now = new Date().toISOString();
+    await adapter.execute(
+      `INSERT INTO users (id,username,display_name,password_hash,role,status,principal_id,profile_id,session_version,created_at,updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        'owner',
+        'owner',
+        'Owner',
+        'hashed',
+        'user',
+        'active',
+        'principal:owner',
+        'profile:owner',
+        1,
+        now,
+        now,
+      ],
+    );
+    for (const [id, scopes] of [
+      ['read-only', ['bot_report.read']],
+      ['pregranted', ['bot_report.read', 'bot_report.terminal', 'offline_access']],
+    ] as const) {
+      await adapter.execute(
+        `INSERT INTO mcp_oauth_clients
+       (id,client_id,client_secret_hash,display_name,principal_id,profile_id,owner_user_id,
+       redirect_uris_json,allowed_scopes_json,status,created_at,updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [
+          id,
+          id,
+          'hash',
+          id,
+          'principal:owner',
+          'profile:owner',
+          'owner',
+          '[]',
+          JSON.stringify(scopes),
+          'active',
+          now,
+          now,
+        ],
+      );
+    }
+    const grants = (db: typeof adapter) =>
+      db.queryAll<{ id: string; allowed_scopes_json: string }>(
+        'SELECT id, allowed_scopes_json FROM mcp_oauth_clients ORDER BY id',
+      );
+    const before = await grants(adapter);
+    await runner.rollback({ steps: 1 });
+    const target = '2026_11_02_000012_add_user_ownership_to_workers';
+    // Save the method for restoration after the deliberate test-only failure.
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    const execute = MysqlAdapter.prototype.execute;
+    let interrupted = false;
+    MysqlAdapter.prototype.execute = async function (sql, params = []) {
+      if (!interrupted && sql.startsWith('INSERT INTO migrations') && params[0] === target) {
+        interrupted = true;
+        throw new Error('TEST_LEDGER_FAILURE_AFTER_COMMITTED_DDL');
+      }
+      return execute.call(this, sql, params);
+    };
+    try {
+      await assert.rejects(() => runner.migrate(), /TEST_LEDGER_FAILURE_AFTER_COMMITTED_DDL/);
+    } finally {
+      MysqlAdapter.prototype.execute = execute;
+    }
+    assert.equal(interrupted, true);
+    assert.deepEqual(await grants(adapter), before);
+    assert.equal(
+      (
+        await requireRow<{ n: number }>(
+          adapter,
+          'SELECT COUNT(*) AS n FROM migrations WHERE migration = ?',
+          [target],
+        )
+      ).n,
+      0,
+    );
+    assert.equal(
+      (
+        await requireRow<{ n: number }>(
+          adapter,
+          `SELECT COUNT(*) AS n FROM information_schema.columns
+     WHERE table_schema=DATABASE() AND table_name='workers' AND column_name='owner_user_id'`,
+        )
+      ).n,
+      1,
+    );
+
+    await adapter.close(); // true connection restart, not transaction rollback
+    adapter = MysqlAdapter.create(mysqlConfig());
+    await adapter.ping();
+    const [a, b] = await Promise.all([
+      new MigrationRunner(adapter).migrate(),
+      new MigrationRunner(adapter).migrate(),
+    ]);
+    assert.equal(a.ran.length + b.ran.length, 1);
+    assert.deepEqual(
+      await grants(adapter),
+      before,
+      'migration must never widen or trim OAuth grants',
+    );
+    assert.equal(
+      (
+        await requireRow<{ n: number }>(
+          adapter,
+          'SELECT COUNT(*) AS n FROM migrations WHERE migration = ?',
+          [target],
+        )
+      ).n,
+      1,
+    );
+    for (const table of ['workers', 'worker_enrollment_tokens', 'mcp_oauth_clients']) {
+      assert.equal(
+        (
+          await requireRow<{ n: number }>(
+            adapter,
+            `SELECT COUNT(*) AS n FROM information_schema.key_column_usage
+       WHERE table_schema=DATABASE() AND table_name=? AND column_name='owner_user_id'
+       AND referenced_table_name='users'`,
+            [table],
+          )
+        ).n,
+        1,
+      );
+    }
+    const { McpOAuthRepository } = (await import('../src/repositories/mcpOAuthRepository.js'))
+      .default;
+    // A complete migration ledger cannot make a damaged MySQL source READY.
+    await adapter.exec(
+      'ALTER TABLE `mcp_oauth_access_tokens` DROP INDEX `idx_mcp_access_tokens_client`',
+    );
+    await assert.rejects(
+      () => new MigrationRunner(adapter).inspectSource(),
+      (error: unknown) =>
+        error instanceof Error && 'code' in error && error.code === 'MYSQL_SCHEMA_INCOMPATIBLE',
+    );
+    await adapter.exec(
+      'ALTER TABLE `mcp_oauth_access_tokens` ADD INDEX `idx_mcp_access_tokens_client` (`client_id`)',
+    );
+    assert.equal((await new MigrationRunner(adapter).inspectSource()).initialized, true);
+
+    const repo = new McpOAuthRepository(adapter);
+    await adapter.execute(
+      `INSERT INTO mcp_oauth_access_tokens
+     (id,token_hash,client_id,principal_id,resource,scopes_json,expires_at,created_at)
+     VALUES (?,?,?,?,?,?,?,?)`,
+      ['a', 'token-b', 'client-b', 'p', 'r', '[]', now, now],
+    );
+    await adapter.execute(
+      `INSERT INTO mcp_oauth_refresh_tokens
+     (id,token_hash,token_family_id,client_id,principal_id,resource,scopes_json,expires_at,created_at)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
+      ['r', 'refresh-b', 'family', 'client-b', 'p', 'r', '[]', now, now],
+    );
+    await repo.revokeAccessTokenForClient('token-b', 'client-a');
+    await repo.revokeRefreshTokenForClient('refresh-b', 'client-a');
+    assert.equal(
+      (
+        await requireRow<{ revoked_at: string | null }>(
+          adapter,
+          'SELECT revoked_at FROM mcp_oauth_access_tokens WHERE token_hash=?',
+          ['token-b'],
+        )
+      ).revoked_at,
+      null,
+    );
+    assert.equal(
+      (
+        await requireRow<{ revoked_at: string | null }>(
+          adapter,
+          'SELECT revoked_at FROM mcp_oauth_refresh_tokens WHERE token_hash=?',
+          ['refresh-b'],
+        )
+      ).revoked_at,
+      null,
+    );
+    await repo.revokeAccessTokenForClient('token-b', 'client-b');
+    await repo.revokeRefreshTokenForClient('refresh-b', 'client-b');
+    assert.ok(
+      (
+        await requireRow<{ revoked_at: string | null }>(
+          adapter,
+          'SELECT revoked_at FROM mcp_oauth_access_tokens WHERE token_hash=?',
+          ['token-b'],
+        )
+      ).revoked_at,
+    );
+    assert.ok(
+      (
+        await requireRow<{ revoked_at: string | null }>(
+          adapter,
+          'SELECT revoked_at FROM mcp_oauth_refresh_tokens WHERE token_hash=?',
+          ['refresh-b'],
+        )
+      ).revoked_at,
+    );
+  },
+);
+
+void test(
+  'Historical OAuth grant repair is atomic in disposable MySQL (dry-run policy, no production apply)',
+  {
+    skip:
+      !enabled ||
+      !['localhost', '127.0.0.1'].includes(process.env.MYSQL_TEST_HOST || '') ||
+      !(process.env.MYSQL_TEST_DATABASE || '').startsWith('bot_report_test'),
+  },
+  async (t) => {
+    const { MysqlAdapter } = await import('../src/db/adapters/mysqlAdapter.js');
+    const { MigrationRunner } = await import('../src/db/migrationRunner.js');
+    const db = MysqlAdapter.create(mysqlConfig());
+    t.after(async () => {
+      try {
+        await new MigrationRunner(db).fresh({ allowDestructive: true });
+      } finally {
+        await db.close();
+      }
+    });
+    await new MigrationRunner(db).fresh({ allowDestructive: true });
+    const now = new Date().toISOString();
+    const currentScopes = JSON.stringify([
+      'bot_report.read',
+      'bot_report.terminal',
+      'offline_access',
+    ]);
+    const ownerReviewed = JSON.stringify(['bot_report.read']);
+    for (const id of ['legacy-fixture', 'unrelated-fixture']) {
+      await db.execute(
+        `INSERT INTO mcp_oauth_clients
+          (id,client_id,client_secret_hash,display_name,principal_id,profile_id,
+           redirect_uris_json,allowed_scopes_json,status,created_at,updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+        [
+          id,
+          id,
+          'fixture-hash',
+          id,
+          'principal:fixture',
+          'profile:fixture',
+          '[]',
+          currentScopes,
+          'active',
+          now,
+          now,
+        ],
+      );
+      await db.execute(
+        `INSERT INTO mcp_oauth_access_tokens
+          (id,token_hash,client_id,principal_id,resource,scopes_json,expires_at,created_at)
+         VALUES (?,?,?,?,?,?,?,?)`,
+        [id, `access-${id}`, id, 'principal:fixture', 'resource:fixture', currentScopes, now, now],
+      );
+      await db.execute(
+        `INSERT INTO mcp_oauth_refresh_tokens
+          (id,token_hash,token_family_id,client_id,principal_id,resource,scopes_json,expires_at,created_at)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
+        [
+          id,
+          `refresh-${id}`,
+          `family-${id}`,
+          id,
+          'principal:fixture',
+          'resource:fixture',
+          currentScopes,
+          now,
+          now,
+        ],
+      );
+    }
+    const clientId = 'legacy-fixture';
+    const getScopes = async (id: string) =>
+      (
+        await requireRow<{ allowed_scopes_json: string }>(
+          db,
+          'SELECT allowed_scopes_json FROM mcp_oauth_clients WHERE client_id = ?',
+          [id],
+        )
+      ).allowed_scopes_json;
+    const activeTokens = async (table: string, id: string) =>
+      (
+        await requireRow<{ count: number }>(
+          db,
+          `SELECT COUNT(*) AS count FROM ${table} WHERE client_id = ? AND revoked_at IS NULL`,
+          [id],
+        )
+      ).count;
+    const applyFixture = (abort: boolean) =>
+      db.transaction(async (tx) => {
+        const row = await tx.queryOne<{ allowed_scopes_json: string }>(
+          'SELECT allowed_scopes_json FROM mcp_oauth_clients WHERE client_id = ? FOR UPDATE',
+          [clientId],
+        );
+        assert.equal(row?.allowed_scopes_json, currentScopes, 'must match approved snapshot');
+        const updated = await tx.execute(
+          'UPDATE mcp_oauth_clients SET allowed_scopes_json = ? WHERE client_id = ? AND allowed_scopes_json = ?',
+          [ownerReviewed, clientId, currentScopes],
+        );
+        assert.equal(updated.changes, 1, 'optimistic grant precondition must succeed');
+        for (const table of ['mcp_oauth_access_tokens', 'mcp_oauth_refresh_tokens']) {
+          await tx.execute(
+            `UPDATE ${table} SET revoked_at = ? WHERE client_id = ? AND revoked_at IS NULL`,
+            [now, clientId],
+          );
+        }
+        if (abort) throw new Error('FIXTURE_ROLLBACK');
+      });
+    await assert.rejects(() => applyFixture(true), /FIXTURE_ROLLBACK/);
+    assert.equal(await getScopes(clientId), currentScopes);
+    for (const table of ['mcp_oauth_access_tokens', 'mcp_oauth_refresh_tokens']) {
+      assert.equal(await activeTokens(table, clientId), 1, 'rollback preserves issued tokens');
+    }
+    await applyFixture(false);
+    assert.equal(await getScopes(clientId), ownerReviewed, 'approved narrowed grants applied');
+    assert.equal(await getScopes('unrelated-fixture'), currentScopes, 'unrelated grants unchanged');
+    for (const table of ['mcp_oauth_access_tokens', 'mcp_oauth_refresh_tokens']) {
+      assert.equal(await activeTokens(table, clientId), 0, 'issued tokens revoked with grant');
+      assert.equal(await activeTokens(table, 'unrelated-fixture'), 1, 'unrelated tokens unchanged');
+    }
+    await assert.rejects(() => applyFixture(false), /must match approved snapshot/);
+  },
+);
