@@ -9,7 +9,6 @@ npm-debug.log*
 # Environment and Secrets
 .env
 .env.*
-!.env.docker.example
 
 # Production Database and Locks
 data/*.sqlite*

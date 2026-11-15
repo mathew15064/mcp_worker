@@ -9,22 +9,22 @@ business modules, private deployments, operational data or credentials.
 Use a feature branch and a small reviewable change. Explain motivation,
 compatibility, risks and test evidence; include a regression test for fixes.
 
-Development prerequisites: Node 26.13.0, npm, Go 1.26.10, Docker/Compose
+Development prerequisites: Node 22, npm, Go 1.26.10, Docker/Compose
 and browser dependencies. In an isolated checkout:
 
     npm ci
-    npm --prefix worker ci
     npm test
     (cd worker-go && go test -race ./... && go vet ./...)
     npx playwright install chromium
     npm run test:e2e
 
-Use disposable databases/Workers only. The full release verification
-requires a clean committed checkout and Docker:
+Use disposable databases/Workers only. For additional local release
+verification, run:
 
-    ./scripts/release-verify.sh
+    bash scripts/local-verify-quickstart.sh --targeted
 
-See [release engineering](docs/RELEASE_ENGINEERING.md) for the scan gate.
+The [release engineering guide](docs/RELEASE_ENGINEERING.md) describes the
+opt-in Docker, MySQL, security scan and full PC test gates.
 Never run installer tests on an enrolled host Worker or production DB.
 Do not commit generated binaries, env files, private keys, backup files,
 reports, screenshots containing credentials or local identity metadata.

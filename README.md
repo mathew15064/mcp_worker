@@ -34,7 +34,7 @@ and system settings. The terminal_list tool still lists Worker aliases for compa
 
 ## Version and release policy
 
-GitHub `main` is the active development baseline. The Worker-only service exposes MCP tools over outbound Go Worker transport. Docker release candidates use versioned Git tags; the signed Worker installer remains gated until separately approved. See [release checklist](docs/RELEASE_CHECKLIST.md) and [the public release roadmap](docs/PUBLIC_RELEASE_ROADMAP.md).
+GitHub `main` is the active development baseline. The Worker-only service exposes MCP tools over outbound Go Worker transport. Docker release candidates use versioned Git tags; the signed Worker installer remains gated until separately approved. See [release checklist](docs/RELEASE_CHECKLIST.md).
 
 ## Compatibility identifiers
 
@@ -66,7 +66,7 @@ the generated password privately from `.env.setup` (mode 0600). Do not share
 that file, logs containing credentials, or Docker inspect output. Back up the
 env file and both named volumes together. The app binds loopback only, with
 HTTP cookies suitable for local access. Remote MCP requires HTTPS and an
-explicit public base URL; see [advanced proxy deployment](DOCKER_DEPLOYMENT.md).
+explicit public base URL; see [remote MCP and HTTPS guidance](docs/REMOTE_MCP.md).
 Do not expose the standalone HTTP port remotely.
 
 Rerun the same command to start again without replacing secrets or migrating

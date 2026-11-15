@@ -289,14 +289,14 @@ returns `200` only when production application storage is operational (`READY` M
 
 ## Docker deployment
 
-Production keeps `/app/data` persistent for the encrypted bootstrap file and, during migration, the legacy SQLite source file.
+Use the standalone Docker/Compose installer for a new, isolated installation:
 
-```bash
-cp .env.docker.example .env.docker
-./deploy.sh --dry-run
-./deploy.sh --apply
+```sh
+./setup.sh --init
 ```
 
-The reverse proxy must preserve WebSocket upgrade headers for both `/admin/terminal/ws` (SSH compatibility console) and `/worker/v1/connect` (v2 outbound workers).
-
-See `DOCKER_DEPLOYMENT.md` for production details.
+The default app binds loopback only. Keep the encrypted bootstrap data and
+MySQL named volumes together for backup and recovery. For remote MCP,
+configure a trusted HTTPS reverse proxy separately; see
+[remote MCP guidance](REMOTE_MCP.md). Preserve WebSocket upgrade support for
+`/worker/v1/connect`. Do not expose the standalone HTTP port directly.

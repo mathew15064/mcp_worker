@@ -6,7 +6,8 @@ configuration is an advanced deployment, not an automatically enabled
 feature. The external HTTPS flow is not yet end-to-end release-certified.
 
 Use a controlled HTTPS hostname with a valid trusted certificate and an
-explicit reverse proxy. See [advanced deployment](../DOCKER_DEPLOYMENT.md).
+explicit reverse proxy configured by the operator. This repository does not
+provide an automated public reverse-proxy deployment script.
 The proxy must forward Host and X-Forwarded-Proto, support WebSocket
 upgrades, and permit MCP streaming responses. Restrict direct backend
 access to the trusted proxy; set TRUST_PROXY to the actual trusted hop

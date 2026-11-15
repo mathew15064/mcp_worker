@@ -62,7 +62,7 @@ run() {
   record "$name" "$required" "$status" "$code" "$pass" "$fail" "$skip" "$note"
 }
 command -v node >/dev/null 2>&1 || { echo "Node unavailable" >&2; exit 2; }
-run script_syntax yes "node --check; bash/sh -n; no source builds" bash -c 'node --check scripts/test-linux-installer-lifecycle.cjs && node --check scripts/quality-gate.mjs && bash -n scripts/local-verify-quickstart.sh scripts/verify-oci-image-local.sh && sh -n scripts/release-verify.sh scripts/release-scan.sh'
+run script_syntax yes "node --check; bash/sh -n; no source builds" bash -c 'node --check scripts/test-linux-installer-lifecycle.cjs && node --check scripts/quality-gate.mjs && bash -n scripts/local-verify-quickstart.sh scripts/verify-oci-image-local.sh && sh -n scripts/release-scan.sh'
 NODE_VERSION="$(node -v)"
 NPM_VERSION="$(npm -v 2>/dev/null || echo missing)"
 GO_BIN=""
