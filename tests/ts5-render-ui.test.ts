@@ -91,7 +91,11 @@ void test('Worker install commands fail closed on partial or empty downloads', (
   assert.match(windows, /MaximumRedirection 0/);
   assert.match(windows, /IsNullOrWhiteSpace/);
   assert.doesNotMatch(windows, /[|]\s*iex/);
-  for (const invalid of ['http://example.test', 'https://example.test/other', "https://example.test';whoami"]) {
+  for (const invalid of [
+    'http://example.test',
+    'https://example.test/other',
+    "https://example.test';whoami",
+  ]) {
     assert.throws(() => pages.workerInstallCommand(invalid, 'linux'), /Trusted HTTPS/);
   }
 
