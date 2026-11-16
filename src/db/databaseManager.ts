@@ -1,144 +1,147 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import config from '../config/env';
-import bootstrapConfigStore from './bootstrapConfigStore';
-import { getDb } from './connection';
+import { getDb, closeDb } from './connection';
 import { SqliteAdapter } from './adapters/sqliteAdapter';
-import { MysqlAdapter } from './adapters/mysqlAdapter';
-import type { DatabaseAdapter, SqlRow } from './contracts';
+import type { DatabaseAdapter } from './contracts';
 import type Database from 'better-sqlite3';
-import { MigrationRunner } from './migrationRunner';
 import { runMigrations } from './migrations';
 import { assertRailwaySqliteSchema } from './sqliteSchemaValidation';
-type MysqlInput = Parameters<typeof MysqlAdapter.create>[0];
-type SourceInfo = Awaited<ReturnType<MigrationRunner['inspectSource']>>;
-interface Candidate {
-  adapter: MysqlAdapter;
-  info: SqlRow;
-  source: SourceInfo;
-  duration_ms: number;
-}
-interface Prepared extends Candidate {
-  beforeSource: SourceInfo;
-  migration: Awaited<ReturnType<MigrationRunner['migrate']>>;
-}
-function errorCode(error: unknown) {
-  return typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    typeof error.code === 'string'
-    ? error.code
-    : null;
-}
 
 const STATES = Object.freeze({
   UNCONFIGURED: 'UNCONFIGURED',
-  MIGRATION_REQUIRED: 'MIGRATION_REQUIRED',
-  CONFIGURED: 'CONFIGURED',
-  LEGACY_SQLITE: 'LEGACY_SQLITE', // test-only compatibility adapter
+  TEST_SQLITE: 'TEST_SQLITE',
   READY: 'READY',
   DEGRADED: 'DEGRADED',
 } as const);
 type State = (typeof STATES)[keyof typeof STATES];
+const SCHEMA_VERSION = '2026-11-12-initial';
 
 class DatabaseManager {
-  state: State;
-  adapter: DatabaseAdapter | null;
-  mysqlInfo: SqlRow | null;
-  sourceInfo: SourceInfo | null;
-  lastError: { code: string; message: string } | null;
-  lastTestAt: string | null;
-  initialized: boolean;
-  constructor() {
-    this.state = STATES.UNCONFIGURED;
-    this.adapter = null;
-    this.mysqlInfo = null;
-    this.sourceInfo = null;
-    this.lastError = null;
-    this.lastTestAt = null;
-    this.initialized = false;
-  }
+  state: State = STATES.UNCONFIGURED;
+  adapter: DatabaseAdapter | null = null;
+  sourceInfo: { initialized: boolean; total: number; ran: number; pending: string[] } | null = null;
+  lastError: { code: string; message: string } | null = null;
+  initialized = false;
 
-  legacyAvailable() {
+  databaseExists() {
     try {
-      const stat = fs.statSync(config.DATABASE_PATH);
-      return stat.isFile() && stat.size > 0;
+      return fs.statSync(config.DATABASE_PATH).size > 0;
     } catch {
       return false;
     }
   }
 
-  async inspectMysql(input: MysqlInput) {
-    const adapter = MysqlAdapter.create(input);
+  async initialize() {
+    if (this.initialized) return this.status();
+    this.initialized = true;
+    if (process.env.MCP_PLATFORM === 'railway') {
+      const state = this.connectRailwaySqlite();
+      await this.adapter?.ping();
+      return state;
+    }
+    // Refuse silent reuse of a pre-SQLite installation's configuration.
+    // A fresh development installation must explicitly use a new project/volume.
+    const oldBootstrap = path.resolve(
+      process.cwd(),
+      process.env.BOOTSTRAP_CONFIG_PATH || 'data/bootstrap-config.json',
+    );
+    if (fs.existsSync(oldBootstrap)) {
+      throw Object.assign(
+        new Error(
+          'Obsolete database bootstrap detected; fresh SQLite setup requires a clean data directory.',
+        ),
+        {
+          code: 'OBSOLETE_BOOTSTRAP_REFUSED',
+        },
+      );
+    }
+    if (!fs.existsSync(config.DATABASE_PATH)) {
+      this.state = STATES.UNCONFIGURED;
+      return this.status();
+    }
+    const dbPath = config.DATABASE_PATH;
+    const dir = path.dirname(dbPath);
+    if (fs.realpathSync(dir) !== dir) {
+      throw Object.assign(new Error('SQLite data directory must not be a symlink.'), {
+        code: 'SQLITE_PATH_INVALID',
+      });
+    }
+    for (const file of [dbPath, dbPath + '-wal', dbPath + '-shm', dbPath + '-journal']) {
+      const entry = fs.lstatSync(file, { throwIfNoEntry: false });
+      if (entry && (!entry.isFile() || entry.isSymbolicLink())) {
+        throw Object.assign(new Error('SQLite database files must be regular files.'), {
+          code: 'SQLITE_PATH_INVALID',
+        });
+      }
+    }
+    const state = this.activateSqlite();
+    await this.adapter?.ping();
+    return state;
+  }
+
+  private activateSqlite() {
     try {
-      const started = Date.now();
-      await adapter.ping();
-      const info = await adapter.serverInfo();
-      const source = await new MigrationRunner(adapter).inspectSource();
-      return { adapter, info, source, duration_ms: Date.now() - started };
+      const db = getDb();
+      if (db.pragma('integrity_check', { simple: true }) !== 'ok') {
+        throw Object.assign(new Error('SQLite integrity check failed.'), {
+          code: 'SQLITE_INTEGRITY_FAILED',
+        });
+      }
+      db.transaction(() => {
+        const ledger = db
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+          .get('railway_schema_versions');
+        if (ledger) {
+          const versions = db.prepare('SELECT version FROM railway_schema_versions').all() as {
+            version: string;
+          }[];
+          if (versions.length !== 1 || versions[0]?.version !== SCHEMA_VERSION) {
+            throw Object.assign(
+              new Error(
+                process.env.MCP_PLATFORM === 'railway'
+                  ? 'Unsupported Railway SQLite schema version.'
+                  : 'Unsupported SQLite schema version.',
+              ),
+              { code: 'SQLITE_SCHEMA_UNSUPPORTED' },
+            );
+          }
+        }
+        runMigrations(db);
+        assertRailwaySqliteSchema(db);
+        db.exec(
+          'CREATE TABLE IF NOT EXISTS railway_schema_versions (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)',
+        );
+        db.prepare(
+          'INSERT OR IGNORE INTO railway_schema_versions (version, applied_at) VALUES (?, ?)',
+        ).run(SCHEMA_VERSION, new Date().toISOString());
+      })();
+      if (db.pragma('integrity_check', { simple: true }) !== 'ok') {
+        throw Object.assign(new Error('SQLite integrity check failed.'), {
+          code: 'SQLITE_INTEGRITY_FAILED',
+        });
+      }
+      this.adapter = new SqliteAdapter(db);
+      this.state = STATES.READY;
+      this.lastError = null;
+      this.sourceInfo = { initialized: true, total: 13, ran: 13, pending: [] };
+      return this.status();
     } catch (error) {
-      await adapter.close();
+      closeDb();
+      this.adapter = null;
+      this.state = STATES.DEGRADED;
+      this.lastError = {
+        code:
+          error && typeof error === 'object' && 'code' in error
+            ? String(error.code)
+            : 'SQLITE_OPEN_FAILED',
+        message: error instanceof Error ? error.message : 'SQLite initialization failed',
+      };
       throw error;
     }
   }
 
-  async adoptInspected(candidate: Candidate) {
-    const previous = this.adapter;
-    this.mysqlInfo = candidate.info || null;
-    this.sourceInfo = candidate.source || null;
-    this.lastError = null;
-    this.lastTestAt = new Date().toISOString();
-
-    if (candidate.source?.initialized) {
-      this.adapter = candidate.adapter;
-      this.state = STATES.READY;
-    } else {
-      this.adapter = null;
-      this.state = STATES.CONFIGURED;
-      try {
-        await candidate.adapter.close();
-      } catch {}
-    }
-
-    if (previous?.kind === 'mysql' && previous !== this.adapter && previous !== candidate.adapter) {
-      try {
-        await previous.close();
-      } catch {}
-    }
-    return this.status();
-  }
-
-  async initialize() {
-    if (this.initialized) return this.status();
-    this.initialized = true;
-
-    if (process.env.MCP_PLATFORM === 'railway') {
-      return this.connectRailwaySqlite();
-    }
-    if (bootstrapConfigStore.exists()) {
-      return this.reconnect();
-    }
-
-    if (this.legacyAvailable()) {
-      this.adapter = null;
-      this.state = STATES.MIGRATION_REQUIRED;
-      this.sourceInfo = null;
-      this.lastError = null;
-      return this.status();
-    }
-
-    this.state = STATES.UNCONFIGURED;
-    this.adapter = null;
-    this.sourceInfo = null;
-    return this.status();
-  }
-
-  /**
-   * Dedicated, single-replica Railway backend. Never use ephemeral container
-   * storage: the platform volume must match the configured SQLite directory.
-   * Schema changes are additive and idempotent via the existing SQLite schema
-   * upgrade path, run atomically before accepting HTTP connections.
-   */
+  /** Enforce the old Railway persistent-volume safety contract when that deployment mode is selected. */
   connectRailwaySqlite() {
     const volumePath = process.env.RAILWAY_VOLUME_MOUNT_PATH;
     if (!volumePath || !path.isAbsolute(volumePath)) {
@@ -175,61 +178,14 @@ class DatabaseManager {
       fs.rmSync(probe, { recursive: true, force: true });
     }
 
-    const db = getDb();
-    if (db.pragma('quick_check', { simple: true }) !== 'ok') {
-      throw Object.assign(new Error('SQLite integrity check failed.'), {
-        code: 'RAILWAY_DB_INTEGRITY_FAILED',
-      });
-    }
-    db.transaction(() => {
-      const ledger = db
-        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
-        .get('railway_schema_versions');
-      if (ledger) {
-        const versions = db.prepare('SELECT version FROM railway_schema_versions').all() as {
-          version: string;
-        }[];
-        if (versions.length !== 1 || versions[0]?.version !== '2026-11-12-initial') {
-          throw Object.assign(new Error('Unsupported Railway SQLite schema version.'), {
-            code: 'RAILWAY_SCHEMA_UNSUPPORTED',
-          });
-        }
-      }
-      runMigrations(db);
-      // IF NOT EXISTS alone cannot certify a pre-existing legacy schema.
-      assertRailwaySqliteSchema(db);
-      db.exec(
-        'CREATE TABLE IF NOT EXISTS railway_schema_versions (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)',
-      );
-      db.prepare(
-        'INSERT OR IGNORE INTO railway_schema_versions (version, applied_at) VALUES (?, ?)',
-      ).run('2026-11-12-initial', new Date().toISOString());
-    })();
-    if (db.pragma('quick_check', { simple: true }) !== 'ok') {
-      throw Object.assign(new Error('SQLite integrity check failed.'), {
-        code: 'RAILWAY_DB_INTEGRITY_FAILED',
-      });
-    }
-    this.adapter = new SqliteAdapter(db);
-    this.state = STATES.READY;
-    this.initialized = true;
-    this.lastError = null;
-    this.sourceInfo = {
-      initialized: true,
-      migrationTable: false,
-      total: 1,
-      ran: 1,
-      pending: [],
-    };
-    return this.status();
+    return this.activateSqlite();
   }
 
-  useLegacyForTests(db: Database.Database | null = null) {
+  useSqliteForTests(db: Database.Database | null = null) {
     this.initialized = true;
     this.adapter = new SqliteAdapter(db || getDb());
-    this.state = STATES.LEGACY_SQLITE;
-    this.mysqlInfo = null;
-    this.sourceInfo = { initialized: true, migrationTable: false, total: 0, ran: 0, pending: [] };
+    this.state = STATES.TEST_SQLITE;
+    this.sourceInfo = { initialized: true, total: 0, ran: 0, pending: [] };
     this.lastError = null;
     return this.adapter;
   }
@@ -239,36 +195,17 @@ class DatabaseManager {
   }
 
   requireAdapter() {
-    if (!this.adapter || !([STATES.READY, STATES.LEGACY_SQLITE] as State[]).includes(this.state)) {
-      const messages: Partial<Record<State, string>> = {
-        [STATES.DEGRADED]: 'MySQL is configured but unavailable.',
-        [STATES.CONFIGURED]:
-          'MySQL connection is saved but the mcp_worker source has not been initialized.',
-        [STATES.MIGRATION_REQUIRED]: 'MySQL is not configured.',
-        [STATES.UNCONFIGURED]: 'MySQL is not configured.',
-      };
-      const code =
-        this.state === STATES.DEGRADED
-          ? 'DATABASE_DEGRADED'
-          : this.state === STATES.CONFIGURED
-            ? 'DATABASE_SOURCE_UNINITIALIZED'
-            : 'DATABASE_UNCONFIGURED';
-      throw Object.assign(
-        new Error(messages[this.state] || 'Application database is unavailable.'),
-        { code, status: 503 },
-      );
+    if (!this.adapter || !this.isOperational()) {
+      throw Object.assign(new Error('SQLite database is unavailable.'), {
+        code: 'DATABASE_UNAVAILABLE',
+        status: 503,
+      });
     }
     return this.adapter;
   }
 
   isOperational() {
-    return (
-      Boolean(this.adapter) &&
-      ([STATES.READY, STATES.LEGACY_SQLITE] as State[]).includes(this.state)
-    );
-  }
-  isMysqlReady() {
-    return this.state === STATES.READY && this.adapter?.kind === 'mysql';
+    return !!this.adapter && (this.state === STATES.READY || this.state === STATES.TEST_SQLITE);
   }
   isRailwaySqliteReady() {
     return (
@@ -278,182 +215,37 @@ class DatabaseManager {
     );
   }
   isSqlReady() {
-    return this.isMysqlReady() || this.isRailwaySqliteReady();
+    return this.state === STATES.READY && this.adapter?.kind === 'sqlite';
   }
   isSetupOnly() {
-    return (
-      [
-        STATES.UNCONFIGURED,
-        STATES.MIGRATION_REQUIRED,
-        STATES.CONFIGURED,
-        STATES.DEGRADED,
-      ] as State[]
-    ).includes(this.state);
-  }
-
-  async testMysql(input: MysqlInput) {
-    const adapter = MysqlAdapter.create(input);
-    const started = Date.now();
-    try {
-      await adapter.ping();
-      const info = await adapter.serverInfo();
-      this.lastTestAt = new Date().toISOString();
-      return {
-        ok: true,
-        duration_ms: Date.now() - started,
-        version: info.version || null,
-        database: info.database_name || input.database || null,
-      };
-    } finally {
-      await adapter.close();
-    }
-  }
-
-  async saveMysqlConfig(input: MysqlInput) {
-    bootstrapConfigStore.save(input);
-    return this.reconnect();
-  }
-
-  async prepareSourceInitialization() {
-    if (!bootstrapConfigStore.exists()) {
-      const error = Object.assign(
-        new Error('Save the MySQL connection before initializing the source.'),
-        { code: 'DATABASE_UNCONFIGURED' },
-      );
-      throw error;
-    }
-
-    const input = bootstrapConfigStore.load();
-    if (!input)
-      throw Object.assign(new Error('Bootstrap database configuration is missing.'), {
-        code: 'DATABASE_UNCONFIGURED',
-      });
-    const adapter = MysqlAdapter.create(input);
-    try {
-      const started = Date.now();
-      await adapter.ping();
-      const info = await adapter.serverInfo();
-      const runner = new MigrationRunner(adapter);
-      const beforeSource = await runner.inspectSource();
-      const migration = await runner.migrate();
-      const source = await runner.inspectSource();
-      if (!source.initialized) {
-        const error = Object.assign(
-          new Error('mcp_worker source initialization did not complete.'),
-          { code: 'DATABASE_SOURCE_UNINITIALIZED' },
-        );
-        throw error;
-      }
-      return { adapter, info, beforeSource, source, migration, duration_ms: Date.now() - started };
-    } catch (error) {
-      await adapter.close();
-      throw error;
-    }
-  }
-
-  async activatePrepared(prepared: Prepared) {
-    if (!prepared?.adapter || !prepared?.source?.initialized) {
-      throw new Error('A fully initialized MySQL source is required before activation.');
-    }
-    const previous = this.adapter;
-    this.adapter = prepared.adapter;
-    this.state = STATES.READY;
-    this.mysqlInfo = prepared.info || (await prepared.adapter.serverInfo());
-    this.sourceInfo = prepared.source;
-    this.lastError = null;
-    this.lastTestAt = new Date().toISOString();
-    if (previous?.kind === 'mysql' && previous !== this.adapter) {
-      try {
-        await previous.close();
-      } catch {}
-    }
-    return this.status();
-  }
-
-  async reconnect() {
-    if (!bootstrapConfigStore.exists()) {
-      if (this.adapter?.kind === 'mysql')
-        try {
-          await this.adapter.close();
-        } catch {}
-      this.adapter = null;
-      this.mysqlInfo = null;
-      this.sourceInfo = null;
-      this.state = this.legacyAvailable() ? STATES.MIGRATION_REQUIRED : STATES.UNCONFIGURED;
-      this.initialized = true;
-      return this.status();
-    }
-
-    const input = bootstrapConfigStore.load();
-    if (!input)
-      throw Object.assign(new Error('Bootstrap database configuration is missing.'), {
-        code: 'DATABASE_UNCONFIGURED',
-      });
-    try {
-      const candidate = await this.inspectMysql(input);
-      this.initialized = true;
-      return this.adoptInspected(candidate);
-    } catch (error) {
-      if (this.adapter?.kind === 'mysql')
-        try {
-          await this.adapter.close();
-        } catch {}
-      this.adapter = null;
-      this.mysqlInfo = null;
-      this.sourceInfo = null;
-      this.state = STATES.DEGRADED;
-      this.lastError = {
-        code: errorCode(error) || 'MYSQL_CONNECT_FAILED',
-        message:
-          error instanceof Error
-            ? error.message || 'MySQL connection failed.'
-            : 'MySQL connection failed.',
-      };
-      this.lastTestAt = new Date().toISOString();
-      this.initialized = true;
-      return this.status();
-    }
+    return !this.isOperational();
   }
 
   status() {
-    const saved = bootstrapConfigStore.readPublic();
     return {
       state: this.state,
-      engine: this.isMysqlReady()
-        ? 'mysql'
-        : this.state === STATES.LEGACY_SQLITE || this.isRailwaySqliteReady()
-          ? 'sqlite'
-          : null,
-      mysql: saved ? { ...saved, version: this.mysqlInfo?.version || null } : null,
+      engine: this.isOperational() ? 'sqlite' : null,
       source: this.sourceInfo
-        ? {
-            initialized: Boolean(this.sourceInfo.initialized),
-            total: Number(this.sourceInfo.total || 0),
-            ran: Number(this.sourceInfo.ran || 0),
-            pending: Array.isArray(this.sourceInfo.pending) ? [...this.sourceInfo.pending] : [],
-          }
+        ? { ...this.sourceInfo, pending: [...this.sourceInfo.pending] }
         : null,
-      legacyAvailable: this.legacyAvailable(),
+      databaseExists: this.databaseExists(),
       operational: this.isOperational(),
-      mysqlReady: this.isMysqlReady(),
       setupOnly: this.isSetupOnly(),
       lastError: this.lastError,
-      lastTestAt: this.lastTestAt,
     };
   }
 
   async close() {
-    if (this.adapter?.kind === 'mysql') await this.adapter.close();
+    await this.adapter?.close();
     this.adapter = null;
+    closeDb();
   }
 
   resetForTests() {
     this.adapter = null;
     this.state = STATES.UNCONFIGURED;
-    this.mysqlInfo = null;
     this.sourceInfo = null;
     this.lastError = null;
-    this.lastTestAt = null;
     this.initialized = false;
   }
 }

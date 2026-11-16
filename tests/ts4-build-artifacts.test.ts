@@ -18,7 +18,7 @@ void test('TS4 compiled CLI layout excludes the retired Node Worker', () => {
   for (const name of ['agent.js', 'cli.js', 'lifecycle.js']) {
     assert.equal(fs.existsSync(path.join(compiled, 'worker', name)), false);
   }
-  for (const name of ['first-mcp-call.js', 'init-bundled-db.js', 'migrate.js', 'mcp-client.js']) {
+  for (const name of ['first-mcp-call.js', 'init-bundled-db.js', 'mcp-client.js']) {
     assert.ok(fs.statSync(path.join(compiled, 'scripts', name)).isFile());
   }
   assert.ok(fs.statSync(path.join(compiled, 'src/server.js')).isFile());

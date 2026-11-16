@@ -1048,7 +1048,7 @@ router.post('/worker/v1/enroll', enrollmentLimiter, async (req, res, next) => {
       return res.status(503).json({
         error: 'temporarily_unavailable',
         code: databaseManager.status().state,
-        message: 'MySQL must be ready before workers can enroll.',
+        message: 'SQLite must be ready before workers can enroll.',
       });
     }
     // Express parses request bodies as any; keep the boundary typed and let

@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import { SqliteAdapter } from '../src/db/adapters/sqliteAdapter';
-import { normalizeMysqlError } from '../src/db/adapters/mysqlAdapter';
 import { getDb } from '../src/db/connection';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -84,15 +83,6 @@ void test('OAuth revoke UPDATE is atomically scoped to the authenticated client'
   } finally {
     raw.close();
   }
-});
-
-void test('MySQL normalization retains stable error codes', () => {
-  assert.deepEqual(normalizeMysqlError({ code: 'ER_DUP_ENTRY' }), { code: 'DB_UNIQUE_CONSTRAINT' });
-  assert.deepEqual(normalizeMysqlError({ message: 'Queue limit reached.' }), {
-    message: 'Queue limit reached.',
-    code: 'MYSQL_POOL_BUSY',
-    status: 503,
-  });
 });
 
 void test('Railway SQLite readiness rejects missing indexes, foreign keys, and partial legacy tables', () => {

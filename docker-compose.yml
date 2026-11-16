@@ -21,40 +21,10 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?run setup.sh}
       SESSION_SECRET: ${SESSION_SECRET:?run setup.sh}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?run setup.sh}
-      BUNDLED_MYSQL_PASSWORD: ${MYSQL_PASSWORD:?run setup.sh}
       MCP_PUBLIC_BASE_URL: http://127.0.0.1:${BOT_REPORT_PORT:-3333}
     ports:
       - "127.0.0.1:${BOT_REPORT_PORT:-3333}:80"
     volumes:
       - app-data:/app/data
-    depends_on:
-      mysql:
-        condition: service_healthy
-    networks: [app-net, db-net]
-  mysql:
-    build:
-      context: .
-      dockerfile: Dockerfile.mysql
-    image: ${COMPOSE_PROJECT_NAME:-mcp_worker}-mysql:local
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?run setup.sh}
-      MYSQL_DATABASE: bot_report
-      MYSQL_USER: bot_report
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?run setup.sh}
-    volumes:
-      - mysql-data:/var/lib/mysql
-    networks: [db-net]
-    healthcheck:
-      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_PASSWORD\" mysql -h 127.0.0.1 -u bot_report -D bot_report -Nse 'SELECT 1' >/dev/null"]
-      interval: 5s
-      timeout: 5s
-      retries: 40
-      start_period: 30s
 volumes:
   app-data:
-  mysql-data:
-networks:
-  app-net:
-  db-net:
-    internal: true

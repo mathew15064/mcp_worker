@@ -1,7 +1,6 @@
 import { stringifyUnknown } from '../utils/stringifyUnknown';
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
-import Database from 'better-sqlite3';
 import config from '../config/env';
 import databaseManager from '../db/databaseManager';
 interface AdminSession {
@@ -48,35 +47,6 @@ function envAuthenticate(username: unknown, password: unknown) {
   );
 }
 
-function legacyAuthenticate(username: unknown, password: unknown) {
-  if (databaseManager.status().state !== 'MIGRATION_REQUIRED' || !databaseManager.legacyAvailable())
-    return false;
-  let db: Database.Database | null = null;
-  try {
-    db = new Database(config.DATABASE_PATH, { readonly: true, fileMustExist: true });
-    const row = db
-      .prepare<[], { username: string; password_hash: string }>(
-        "SELECT username, password_hash FROM users WHERE role = 'admin' ORDER BY created_at ASC LIMIT 1",
-      )
-      .get();
-    if (
-      !row ||
-      !timingSafeStringEqual(stringifyUnknown(username || ''), stringifyUnknown(row.username || ''))
-    )
-      return false;
-    return bcrypt.compareSync(
-      stringifyUnknown(password || ''),
-      stringifyUnknown(row.password_hash || ''),
-    );
-  } catch {
-    return false;
-  } finally {
-    try {
-      db?.close();
-    } catch {}
-  }
-}
-
 export async function authenticate(username: unknown, password: unknown) {
   if (process.env.MCP_PLATFORM === 'railway') {
     const db = databaseManager.getAdapter();
@@ -93,7 +63,6 @@ export async function authenticate(username: unknown, password: unknown) {
       : null;
   }
   if (envAuthenticate(username, password)) return identity('env');
-  if (legacyAuthenticate(username, password)) return identity('legacy');
   return null;
 }
 

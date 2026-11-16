@@ -39,5 +39,5 @@ A SQLite in-memory fixture test demonstrates the narrowed grant, same-client acc
 - Approve evidence for each historical grant and decide whether unverified elevated clients are disabled/re-authorized pending review.
 - Approve active token/session revocation, affected user notification and a non-disruptive window.
 - Approve snapshot backups, key custody, rollback, compliance retention and independent restore test.
-- Run the migration/audit on an approved representative **offline clone** with SQLite/MySQL parity before any live change.
+- Run the migration/audit on an approved representative **offline clone** using SQLite before any live change.
 - Until these decisions are made: keep historical data unchanged and release status **NO_GO**.

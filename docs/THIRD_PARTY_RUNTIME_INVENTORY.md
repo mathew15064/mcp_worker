@@ -4,30 +4,23 @@ Generated from the committed root package-lock.json using node scripts/generate-
 This is a metadata inventory for review, NOT a license notice bundle, an SBOM, or permission to redistribute.
 Inspect actual installed LICENSE/NOTICE texts and Docker image components before publication.
 
-Non-root npm packages: 262; runtime/non-dev: 156; dev-only: 106.
+Non-root npm packages: 241; runtime/non-dev: 137; dev-only: 104.
 
 | Package | Locked version | Declared license |
 | --- | --- | --- |
-| @hono/node-server | 2.1.5 | MIT |
+| @hono/node-server | 2.1.8 | MIT |
 | @modelcontextprotocol/sdk | 1.32.2 | MIT |
 | @modelcontextprotocol/sdk/node_modules/content-type | 1.0.5 | MIT |
-| @types/node | 26.6.6 | MIT |
-| @xterm/addon-fit | 0.10.0 | MIT |
-| @xterm/xterm | 5.5.0 | MIT |
 | accepts | 2.0.0 | MIT |
 | ajv | 8.20.0 | MIT |
 | ajv-formats | 3.0.1 | MIT |
-| asn1 | 0.2.6 | MIT |
-| aws-ssl-profiles | 1.1.2 | MIT |
 | base64-js | 1.5.1 | MIT |
-| bcrypt-pbkdf | 1.0.2 | BSD-3-Clause |
 | bcryptjs | 3.0.3 | BSD-3-Clause |
 | better-sqlite3 | 12.11.1 | MIT |
 | bindings | 1.5.0 | MIT |
 | bl | 4.1.0 | MIT |
 | body-parser | 2.4.0 | MIT |
 | buffer | 5.7.1 | MIT |
-| buildcheck | 0.0.7 | UNDECLARED (manual review) |
 | bytes | 3.1.2 | MIT |
 | call-bind-apply-helpers | 1.0.2 | MIT |
 | call-bound | 1.0.4 | MIT |
@@ -37,7 +30,6 @@ Non-root npm packages: 262; runtime/non-dev: 156; dev-only: 106.
 | cookie | 0.7.2 | MIT |
 | cookie-signature | 1.2.2 | MIT |
 | cors | 2.8.6 | MIT |
-| cpu-features | 0.0.10 | UNDECLARED (manual review) |
 | cross-spawn | 7.0.6 | MIT |
 | debug | 4.4.3 | MIT |
 | decompress-response | 6.0.0 | MIT |
@@ -71,14 +63,13 @@ Non-root npm packages: 262; runtime/non-dev: 156; dev-only: 106.
 | fresh | 2.0.0 | MIT |
 | fs-constants | 1.0.0 | MIT |
 | function-bind | 1.1.2 | MIT |
-| generate-function | 2.3.1 | MIT |
 | get-intrinsic | 1.3.0 | MIT |
 | get-proto | 1.0.1 | MIT |
 | github-from-package | 0.0.0 | MIT |
 | gopd | 1.2.0 | MIT |
 | has-symbols | 1.1.0 | MIT |
 | hasown | 2.0.4 | MIT |
-| hono | 4.13.14 | MIT |
+| hono | 4.13.18 | MIT |
 | http-errors | 2.0.1 | MIT |
 | iconv-lite | 0.7.3 | MIT |
 | ieee754 | 1.2.1 | BSD-3-Clause |
@@ -87,13 +78,10 @@ Non-root npm packages: 262; runtime/non-dev: 156; dev-only: 106.
 | ip-address | 10.7.4 | MIT |
 | ipaddr.js | 1.9.1 | MIT |
 | is-promise | 4.0.0 | MIT |
-| is-property | 1.0.2 | MIT |
 | isexe | 2.0.0 | ISC |
 | jose | 6.2.13 | MIT |
 | json-schema-traverse | 1.0.0 | MIT |
 | json-schema-typed | 8.0.2 | BSD-2-Clause |
-| long | 5.3.2 | Apache-2.0 |
-| lru.min | 1.1.5 | MIT |
 | math-intrinsics | 1.1.0 | MIT |
 | media-typer | 1.1.1 | MIT |
 | merge-descriptors | 2.0.0 | MIT |
@@ -103,9 +91,6 @@ Non-root npm packages: 262; runtime/non-dev: 156; dev-only: 106.
 | minimist | 1.2.8 | MIT |
 | mkdirp-classic | 0.5.3 | MIT |
 | ms | 2.1.3 | MIT |
-| mysql2 | 3.24.6 | MIT |
-| named-placeholders | 1.1.6 | MIT |
-| nan | 2.30.0 | MIT |
 | napi-build-utils | 2.0.0 | MIT |
 | negotiator | 1.1.0 | MIT |
 | node-abi | 3.100.0 | MIT |
@@ -143,8 +128,6 @@ Non-root npm packages: 262; runtime/non-dev: 156; dev-only: 106.
 | side-channel-weakmap | 1.0.2 | MIT |
 | simple-concat | 1.0.1 | MIT |
 | simple-get | 4.0.1 | MIT |
-| sql-escaper | 1.5.2 | MIT |
-| ssh2 | 1.16.0 | UNDECLARED (manual review) |
 | statuses | 2.0.2 | MIT |
 | string_decoder | 1.3.0 | MIT |
 | strip-json-comments | 2.0.1 | MIT |
@@ -152,10 +135,8 @@ Non-root npm packages: 262; runtime/non-dev: 156; dev-only: 106.
 | tar-stream | 2.2.0 | MIT |
 | toidentifier | 1.0.1 | MIT |
 | tunnel-agent | 0.6.0 | Apache-2.0 |
-| tweetnacl | 0.14.5 | Unlicense |
 | type-is | 2.1.0 | MIT |
 | uid-safe | 2.1.5 | MIT |
-| undici-types | 8.9.0 | MIT |
 | unpipe | 1.0.0 | MIT |
 | util-deprecate | 1.0.2 | MIT |
 | vary | 1.1.2 | MIT |

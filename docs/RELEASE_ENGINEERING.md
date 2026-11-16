@@ -1,41 +1,29 @@
-# Local verification and Docker publishing
+# SQLite-only release engineering (development)
 
-Use the single PC checkout of GitHub `main`. Builds and tests are **local**;
-there is no GitHub Actions or CI/CD release workflow. Do not use
-Railway-specific Dockerfiles or templates.
+This branch builds **one application image and one SQLite app-data volume**. There is no MySQL image, MySQL driver, online database conversion or dual database mode. The earlier `v2.0.0-rc.2` image/tag is historical and is **not** evidence for this source commit.
 
-## Fast checks
+## Source checks
 
-With Node 22 and dependencies already installed:
+Run from the reviewed, clean branch with Node 22:
 
 ```sh
+npm ci
 npm run typecheck
 npm run lint:typed
-npm run build
-node --test --test-concurrency=1 dist/tests/*.test.js
+npm run format:check
+npm test
 ```
 
-For isolated PC gates (including Go tests, OAuth/WSS, optional Chromium,
-disposable MySQL, and local Docker images):
+The source must match the exact Git commit being reviewed. Node TAP skips are not release evidence for the skipped scenario. Execute targeted native/Worker/browser tests in disposable environments when their prerequisites are available:
 
 ```sh
 bash scripts/local-verify-quickstart.sh --targeted
 T5_BROWSER_SANDBOX=1 bash scripts/local-verify-quickstart.sh --full
 ```
 
-The full runner records PASS, FAIL and NOT_TESTED in a private temporary
-directory. It returns 3 when mandatory prerequisites are missing; this is
-**not** an application test failure. Do not point any test to live data.
-MySQL gates require an explicit disposable localhost database and
-`T5_MYSQL_SANDBOX=1`. Chromium, Docker and non-root recovery require
-their respective documented opt-in environment variables. Go module
-tests use a locally cached module-compatible toolchain.
+The full runner records PASS / FAIL / NOT_TESTED. A missing required gate returns a **NO_GO**, not an implicit pass. The optional isolated outbound Go Worker test uses fresh SQLite in a disposable Docker container, never an external database.
 
-## Verify a standalone image
-
-The server image is built with `Dockerfile` (Node 22, pinned Go
-1.26.10 Worker builder); the optional bundled database image uses
-`Dockerfile.mysql`.
+## Build a candidate, never overwrite an existing tag
 
 ```sh
 sha="$(git rev-parse HEAD)"
@@ -49,18 +37,17 @@ docker build --pull=false -f Dockerfile \
 bash scripts/verify-oci-image-local.sh mcp-worker-local:review standalone
 ```
 
-`scripts/release-scan.sh` performs separately approved offline Trivy and
-CycloneDX checks against the app and MySQL images. It requires the pinned
-scanner and recent database cache. Check high/critical results before any
-publication, and inspect the registry manifest digest **after** pushing;
-the Docker image ID is not that digest.
+Test a new Compose project with `BOT_REPORT_SETUP_PROJECT` and `BOT_REPORT_SETUP_PORT` on an unused loopback port. Check `./setup.sh --init`, Admin login, readiness, OAuth PKCE, 15 MCP tools, Worker identity, stop/restart persistence, and the Worker installer 503 gate. Keep user volumes out of tests.
 
-## Release boundaries
+The separately approved offline Trivy / CycloneDX gate now accepts only the application image:
 
-Existing `v2.0.0-rc.1` points to a tested immutable application commit and
-a separately published registry digest. Later source cleanup on `main`
-does not change that image. Publish a new tag/digest only for a newly
-reviewed image. Production-signed Worker downloads are still disabled;
-see [signing policy](WORKER_SIGNED_RELEASE_POLICY.md). External HTTPS
-connection, independent backup/restore and native-platform acceptance
-require separate evidence before a stable release.
+```sh
+T5_ALLOW_LOCAL_TRIVY_SCAN=1 BOT_REPORT_TRIVY_CACHE=/private/scanner-cache \
+  sh scripts/release-scan.sh mcp-worker-local:review /private/evidence
+```
+
+The scanner image, vulnerability DB and application image must already be cached. This command never pulls, pushes or signs; check vulnerability DB freshness and findings explicitly.
+
+## Release boundary
+
+A passing local build is a **source candidate**, not proof that production signing roots, external HTTPS/ChatGPT OAuth, off-host recovery, supply-chain/license review or target-platform Worker installers have been approved. Until independent release-signing approval, `/worker/install*` and `/worker/dist/*` remain HTTP 503. A new immutable tag/digest requires explicit release authorization; do not rewrite `v2.0.0-rc.2`.

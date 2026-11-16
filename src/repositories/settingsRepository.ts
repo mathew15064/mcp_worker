@@ -24,16 +24,6 @@ class SettingsRepository {
 
   async set(key: string, value: unknown) {
     const now = new Date().toISOString();
-    if (this.db.kind === 'mysql') {
-      return this.db.execute(
-        `
-        INSERT INTO system_settings (\`key\`, \`value\`, updated_at)
-        VALUES (?, ?, ?)
-        ON DUPLICATE KEY UPDATE \`value\` = VALUES(\`value\`), updated_at = VALUES(updated_at)
-      `,
-        [key, stringifyUnknown(value ?? ''), now],
-      );
-    }
     return this.db.execute(
       `
       INSERT INTO system_settings (key, value, updated_at)

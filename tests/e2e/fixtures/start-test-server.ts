@@ -46,7 +46,7 @@ async function main() {
   const databaseManager = (await import('../../../src/db/databaseManager.js')).default;
   const runtimeSettings = (await import('../../../src/services/runtimeSettingsService.js')).default;
   runMigrations();
-  databaseManager.useLegacyForTests(getDb());
+  databaseManager.useSqliteForTests(getDb());
   await runtimeSettings.load(databaseManager.getAdapter());
   const oauthService = (await import('../../../src/services/mcpOAuthService.js')).default;
   const oauthRepo = (await import('../../../src/repositories/mcpOAuthRepository.js')).default;

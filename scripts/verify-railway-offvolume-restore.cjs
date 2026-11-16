@@ -94,12 +94,27 @@ function inspectSqlite(file) {
     const versions = db.prepare('SELECT version FROM railway_schema_versions').all();
     if (versions.length !== 1 || versions[0].version !== SCHEMA)
       fail('unsupported schema version');
-    const owner = db.prepare("SELECT value FROM system_settings WHERE key='bootstrap.admin_password_hash'").get();
-    if (!owner || typeof owner.value !== 'string' || !/^\$2[aby]\$/.test(owner.value))
-      fail('owner account is not claimed');
+    const standalone = process.env.W3_STANDALONE_SQLITE_TEST_ONLY === '1';
+    if (standalone) {
+      // Standalone Admin authority is supplied by ADMIN_PASSWORD in the
+      // independently retained installer env, not a Railway owner claim.
+      const required = ['users', 'terminal_profiles', 'terminal_connection_audit',
+        'worker_enrollment_tokens', 'worker_profiles', 'mcp_oauth_authorization_codes',
+        'mcp_request_audit'];
+      for (const table of required) {
+        if (!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(table))
+          fail('missing standalone table: ' + table);
+      }
+      if (db.pragma('foreign_key_check').length)
+        fail('standalone database contains orphaned foreign keys');
+    } else {
+      const owner = db.prepare("SELECT value FROM system_settings WHERE key='bootstrap.admin_password_hash'").get();
+      if (!owner || typeof owner.value !== 'string' || !/^\$2[aby]\$/.test(owner.value))
+        fail('owner account is not claimed');
+    }
     return {
       schema: versions[0].version,
-      ownerPresent: true,
+      ownerPresent: !standalone,
       sessions: db.prepare('SELECT COUNT(*) AS n FROM sessions').get().n,
       clients: db.prepare('SELECT COUNT(*) AS n FROM mcp_oauth_clients').get().n,
       workers: db.prepare('SELECT COUNT(*) AS n FROM workers').get().n,

@@ -6,17 +6,12 @@
   "main": "dist/src/server.js",
   "scripts": {
     "start": "node dist/src/server.js",
-    "init-db": "node dist/scripts/init-db.js",
+    "init-db": "node dist/scripts/init-bundled-db.js --init-fresh",
     "test": "npm run build && node --test --test-concurrency=1 dist/tests/*.test.js",
     "test:e2e": "npm run build && playwright test --config dist/playwright.config.js",
     "backup-db": "node dist/scripts/backup-db.js",
     "rotate-admin-password": "node dist/scripts/rotate-admin-password.js",
     "mcp-client": "node dist/scripts/mcp-client.js",
-    "migrate": "node dist/scripts/migrate.js migrate",
-    "migrate:status": "node dist/scripts/migrate.js status",
-    "migrate:rollback": "node dist/scripts/migrate.js rollback",
-    "migrate:reset": "node dist/scripts/migrate.js reset",
-    "migrate:fresh": "node dist/scripts/migrate.js fresh",
     "build": "node scripts/build.cjs",
     "typecheck": "tsc --noEmit",
     "first:mcp": "npm run build && node dist/scripts/first-mcp-call.js",
@@ -29,7 +24,7 @@
     "mcp",
     "worker",
     "coding-harness",
-    "mysql"
+    "sqlite"
   ],
   "license": "MIT",
   "dependencies": {
@@ -40,7 +35,6 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.3.0",
     "express-session": "^1.19.0",
-    "mysql2": "^3.24.6",
     "ws": "8.21.0",
     "zod": "^4.6.7"
   },

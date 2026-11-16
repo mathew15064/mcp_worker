@@ -1,7 +1,7 @@
 # Remote MCP and ChatGPT connector
 
 The default standalone endpoint is loopback HTTP; a cloud connector cannot
-reach it. Do not forward the standalone HTTP port or expose MySQL. Remote
+reach it. Do not forward the standalone HTTP port or expose the SQLite database volume. Remote
 configuration is an advanced deployment, not an automatically enabled
 feature. The external HTTPS flow is not yet end-to-end release-certified.
 

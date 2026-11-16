@@ -58,7 +58,7 @@ async function bootstrapStorage() {
   await databaseManager.initialize();
   if (!databaseManager.isOperational())
     throw new Error(
-      'Database is not configured or available. Configure MySQL from /admin/settings.',
+      'SQLite is not initialized or available. Run ./setup.sh --init for a fresh installation.',
     );
   await runtimeSettings.load(databaseManager.getAdapter());
 }

@@ -17,10 +17,7 @@ import settingsRepo from '../repositories/settingsRepository';
 import telegramSecrets from '../services/telegramSecretService';
 import telegramService from '../services/telegramService';
 import runtimeSettings from '../services/runtimeSettingsService';
-import legacyImporter from '../services/legacySqliteImportService';
 import databaseManager from '../db/databaseManager';
-import bootstrapConfigStore from '../db/bootstrapConfigStore';
-const { normalizeDatabaseConfig } = bootstrapConfigStore;
 import mcpConfig from '../config/mcpConfig';
 import { TOOLS } from '../mcp/toolRegistry';
 const {
@@ -141,29 +138,6 @@ async function migrateTelegramTokenIfNeeded() {
   return migrated;
 }
 
-function databaseFormInput(
-  req: Request,
-  { allowStoredPassword = true }: { allowStoredPassword?: boolean } = {},
-) {
-  const passwordInput = String(formString(req.body, 'password') || '');
-  let password = passwordInput;
-  if (!password && allowStoredPassword && bootstrapConfigStore.exists()) {
-    const stored = bootstrapConfigStore.load();
-    if (stored) password = stored.password;
-  }
-  return normalizeDatabaseConfig(
-    {
-      host: formString(req.body, 'host'),
-      port: formString(req.body, 'port'),
-      database: formString(req.body, 'database'),
-      username: formString(req.body, 'username'),
-      password,
-      ssl: formFlag(req.body, 'ssl'),
-    },
-    { requirePassword: true },
-  );
-}
-
 router.use('/admin', requireAdmin, (req, res, next) => {
   res.set('Cache-Control', 'no-store');
   next();
@@ -266,19 +240,10 @@ router.get('/admin/settings/:section', async (req, res, next) => {
     }
     const storage = databaseManager.status();
     const flash = consumeFlash(req);
-    if (
-      storage.state === 'MIGRATION_REQUIRED' &&
-      req.session?.authSource === 'legacy' &&
-      !flash.error
-    ) {
-      flash.error =
-        'You are signed in with the legacy SQLite administrator credential. Update ADMIN_USERNAME / ADMIN_PASSWORD, sign out, and sign in with ENV credentials before activating MySQL.';
-    }
     return res.type('html').send(
       settingsPage({
         activeSection: req.params.section,
         storage,
-        legacy: legacyImporter.inspect(),
         mcp: {
           enabled: runtimeSettings.bool('mcp.enabled', true),
           publicBaseUrl: mcpConfig.publicBaseUrl,
@@ -302,104 +267,6 @@ router.get('/admin/settings/:section', async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-});
-
-router.post('/admin/settings/database/test', async (req, res) => {
-  try {
-    const input = databaseFormInput(req);
-    const result = await databaseManager.testMysql(input);
-    if (String(req.get('accept') || '').includes('application/json')) return res.json(result);
-    setFlash(
-      req,
-      'success',
-      `MySQL connection successful (${stringifyUnknown(result.version || 'unknown version')}, ${stringifyUnknown(result.duration_ms)} ms).`,
-    );
-  } catch (error) {
-    if (String(req.get('accept') || '').includes('application/json'))
-      return res.status(422).json({
-        ok: false,
-        code: routeError(error).code || 'MYSQL_CONNECT_FAILED',
-        message: routeError(error).message,
-      });
-    setFlash(req, 'error', `MySQL connection failed: ${routeError(error).message}`);
-  }
-  return res.redirect('/admin/settings/database');
-});
-
-router.post('/admin/settings/database/save', async (req, res) => {
-  if (req.session?.authSource !== 'env') {
-    setFlash(
-      req,
-      'error',
-      'Saving MySQL configuration requires an administrator session authenticated by ADMIN_USERNAME / ADMIN_PASSWORD from ENV.',
-    );
-    return res.redirect('/admin/settings/database');
-  }
-  try {
-    const input = databaseFormInput(req);
-    const status = await databaseManager.saveMysqlConfig(input);
-    await runtimeSettings.load(status.operational ? databaseManager.getAdapter() : null);
-    setFlash(
-      req,
-      'success',
-      status.source?.initialized
-        ? 'MySQL connection saved. Existing mcp_worker source detected and activated without schema changes.'
-        : 'MySQL connection saved. No schema changes were applied. Initialize Source when you are ready.',
-    );
-  } catch (error) {
-    setFlash(
-      req,
-      'error',
-      `Database configuration could not be saved: ${routeError(error).message}`,
-    );
-  }
-  return res.redirect('/admin/settings/database');
-});
-
-router.post('/admin/settings/database/initialize', async (req, res) => {
-  if (req.session?.authSource !== 'env') {
-    setFlash(
-      req,
-      'error',
-      'Source initialization requires an administrator session authenticated by ADMIN_USERNAME / ADMIN_PASSWORD from ENV.',
-    );
-    return res.redirect('/admin/settings/database');
-  }
-  let prepared = null;
-  try {
-    const current = databaseManager.status();
-    if (!current.mysql)
-      throw new Error('Save the MySQL connection before initializing the source.');
-    if (current.source?.initialized) {
-      setFlash(req, 'success', 'mcp_worker source is already initialized.');
-      return res.redirect('/admin/settings/database');
-    }
-
-    prepared = await databaseManager.prepareSourceInitialization();
-    let imported = null;
-    if (!prepared.beforeSource?.migrationTable && legacyImporter.available()) {
-      imported = await legacyImporter.importTo(prepared.adapter);
-    } else {
-      await runtimeSettings.seedDefaults(prepared.adapter);
-    }
-    await databaseManager.activatePrepared(prepared);
-    prepared = null;
-    await runtimeSettings.load(databaseManager.getAdapter());
-    setFlash(
-      req,
-      'success',
-      imported?.imported
-        ? `mcp_worker source initialized and legacy data imported successfully (${Object.values(imported.counts).reduce((a: number, b) => a + Number(b || 0), 0)} records).`
-        : 'mcp_worker source initialized successfully.',
-    );
-  } catch (error) {
-    if (prepared?.adapter)
-      try {
-        await prepared.adapter.close();
-      } catch {}
-    setFlash(req, 'error', `Source initialization failed: ${routeError(error).message}`);
-  }
-  return res.redirect('/admin/settings/database');
 });
 
 router.post('/admin/settings/mcp', requireDataStore, async (req, res) => {

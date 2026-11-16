@@ -8,19 +8,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, spawnSync, type SpawnOptionsWithoutStdio } from 'node:child_process';
 
-const enabled =
-  Boolean(process.env.MYSQL_TEST_HOST) && process.env.BOT_REPORT_ISOLATED_WORKER_TEST === '1';
-
-async function mysqlAdmin(database: string) {
-  const mysql = await import('mysql2/promise');
-  return mysql.createConnection({
-    host: process.env.MYSQL_TEST_HOST,
-    port: Number(process.env.MYSQL_TEST_PORT || 3306),
-    user: process.env.MYSQL_TEST_USERNAME || 'root',
-    password: process.env.MYSQL_TEST_PASSWORD || '',
-    database,
-  });
-}
+const enabled = process.env.BOT_REPORT_ISOLATED_WORKER_TEST === '1';
 
 async function waitFor<T>(
   check: () => Promise<T> | T,
@@ -70,15 +58,6 @@ void test(
       fs.existsSync('/.dockerenv'),
       'Worker installer test must run inside a disposable Docker container',
     );
-    const database = 'bot_report_worker_live_test';
-    const rootDatabase = process.env.MYSQL_TEST_DATABASE || 'bot_report_test';
-    const admin = await mysqlAdmin(rootDatabase);
-    await admin.query(`DROP DATABASE IF EXISTS \`${database}\``);
-    await admin.query(
-      `CREATE DATABASE \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
-    );
-    await admin.end();
-
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-report-worker-live-'));
     const workRoot = path.join(dir, 'workspace');
     fs.mkdirSync(workRoot, { recursive: true });
@@ -99,24 +78,14 @@ void test(
       LOGIN_RATE_LIMIT_MAX: '1000',
     });
 
-    const bootstrapStore = (await import('../src/db/bootstrapConfigStore.js')).default;
-    bootstrapStore.save({
-      host: process.env.MYSQL_TEST_HOST,
-      port: Number(process.env.MYSQL_TEST_PORT || 3306),
-      database,
-      username: process.env.MYSQL_TEST_USERNAME || 'root',
-      password: process.env.MYSQL_TEST_PASSWORD || '',
-      ssl: false,
-    });
     const databaseManager = (await import('../src/db/databaseManager.js')).default;
     const runtimeSettings = (await import('../src/services/runtimeSettingsService.js')).default;
     databaseManager.resetForTests();
     runtimeSettings.resetForTests();
+    const { runMigrations } = await import('../src/db/migrations.js');
+    runMigrations();
     await databaseManager.initialize();
-    assert.equal(databaseManager.status().state, 'CONFIGURED');
-    const preparedSource = await databaseManager.prepareSourceInitialization();
-    await runtimeSettings.seedDefaults(preparedSource.adapter);
-    await databaseManager.activatePrepared(preparedSource);
+    await runtimeSettings.seedDefaults(databaseManager.getAdapter());
     assert.equal(databaseManager.status().state, 'READY');
 
     const app = (await import('../src/app.js')).default;
@@ -154,11 +123,6 @@ void test(
       } catch {}
       try {
         await databaseManager.close();
-      } catch {}
-      try {
-        const cleanup = await mysqlAdmin(rootDatabase);
-        await cleanup.query(`DROP DATABASE IF EXISTS \`${database}\``);
-        await cleanup.end();
       } catch {}
       fs.rmSync(dir, { recursive: true, force: true });
     });

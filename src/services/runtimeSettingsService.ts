@@ -68,21 +68,12 @@ class RuntimeSettingsService {
   async set(key: string, value: unknown, adapter: DatabaseAdapter | null = null) {
     const db = adapter || databaseManager.requireAdapter();
     const now = new Date().toISOString();
-    if (db.kind === 'mysql') {
-      await db.execute(
-        `INSERT INTO system_settings (\`key\`, \`value\`, updated_at)
-        VALUES (?, ?, ?)
-        ON DUPLICATE KEY UPDATE \`value\` = VALUES(\`value\`), updated_at = VALUES(updated_at)`,
-        [key, stringifyUnknown(value ?? ''), now],
-      );
-    } else {
-      await db.execute(
-        `INSERT INTO system_settings (key, value, updated_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-        [key, stringifyUnknown(value ?? ''), now],
-      );
-    }
+    await db.execute(
+      `INSERT INTO system_settings (key, value, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      [key, stringifyUnknown(value ?? ''), now],
+    );
     this.values.set(key, stringifyUnknown(value ?? ''));
   }
 

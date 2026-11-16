@@ -1,42 +1,16 @@
-# Docker-only release checklist
+# SQLite-only release readiness checklist
 
-The [public standalone Docker image](https://hub.docker.com/r/mathew15604/mcp-worker)
-is a **release candidate**, not a production-signed Go Worker installer release.
-GitHub `main` remains the development baseline.
+Scope: new standalone Docker installation from a **clean and reviewed source commit**; not an upgrade from earlier database formats. An older `v2.0.0-rc.2` image/tag remains a distinct historical build.
 
-- Latest Docker Hub tag: `mathew15604/mcp-worker:2.0.0-rc.2` (Linux/amd64).
-- Tested source: Git tag [`v2.0.0-rc.2`](https://github.com/mathew15064/mcp_worker/tree/v2.0.0-rc.2),
-  commit `b237d156ff49669127bfafdf700d4886746f29a5`.
-- Immutable OCI index digest: `sha256:001bb9642fd5b5098c29cecc15dc466f29c66e3a5d6d7725be84b9565134ca3b`.
-- **Erratum:** The already-published annotated Git tag message contains a truncated
-  image digest. Use the verified 64-hex-character digest above instead; do not
-  rewrite the source tag or overwrite the registry image.
-- PC checks: 169 Node tests passed (0 failed, 9 skipped), 3 real Go Worker WSS/OAuth
-  tests, 16 Chromium tests, Go unit/race/vet, exact-commit Docker build,
-  provenance verification and non-root HTTP health smoke.
-- Trivy: **0 HIGH/CRITICAL** for locally scanned app and MySQL images;
-  CycloneDX SBOMs were generated. The cached DB and scope of each scan must
-  still be reviewed independently for a stable release.
-- The legacy Node Worker runtime, unused Railway assets and runtime npm CLI
-  have been removed from the new source/image; old Git tag
-  `v2.0.0-rc.1` and its Docker image remain unchanged.
-- No GitHub Actions workflows, CI/CD or Railway deployment were used.
+- [ ] Source tree clean, `package-lock.json` matches `package.json`, one SQLite runtime adapter and no MySQL library/image/importer; record the exact Git SHA.
+- [ ] Typecheck, typed lint, formatter, complete Node test suite, and no unexpected skips; verify the 15-tool MCP schema hash against baseline.
+- [ ] Build a fresh local single-app Docker image and verify its commit/tree labels, non-root runtime and native SQLite addon.
+- [ ] Run isolated fresh `./setup.sh --init` with three generated secrets, Admin login, User/OAuth PKCE, Worker registration, WSS, audited tool calls, restart persistence and permission guards.
+- [ ] Confirm unauthenticated MCP requests are rejected and unsigned Worker installation/distribution endpoints return HTTP 503. Do **not** disable the gate to claim a release pass.
+- [ ] Run available Go test/race/vet and native signed installer negative/rollback tests. Record unavailable native OS/browser tests as NOT_TESTED.
+- [ ] Scan the single image and generated Worker binaries for dependencies, licenses and vulnerabilities; document the scanner DB recency and third-party notices.
+- [ ] For external client use: separately certify HTTPS reverse proxy, OAuth discovery/consent/PKCE, WSS transport, cookie security and exact public origin.
+- [ ] For stable Worker distribution: separately approve production signing material and target-platform native installer acceptance.
+- [ ] If real users/data will be retained, obtain separately approved backup/restore and rollback proof; no backup/restore gate is required to **reset a disposable development database**.
 
-## Before labeling a future release stable
-
-- [ ] Pin an exact clean commit and independently test/re-scan its new Docker
-  image. Record a new immutable registry digest; never silently overwrite
-  the RC tag.
-- [ ] Approve a production signing root, sign and verify Worker manifest
-  and binaries, and perform native installer acceptance. Until then
-  `/worker/install*` and `/worker/dist/*` remain HTTP 503.
-- [ ] Validate secure setup, OAuth consent and Worker enrollment on a
-  controlled HTTPS endpoint if offering remote MCP/ChatGPT use.
-- [ ] Verify off-host encrypted backup and independent restore, recovery
-  keys and permissions for any real user data.
-- [ ] Review third-party licenses and security disclosure routes.
-
-Use [release engineering](RELEASE_ENGINEERING.md),
-[signed Worker policy](WORKER_SIGNED_RELEASE_POLICY.md), and
-[backup/restore](BACKUP_RESTORE.md) for details. Do not use test-only keys
-or temporary Docker volumes for production.
+No Git push, deployment, production signing, registry publication or existing-data deletion is implied by this checklist. See [local release engineering](RELEASE_ENGINEERING.md), [quickstart](QUICKSTART.md) and [signed Worker policy](WORKER_SIGNED_RELEASE_POLICY.md).
