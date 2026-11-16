@@ -54,32 +54,39 @@ The project source is licensed under [MIT](LICENSE). Third-party components reta
 - [Release engineering](docs/RELEASE_ENGINEERING.md), [release checklist](docs/RELEASE_CHECKLIST.md) and [changelog](CHANGELOG.md)
 - [Administration and development reference](docs/ADMIN_REFERENCE.md), [contributing](CONTRIBUTING.md) and [security reporting](SECURITY.md)
 
-## Standalone Docker quickstart (local only)
+## Install from source with Docker (local only)
 
-On a Linux host with Docker Engine, Compose v2, Git, OpenSSL and flock:
+On a Linux host with Docker Engine, Compose v2, Git, OpenSSL and `flock`
+(plus `curl` for the optional health checks), with network access to fetch
+pinned base images and build dependencies:
 
 ```sh
+git clone https://github.com/mathew15064/mcp_worker.git
+cd mcp_worker
 ./setup.sh --init
+curl -fsS http://127.0.0.1:3333/healthz
+curl -fsS http://127.0.0.1:3333/readyz
 ```
 
-This builds the app and bundled MySQL 8.4.13 derivative locally and explicitly consents to initializing an empty dedicated database.
-Open http://127.0.0.1:3333/admin. The initial admin username is `admin`; read
-the generated password privately from `.env.setup` (mode 0600). Do not share
-that file, logs containing credentials, or Docker inspect output. Back up the
-env file and both named volumes together. The app binds loopback only, with
-HTTP cookies suitable for local access. Remote MCP requires HTTPS and an
-explicit public base URL; see [remote MCP and HTTPS guidance](docs/REMOTE_MCP.md).
-Do not expose the standalone HTTP port remotely.
+`./setup.sh --init` builds the app and bundled MySQL image from this source
+checkout, then explicitly initializes only an empty dedicated database.
+Open http://127.0.0.1:3333/admin and sign in as `admin`. Read the generated
+password privately from `.env.setup` (mode 0600). **Do not create a separate
+`.env` for Docker**, publish secrets, or expose this local HTTP port remotely.
+Back up `.env.setup` and both Docker data volumes together.
 
-Rerun the same command to start again without replacing secrets or migrating
-an existing database. Use `./setup.sh` to start without schema initialization;
-existing/external databases use the Admin Test/Save/Initialize workflow.
-If initialization fails or an existing database is not ready, inspect the
-state and use the Admin recovery workflow; the script does not reset it.
-`./setup.sh --down` stops the stack and retains volumes and credentials.
-For isolated testing, set BOT_REPORT_SETUP_ENV=.env.setup-test,
-BOT_REPORT_SETUP_PROJECT=mcp_worker-test and BOT_REPORT_SETUP_PORT=13333
-on first run, and reuse the same env file thereafter.
+Use `./setup.sh` to start an existing installation without initializing a
+database, and `./setup.sh --down` to stop without deleting secrets or volumes.
+Never use `docker compose down -v` to troubleshoot. For a fresh, isolated
+installation use separate `BOT_REPORT_SETUP_ENV`, `BOT_REPORT_SETUP_PROJECT`
+and `BOT_REPORT_SETUP_PORT` values; keep them consistent on subsequent runs.
+
+The Admin/MySQL setup works now, but **signed Go Worker downloads are not yet
+approved**: `/worker/install*` and `/worker/dist/*` return HTTP 503.
+Do not attempt a Worker installer or bypass the signing gate.
+See [source installation steps](docs/QUICKSTART.md),
+[manual Node development setup](docs/ADMIN_REFERENCE.md#developer-setup),
+and [backup/restore](docs/BACKUP_RESTORE.md).
 
 ## Getting Started — first authenticated call
 
@@ -93,9 +100,12 @@ For a local-only first call, create an Admin OAuth client with the exact
 redirect URI `http://127.0.0.1:43871/callback` and only the
 `bot_report.read` scope. Save the one-time secret privately. On the same
 machine as the browser and standalone service, with Node.js 22 installed,
-run:
+install and build the optional local client helper (the Docker build does not
+create `dist/` on the host):
 
 ```sh
+npm ci
+npm run build
 node dist/scripts/first-mcp-call.js http://127.0.0.1:3333
 ```
 
@@ -146,9 +156,10 @@ clients and profiles. See [Worker lifecycle](worker/README.md),
 
 ## Release status
 
-Worker-only remains an unmerged source candidate. Linux standalone installation,
-the historical 19 tools, Worker upgrade/rollback, and image vulnerability scanning have
-been verified locally. Cross-built binaries do not establish native installer
-compatibility. The [release checklist](docs/RELEASE_CHECKLIST.md) identifies
-the remaining gates; third-party distribution review, signing
-and external validation are required before publication.
+GitHub `main` is the active source baseline. Docker `2.0.0-rc.2` is a
+published Linux/amd64 **release candidate**, not a signed Go Worker release.
+Local installation, database recovery and security tests have passed, but
+cross-built Worker binaries do not establish native installer compatibility.
+Worker distribution remains HTTP 503 pending approval; external HTTPS/OAuth
+and independent offsite recovery are not release-certified. See the
+[release checklist](docs/RELEASE_CHECKLIST.md) before any stable release.

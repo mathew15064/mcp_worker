@@ -38,7 +38,7 @@ initially; use terminal and offline_access only when required. Do not paste
 secrets into chat or issue reports.
 
 Approve consent as the correct owner. Refresh the client's tool list, call
-runtime_info with empty arguments, and confirm the expected commit and 19
+runtime_info with empty arguments, and confirm the expected commit and 15
 tools in Audit Log. Then verify terminal_list and only the intended Worker
 profiles; test a harmless workspace operation before allowing writes or
 shell execution. Disable/revoke the client if the configuration is wrong.

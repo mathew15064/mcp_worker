@@ -2,56 +2,23 @@
 
 For a new installation, start with the [local quickstart](QUICKSTART.md). This reference describes the advanced V2 configuration, storage, ownership, and development interfaces.
 
-## Outbound Worker
+## Outbound Worker — signed distribution pending
 
-1. In Admin, open **Workers** and generate a short-lived one-time enrollment token.
-2. On the target machine install the Worker CLI directly from that mcp_worker deployment:
+The current server releases return **HTTP 503** with
+`WORKER_SIGNED_RELEASE_PENDING` for `/worker/install*` and
+`/worker/dist/*`. Do **not** run download-and-install instructions
+against this server or bypass the signature requirement.
 
-Linux:
+Once an independently approved signed Go Worker release exists,
+the administrator can generate a short-lived enrollment token in
+**Workers**. The Worker runs under an OS account selected by its owner,
+generates its Ed25519 private key locally and connects outbound over
+authenticated WSS. Shell execution has the authority of that OS account;
+allowed roots are not a shell sandbox. Do not replace enrolled identities
+or existing binaries with unsigned builds.
 
-```bash
-installer=$(mktemp)
-curl -fsSL https://bot-report.example.com/worker/install-linux.sh -o "$installer"
-# Inspect the downloaded installer first.
-sh "$installer"
-rm -f "$installer"
-```
-
-macOS:
-
-```bash
-installer=$(mktemp)
-curl -fsSL https://bot-report.example.com/worker/install-macos.sh -o "$installer"
-# Inspect the downloaded installer first.
-sh "$installer"
-rm -f "$installer"
-```
-
-Windows PowerShell:
-
-```powershell
-Invoke-WebRequest https://bot-report.example.com/worker/install-windows.ps1 -OutFile .\install-windows.ps1
-# Inspect the downloaded installer first.
-& .\install-windows.ps1
-```
-
-3. Run the interactive enrollment flow:
-
-```bash
-bot-report-worker login
-```
-
-**Linux service safety:** The default installer is user-mode and does not install systemd or require sudo. Under the owner-approved policy, the Worker inherits its running account's OS privileges; a separate low-privilege account is optional, not mandatory. Systemd is an explicit advanced opt-in (`BOT_REPORT_WORKER_SYSTEMD=1`); existing systemd identities cannot be changed by the manual installer. For tests, use a disposable Docker container and separate HOME, Worker home, install root and bin directory. See [Worker lifecycle](../worker/README.md) for upgrade, rollback and signing.
-
-Each installer downloads the matching standalone Go Worker from the same server and verifies it with SHA-256. `login` prompts for the one-time token, defaults to OS-permitted paths and enabled shell, generates the Ed25519 private key locally, auto-creates a Worker Profile, starts the outbound worker in the background, and waits for authenticated WSS connectivity. Interactive terminal access uses a persistent PTY shell created on demand for that profile; no tmux session or inbound SSH connection is required. Once login prints `connected`, the returned profile alias is immediately usable by the existing MCP execution tools.
-
-For automation, `bot-report-worker login` also accepts `--token`, optional `--roots`, `--name`, and `--profile`. Shell is enabled by default; `BOT_REPORT_WORKER_ALLOW_SHELL=false` disables it. The one-time token is never stored after enrollment.
-
-The private key stays in `~/.bot-report-worker/state.json` with restrictive permissions. Subsequent outbound WSS connections use signed timestamp + nonce authentication and replay protection. Administrators can disable an enrolled worker, which rejects future handshakes and terminates its active connection.
-
-Shell execution grants the mcp_worker execution surface the same command authority as the OS user **running** the Worker. New enrollments have no path allowlist; an explicit roots list restricts path-bearing APIs but is **not a shell sandbox**. Existing local `config.json` settings remain until deliberately updated. OAuth/client scopes, Worker identity, persisted capability grants and revocation remain enforced.
-
-See [Worker lifecycle](../worker/README.md) and [Worker architecture](V2_WORKER_ARCHITECTURE.md) for CLI, protocol and trust boundaries.
+See [Worker installation, lifecycle and signing](../worker/README.md)
+for the future installation flow and trust boundaries.
 
 ## Storage architecture
 
@@ -187,12 +154,12 @@ After ENV-backed administrator login, `/admin` provides:
 - **Audit Log** — MCP request history with client/tool/result filtering, compact pagination, and a viewport-bounded table with a sticky header.
 - **Users** — create/disable users, reset passwords, inspect per-user client counts, and view generated client identities.
 - **OAuth Clients** — create, rotate secret, enable/disable, revoke, delete, and jump to client activity across the installation.
-- **SSH Profiles** — Worker-backed direct shell aliases with Test Shell, Attach Shell, enable/disable, and no stored SSH credential or tmux dependency.
+- **Workers** — review enrolled Workers, execution targets and connection status; new public installer-based enrollment remains gated.
 - **Settings** — dedicated Database, MCP, Telegram, and Runtime pages.
 
 If MySQL is `UNCONFIGURED` or `DEGRADED`, Settings stays available but data pages are blocked server-side. This is not only a UI disable state.
 
-The browser shell uses short-lived one-time WebSocket tickets bound to the authenticated Admin/User session, SSH Profile ownership, and same browser origin. Browser input/output is relayed over the authenticated outbound Worker channel to a local PTY running as the Worker OS account; no SSH credential or tmux session is required.
+The removed browser SSH/terminal console and legacy SSH Profile pages are not available. Worker execution uses the authenticated outbound WSS channel and requires an approved, enrolled Worker.
 
 ## MCP and Telegram settings
 
@@ -223,8 +190,8 @@ npm run build
 HOST=127.0.0.1 npm start
 ```
 
-This is a manual development setup, not the Docker installation path.
-For Docker use `./setup.sh --init` instead; it creates its own private
+This manual development setup requires Node.js 22.x and is not the Docker
+installation path. For Docker use `./setup.sh --init` instead; it creates its own private
 `.env.setup` with separate persistent secrets. Never reuse example or
 test secrets with real data. For local Node, open
 `http://127.0.0.1:3333/admin`, sign in as `admin` with `ADMIN_PASSWORD`,
@@ -244,13 +211,20 @@ Core tests:
 npm test
 ```
 
-The optional MySQL integration test is activated by `MYSQL_TEST_HOST` and related `MYSQL_TEST_*` variables. The project test workflow can run it against a disposable MySQL 8 container. The live Worker installer/MCP integration additionally requires `BOT_REPORT_ISOLATED_WORKER_TEST=1` and a disposable Docker container (with curl, git, bash, ripgrep and OpenSSL installed). It uses a separate MySQL test database, installs and uninstalls a temporary Worker, and calls all 19 MCP tools via authenticated HTTP. Set `BOT_REPORT_WORKER_UPGRADE_FIXTURE` to a distinct previously built Linux/amd64 Worker binary inside that disposable container to exercise checksum/signature rejection, upgrade, repeated install, failed-start restoration and rollback. Never point integration tests at a production database or mount the host Worker state into the container.
+The optional MySQL integration test is activated by `MYSQL_TEST_HOST` and related `MYSQL_TEST_*` variables. The project test workflow can run it against a disposable MySQL 8 container. The live Worker installer/MCP integration additionally requires `BOT_REPORT_ISOLATED_WORKER_TEST=1` and a disposable Docker container (with curl, git, bash, ripgrep and OpenSSL installed). It uses a separate MySQL test database, installs and uninstalls a temporary Worker, and exercises the current MCP tool catalog via authenticated HTTP. Set `BOT_REPORT_WORKER_UPGRADE_FIXTURE` to a distinct previously built Linux/amd64 Worker binary inside that disposable container to exercise checksum/signature rejection, upgrade, repeated install, failed-start restoration and rollback. Never point integration tests at a production database or mount the host Worker state into the container.
 
-## SSH Profile management
+## Worker aliases and execution targets
 
-SSH Profiles are Worker-backed aliases, not stored SSH connection credentials. Enroll a Worker first, then create an SSH Profile from the Admin or User workspace and select an online Worker. A profile can be tested with **Test Shell** or opened interactively with **Attach Shell**.
+The current Go Worker-only release does not expose browser SSH terminals,
+interactive Attach Shell, or legacy Admin/User SSH Profile management.
+`terminal_list` is retained as a Worker-alias discovery tool for
+compatibility; execution uses an authenticated outbound Worker connection.
 
-The attached terminal is a persistent PTY owned by that profile and runs as the local OS account that started mcp_worker Worker. No host, SSH port, SSH username, SSH password, or tmux session is configured in the profile. Admin profiles may bind only global/admin-owned Workers; User profiles may bind only Workers owned by that user.
+Until a signed Go Worker installer is independently approved, new Worker
+enrollment through the public installer is unavailable. Do not configure
+an SSH server or store SSH passwords as a workaround. See the
+[security model](SECURITY_MODEL.md) and
+[Worker lifecycle](../worker/README.md).
 
 ## OAuth client management
 

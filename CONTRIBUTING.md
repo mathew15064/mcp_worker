@@ -4,7 +4,7 @@ This repository is the V2 source release candidate. Project source is
 licensed under MIT (see LICENSE); third-party license and distribution
 obligations remain separate. Stable signed releases require owner approval.
 
-Keep changes focused on the 19-tool V2 coding gateway. Do not add V3
+Keep changes focused on the 15-tool V2 coding gateway. Do not add V3
 business modules, private deployments, operational data or credentials.
 Use a feature branch and a small reviewable change. Explain motivation,
 compatibility, risks and test evidence; include a regression test for fixes.

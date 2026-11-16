@@ -1,84 +1,91 @@
-# Local quickstart
+# Install from source — local Docker
 
-mcp_worker V2 is a self-hosted MCP execution gateway, not an autonomous
-coding model. Start with the local-only configuration. No domain, public
-port, SSH server or ChatGPT subscription is required for the local smoke call.
+This is the recommended **local-only** setup of the mcp_worker server and
+bundled MySQL. No public domain, inbound SSH port, Railway deployment or
+ChatGPT subscription is needed. Worker installation is a separate gated
+release step described below.
 
 ## Requirements
 
-Linux Docker host, Docker Engine and Compose v2, Git, OpenSSL, flock, an
-Internet connection to fetch the pinned bases and build dependencies, and
-enough disk space for images and persistent data. Use a clean checkout of
-the approved V2 release candidate: https://github.com/mathew15064/mcp_worker. Node 26.13.0
-is required on the local client machine for the optional first-call script,
-not to run the Docker server or the Go Worker.
+A Linux machine with Docker Engine, Docker Compose v2, Git, OpenSSL and
+`flock` (plus `curl` for the optional health checks); network access for
+pinned base images and build dependencies; enough
+disk space for images and persistent volumes. The Docker image builds Node.js
+22 and Go Worker binaries inside Docker: **Node.js is not required on the
+host** for installation. Node.js **22.x** is required only if you choose the
+optional OAuth helper or manual development setup.
 
-## Start and sign in
+## Install and check readiness
 
-From a fresh checkout:
+```sh
+git clone https://github.com/mathew15064/mcp_worker.git
+cd mcp_worker
+./setup.sh --init
+curl -fsS http://127.0.0.1:3333/healthz
+curl -fsS http://127.0.0.1:3333/readyz
+```
 
-    git clone https://github.com/mathew15064/mcp_worker.git
-    cd mcp_worker
+This builds the app and MySQL images from the checked-out source, initializes
+only an empty dedicated database, and binds the application to loopback.
+MySQL is not published. A cold build needs network access and its duration
+depends on the host/cache. If an existing database is not ready, do not reset
+it; use the Admin recovery workflow.
 
-    ./setup.sh --init
+Open http://127.0.0.1:3333/admin, sign in as `admin`, and read the generated
+`ADMIN_PASSWORD` privately from `.env.setup`. The installer creates this
+file (mode 0600) with persistent database and encryption secrets; **do not
+create `.env`, share the installer file, regenerate secrets over existing
+volumes, or expose the HTTP port to the Internet**.
 
-Open http://127.0.0.1:3333/admin. Sign in as admin using the generated
-ADMIN_PASSWORD in .env.setup; view it privately on the host. This file is
-mode 0600 and contains the database and encryption secrets. Never publish
-it or regenerate it over existing volumes. The installer builds both app
-and bundled database images and initializes only an empty dedicated source.
-It binds the app to loopback; MySQL is not published. A measured local
-build is not a guaranteed cold-install time.
+`/healthz` checks that the server is alive; `/readyz` checks that the
+database is operational. In **Admin → Getting Started**, MySQL should be
+`READY` and the local MCP endpoint is http://127.0.0.1:3333/mcp.
 
-Open Getting Started. MySQL should show READY; the endpoint should be
-http://127.0.0.1:3333/mcp. Check:
+## Go Worker installation is not available in this release candidate
 
-    curl -fsS http://127.0.0.1:3333/healthz
-    curl -fsS http://127.0.0.1:3333/readyz
+The public `2.0.0-rc.2` source/image does **not** include an approved
+production-signed Worker installer. All `/worker/install*` and
+`/worker/dist/*` endpoints return **HTTP 503**
+(`WORKER_SIGNED_RELEASE_PENDING`), including local installations.
 
-Health means the web process is alive; readiness means the application
-database is operational. Do not initialize/reset a nonempty database.
+Do not download/execute example installer commands, bypass signature checks
+or replace an enrolled Worker identity. Admin/MySQL and the read-only
+`runtime_info` OAuth test below can be checked without a running Worker;
+file, Git, process and shell execution requires an approved, enrolled Worker.
+See [Worker lifecycle](../worker/README.md) for future signed-installation
+requirements.
 
-## Enroll a local Worker
+## Optional first authenticated MCP call (local host)
 
-Use a dedicated unprivileged OS account on the same host, with a dedicated
-workspace directory. In Admin Workers create a short-lived enrollment
-token. Download and inspect the Linux installer, then run it as that user:
+On the **same machine** as the server and browser, install Node.js **22.x**
+only for this helper. In the same repository checkout, create an Admin OAuth
+client with exact redirect URI `http://127.0.0.1:43871/callback`, select only
+`bot_report.read`, and save the one-time secret privately.
 
-    installer=$(mktemp)
-    curl -fsS http://127.0.0.1:3333/worker/install-linux.sh -o "$installer"
-    # Review the downloaded script before executing it.
-    sh "$installer"
-    rm -f "$installer"
-    "$HOME/.local/bin/systemtd" login --server http://127.0.0.1:3333 --insecure-http
+```sh
+npm ci
+npm run build
+node dist/scripts/first-mcp-call.js http://127.0.0.1:3333
+```
 
-Enter the token at the hidden prompt and choose only the intended workspace
-roots. Keep shell permission disabled for the first read-only call. If shell
-execution is needed later, understand that it grants the OS user's command
-authority; roots are not a shell sandbox. Use HTTPS for a remote Worker.
-Do not overwrite an existing enrolled Worker or install as root. Check
-systemtd status and actual online status in Admin. See [Worker lifecycle](../worker/README.md).
+The Docker server build does not populate host `dist/`: the local build
+above is needed for this helper. Enter the ID/secret at the terminal prompts,
+open the printed authorization URL and approve Read access. The helper
+uses PKCE and OAuth state, calls `runtime_info` and attempts token revocation.
+It does not save the credentials to disk. The local callback port must be free.
+This check does **not** enroll a Worker or validate remote ChatGPT HTTPS.
 
-## First authenticated MCP call
+## Stop, restart and recover
 
-Create an Admin OAuth client with exact redirect URI
-http://127.0.0.1:43871/callback. Select bot_report.read only; uncheck Terminal
-and Offline access. Save the one-time secret privately. On the same machine
-as the browser and server, run:
+```sh
+./setup.sh --down
+./setup.sh
+```
 
-    node dist/scripts/first-mcp-call.js http://127.0.0.1:3333
-
-Enter the ID and secret, open the printed URL in the browser and approve.
-The helper validates OAuth state, uses PKCE, invokes runtime_info and attempts
-to revoke the access token. It does not save credentials to disk. Audit Log
-should show a successful runtime_info call; refresh Getting Started.
-
-## Stop and resume
-
-    ./setup.sh --down
-    ./setup.sh --init
-
-The same installer env and volumes are retained. Do not use down -v or
-delete volumes to troubleshoot. See [backup and recovery](BACKUP_RESTORE.md)
-before any maintenance, and [troubleshooting](TROUBLESHOOTING.md) if a step fails.
-For remote connectors, read [remote MCP](REMOTE_MCP.md).
+`--down` preserves `.env.setup` and both named data volumes; `./setup.sh`
+restarts without requesting database initialization. Use `./setup.sh --init`
+only for explicit initialization of a **fresh** database. Do not use
+`down -v` or delete volumes as a troubleshooting step. Read the
+[backup and recovery guide](BACKUP_RESTORE.md) and
+[troubleshooting guide](TROUBLESHOOTING.md) before maintenance.
+For external clients, read [remote HTTPS MCP](REMOTE_MCP.md).
