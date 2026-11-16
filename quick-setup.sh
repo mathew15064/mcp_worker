@@ -22,6 +22,7 @@ case "$port" in ''|*[!0-9]*) fail 'Invalid port.' ;; esac
 # outbound IPv4 source address (no network request is sent by `ip route get`).
 find_public_origin() {
   if [ -n "${MCP_WORKER_PUBLIC_URL:-}" ]; then
+    case "$MCP_WORKER_PUBLIC_URL" in https://*) ;; *) fail 'Explicit public URL must use HTTPS.' ;; esac
     printf '%s\n' "$MCP_WORKER_PUBLIC_URL"
     return
   fi
@@ -35,8 +36,18 @@ find_public_origin() {
   if ! printf '%s\n' "$host_ip" | awk -F. 'NF != 4 {exit 1} {for(i=1;i<=4;i++) if($i !~ /^[0-9]+$/ || $i > 255 || $i < 0) exit 1}'; then
     fail 'Cannot determine host IPv4; set MCP_WORKER_PUBLIC_IP or MCP_WORKER_PUBLIC_URL.'
   fi
-  case "$host_ip" in 0.*|127.*|169.254.*|255.*) fail 'Unusable host IP; set MCP_WORKER_PUBLIC_URL.' ;; esac
-  printf 'http://%s:%s\n' "$host_ip" "$port"
+  case "$host_ip" in
+    0.*|10.*|127.*|169.254.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|192.168.*|255.*)
+      fail 'Private/unusable host IP; supply MCP_WORKER_PUBLIC_IP or an HTTPS public URL.' ;;
+  esac
+  https_port="${MCP_WORKER_HTTPS_PORT:-443}"
+  case "$https_port" in ''|*[!0-9]*) fail 'MCP_WORKER_HTTPS_PORT must be numeric.' ;; esac
+  [ "$https_port" -ge 1 ] && [ "$https_port" -le 65535 ] || fail 'HTTPS port out of range.'
+  if [ "$https_port" -eq 443 ]; then
+    printf 'https://%s\n' "$host_ip"
+  else
+    printf 'https://%s:%s\n' "$host_ip" "$https_port"
+  fi
 }
 
 envfile="$PWD/.env.setup"
@@ -95,25 +106,36 @@ if [ -e "$envfile" ]; then
   [ -n "$saved_port" ] && [ "$saved_port" = "$port" ] || fail 'Saved port differs from requested port.'
 fi
 
-saved_origin=""
-if [ -f "$envfile" ]; then saved_origin="$(sed -n 's/^MCP_PUBLIC_BASE_URL=//p' "$envfile")"; fi
-public_origin="${saved_origin:-$(find_public_origin)}"
-case "$public_origin" in http://*|https://*) ;; *) fail 'Public URL must start with http:// or https://.' ;; esac
-case "$public_origin" in *[[:space:]]*|*'#'*|*'?'*|*'@'*) fail 'Invalid public origin.' ;; esac
-
 if [ "$mode" != --init ] && [ ! -e "$envfile" ]; then
   fail 'No installation found. Use --init for a fresh instance.'
 fi
 
-# Host bind is deliberately public; inside the container the server already
-# listens on 0.0.0.0. Do not use 0.0.0.0 as the OAuth public URL.
+saved_origin=""
+if [ -f "$envfile" ]; then saved_origin="$(sed -n 's/^MCP_PUBLIC_BASE_URL=//p' "$envfile")"; fi
+public_origin="${saved_origin:-$(find_public_origin)}"
+case "$public_origin" in
+  https://*) ;;
+  http://*) [ -n "$saved_origin" ] || fail 'New public deployments require HTTPS.' ;;
+  *) fail 'Public URL must start with HTTPS.' ;;
+esac
+origin_authority="${public_origin#*://}"
+case "$origin_authority" in
+  ''|*/*|*'@'*|*'?'*|*'#'*|*[!a-zA-Z0-9.:_-]*)
+    fail 'Public URL must be a bare IP/hostname HTTPS origin and optional port.' ;;
+esac
+
+# HTTPS is terminated by a trusted local proxy; keep its backend loopback-only.
+# Legacy HTTP servers retain their binding until a deliberate HTTPS migration.
 start_server() {
   run_image="$1"
-  bind_host="${2:-0.0.0.0}"
+  case "$public_origin" in
+    https://*) bind_host="127.0.0.1"; trust_proxy=1; cookie_secure=true ;;
+    *) bind_host="${2:-0.0.0.0}"; trust_proxy=false; cookie_secure=false ;;
+  esac
   set -- docker run -d --name "$name" --init --restart unless-stopped \
     --label mcp_worker.install=quick \
     --env-file "$envfile" -e NODE_ENV=production -e PORT=80 -e HOST=0.0.0.0 \
-    -e TRUST_PROXY=false -e COOKIE_SECURE=false \
+    -e "TRUST_PROXY=$trust_proxy" -e "COOKIE_SECURE=$cookie_secure" \
     -e "MCP_PUBLIC_BASE_URL=$public_origin" \
     --publish "$bind_host:$port:80" \
     --mount "type=volume,src=$volume,dst=/app/data"
@@ -124,6 +146,7 @@ start_server() {
 }
 
 if [ "$mode" = --rebind ]; then
+  case "$public_origin" in https://*) fail '--rebind cannot publicly expose an HTTPS-proxied backend.' ;; esac
   container_exists || fail 'No installed Quick Setup container to rebind.'
   verify_ownership
   verify_signed_dist_mount
@@ -175,6 +198,10 @@ else
   fi
   [ -f "$envfile" ] && [ ! -L "$envfile" ] || fail 'Private .env.setup missing.'
   [ "$(stat -c %a "$envfile")" = 600 ] || fail '.env.setup must have permission 0600.'
+  # --init must never recreate an orphaned existing database.
+  if [ "$mode" = --init ] && volume_exists; then
+    fail 'Existing SQLite volume detected; --init refused. Restore the container or use --start.'
+  fi
   # Do not start if another container holds this SQLite volume.
   if volume_exists; then
     users="$(docker ps -q --filter "volume=$volume")"
@@ -196,4 +223,10 @@ until docker exec "$name" node -e "fetch('http://127.0.0.1:80/readyz').then(r=>p
   [ "$tries" -lt 40 ] || fail "Readiness failed. Check docker logs $name; data retained."
   sleep 1
 done
-echo "Ready: listening on 0.0.0.0:$port; public URL $public_origin (Admin password in $envfile)"
+case "$public_origin" in
+  https://*)
+    echo "Ready: backend on 127.0.0.1:$port; HTTPS origin $public_origin (Admin password in $envfile)"
+    echo "HTTPS needs a valid certificate and reverse proxy at this origin; verify externally before enrolling Workers." ;;
+  *)
+    echo "Ready: legacy HTTP on 0.0.0.0:$port; public URL $public_origin (Admin password in $envfile)" ;;
+esac
