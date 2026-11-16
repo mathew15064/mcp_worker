@@ -62,6 +62,7 @@ fi
 signed_dist_dir="${MCP_WORKER_SIGNED_DIST_DIR:-}"
 if [ -n "$signed_dist_dir" ]; then
   case "$signed_dist_dir" in /*) ;; *) fail 'Signed distribution directory must be an absolute path.' ;; esac
+  case "$signed_dist_dir" in *','*|*[[:cntrl:]]*) fail 'Signed distribution directory contains unsafe mount characters.' ;; esac
   [ -d "$signed_dist_dir" ] && [ ! -L "$signed_dist_dir" ] || fail 'Signed distribution directory missing or symlinked.'
   [ "$(cd "$signed_dist_dir" && pwd -P)" = "$signed_dist_dir" ] || fail 'Signed distribution directory must use its canonical path.'
   command -v sha256sum >/dev/null 2>&1 && command -v cmp >/dev/null 2>&1 || fail 'Signed distribution checks require sha256sum and cmp.'
