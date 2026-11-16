@@ -1,122 +1,95 @@
 # mcp_worker
 
-## Docker image (public release candidate)
+**A self-hosted MCP server that lets an authorized AI client use tools on your own machines through outbound Go Workers.** The server manages users, OAuth, Worker connections and audit records; the Worker performs approved file, Git, command and process operations.
 
-The standalone Linux/amd64 image is available on
-[Docker Hub](https://hub.docker.com/r/mathew15604/mcp-worker).
-Latest candidate: [v2.0.0-rc.2 source](https://github.com/mathew15064/mcp_worker/tree/v2.0.0-rc.2) (Go Worker only). The previous `2.0.0-rc.1` remains available.
+> **Current status:** SQLite-only development baseline on [`main`](https://github.com/mathew15064/mcp_worker/tree/main). The server and Go Worker have passed local integration tests, but **public signed Worker installation is not yet released**. Use a disposable test environment until you have reviewed the [security model](docs/SECURITY_MODEL.md).
 
-```sh
-docker pull mathew15604/mcp-worker:2.0.0-rc.2
+## How it works
+
+```mermaid
+flowchart TD
+    A["ChatGPT / MCP client"] -->|"OAuth 2.0 + PKCE"| B["mcp_worker server"]
+    D["Admin browser"] -->|"Admin sign-in"| B
+    B <--> C[("Persistent SQLite volume")]
+    W["Go Worker on your machine"] -->|"Outbound authenticated WSS"| B
+    W --> E["Allowed workspace / local tools"]
 ```
 
-Immutable image: `docker.io/mathew15604/mcp-worker@sha256:001bb9642fd5b5098c29cecc15dc466f29c66e3a5d6d7725be84b9565134ca3b`.
+- **One server, one SQLite volume:** no MySQL, Redis, external database or inbound SSH.
+- **Outbound Workers:** the Worker initiates the authenticated WSS connection; the server does not connect via SSH or store SSH passwords.
+- **15 MCP tools:** runtime info, Worker discovery, workspace commands, files, Git review, checks and managed processes.
+- **Security boundaries:** OAuth scopes, Worker identity, owner access controls and audit records. A Worker executes with its **operating-system user's permissions**; allowed workspace paths do not sandbox arbitrary shell commands.
 
-**Digest erratum:** The existing annotated Git tag message for `v2.0.0-rc.2` accidentally truncates the digest; use the verified 64-character digest above.
+## Quick start: local Docker
 
-**Release-candidate limitations:** The signed Worker installer distribution remains disabled
-(`/worker/install*` and `/worker/dist/*` return HTTP 503); this is not a
-production-signed Worker release. Configure secrets and persistent data/backup
-storage before using the container with real data. No Railway service or CI/CD is required.
-
-mcp_worker is a deterministic MCP coding execution harness. ChatGPT performs reasoning; mcp_worker exposes bounded MCP primitives and routes execution through an explicit execution profile.
-
-Worker-only deployment: machines run standalone Go Workers that connect **outbound** over
-authenticated WSS. The MCP server never opens inbound SSH connections or stores SSH
-credentials. Browser SSH/terminal consoles and user/admin SSH Profiles are removed.
-
-    ChatGPT / MCP Client -> OAuth/PKCE -> mcp_worker MCP Server
-                                         |
-                                  authenticated WSS
-                                         |
-                                  enrolled Go Worker -> local machine
-
-The Admin UI focuses on OAuth Clients, Workers (including Execution Targets), Audit
-and system settings. The terminal_list tool still lists Worker aliases for compatibility.
-
-## Version and release policy
-
-GitHub `main` is the active development baseline. The Worker-only service exposes MCP tools over outbound Go Worker transport. Docker release candidates use versioned Git tags; the signed Worker installer remains gated until separately approved. See [release checklist](docs/RELEASE_CHECKLIST.md).
-
-## Compatibility identifiers
-
-The product is mcp_worker. The V2 OAuth scopes (bot_report.read and bot_report.terminal), BOT_REPORT_* configuration variables, Worker binary filenames, systemtd CLI, existing Worker state directories and database schema retain their historical identifiers for compatibility. Existing installer env files keep their project name; fresh standalone installs default to mcp_worker. Do not rename or copy live Worker identities.
-
-## License
-
-The project source is licensed under [MIT](LICENSE). Third-party components retain their own licenses and notices; see [dependency review](docs/THIRD_PARTY_DEPENDENCIES.md).
-
-## Documentation
-
-- [Local quickstart](docs/QUICKSTART.md) and [remote MCP / ChatGPT](docs/REMOTE_MCP.md)
-- [Worker installation and lifecycle](worker/README.md) and [security model](docs/SECURITY_MODEL.md)
-- [Backup, restore and upgrade](docs/BACKUP_RESTORE.md) and [troubleshooting](docs/TROUBLESHOOTING.md)
-- [Release engineering](docs/RELEASE_ENGINEERING.md), [release checklist](docs/RELEASE_CHECKLIST.md) and [changelog](CHANGELOG.md)
-- [Administration and development reference](docs/ADMIN_REFERENCE.md), [contributing](CONTRIBUTING.md) and [security reporting](SECURITY.md)
-
-## Install from source (local Docker)
-
-On Linux with Docker Engine, Compose v2, Git, OpenSSL, `flock` and Internet
-access for the pinned build dependencies:
+Use the **source installer** for first-time setup. It builds the application image locally and generates the three required secrets. Requirements: Linux, Docker Engine, Compose v2, Git, OpenSSL, `flock` and network access to build dependencies.
 
 ```sh
 git clone https://github.com/mathew15064/mcp_worker.git
 cd mcp_worker
 ./setup.sh --init
+curl -fsS http://127.0.0.1:3333/readyz
 ```
 
-Open http://127.0.0.1:3333/admin as `admin`. The installer generates the
-password and other persistent secrets in private `.env.setup`. **Do not
-create a separate `.env` for Docker, expose the local HTTP port, or delete
-data volumes.** Back up `.env.setup` and both named volumes together.
+Open **http://127.0.0.1:3333/admin**. Sign in as `admin` with `ADMIN_PASSWORD` from the private `.env.setup` file. The installer binds HTTP to **localhost only**, creates a persistent SQLite volume and stores the password, session secret and encryption key in `.env.setup` (file mode `0600`).
 
-**Worker installer unavailable:** signed Go Worker distribution is not yet
-approved; `/worker/install*` and `/worker/dist/*` return HTTP 503.
-Do not bypass the signature gate.
+To stop and restart without deleting data:
 
-For prerequisites, health checks, stopping/restarting, recovery and the
-optional local OAuth call, follow the **[source installation quickstart](docs/QUICKSTART.md)**.
-Manual Node development: [Admin reference](docs/ADMIN_REFERENCE.md#developer-setup).
-Remote connections: [HTTPS and MCP](docs/REMOTE_MCP.md).
+```sh
+./setup.sh --down
+./setup.sh
+```
 
-## Core MCP tools
+**Never run `docker compose down -v` on an installation whose data you need.** Keep `.env.setup` and the named `app-data` volume together for recovery. The `--init` command is for a **fresh** database, not an upgrade from MySQL.
 
-The Worker-only MCP registry exposes exactly **15 tools**:
+For prerequisites, troubleshooting, OAuth testing and data recovery, see the [full installation guide](docs/QUICKSTART.md) and [backup/restore guide](docs/BACKUP_RESTORE.md).
 
-- Runtime: runtime_info
-- Worker alias discovery: terminal_list
-- Execution and evidence: workspace_exec, artifact_collect
-- Files: file_read, file_write, file_patch
-- Git/review: repo_snapshot, git_diff, code_search
-- Checks: check_run
-- Managed processes: process_start, process_status, process_logs, process_stop
+## Docker Hub images
 
-All execution travels through the selected Worker over authenticated outbound
-WSS. The retired interactive terminal_status, terminal_read, terminal_send
-and terminal_interrupt tools are no longer available. No SSH credentials are
-accepted. The OAuth scope bot_report.terminal remains for compatibility and
-now authorizes **Worker execution only**.
+Development builds and historical release candidates are listed on [Docker Hub — mathew15604/mcp-worker](https://hub.docker.com/r/mathew15604/mcp-worker/tags). **Check the image tag and its Git revision before use**; a public image is not automatically a production-stable release.
 
-## Worker and security boundaries
+You can pull a chosen tag with:
 
-The Go Worker connects outbound over authenticated WSS, with its private
-Ed25519 key stored locally. Install under a dedicated unprivileged account,
-enroll with a one-time token and select only intended workspace roots.
-The default Linux installer does not require sudo or install systemd.
+```sh
+docker pull mathew15604/mcp-worker:<tag>
+```
 
-**Shell access is OS-user authority. Allowed roots are not a shell sandbox.**
-Use an independently configured OS/container sandbox for stronger isolation.
-Start with read-only OAuth access, then grant terminal scope only to intended
-clients and profiles. See [Worker lifecycle](worker/README.md),
-[security model](docs/SECURITY_MODEL.md) and
-[administration reference](docs/ADMIN_REFERENCE.md).
+A pull only downloads an image. The recommended `./setup.sh --init` path above **builds from checked-out source**, initializes SQLite and configures credentials and the volume; it does not automatically use an image you just pulled. The previous `2.0.0-rc.2` image is historical, not this SQLite-only baseline.
 
-## Release status
+## What can I test today?
 
-GitHub `main` is the active source baseline. Docker `2.0.0-rc.2` is a
-published Linux/amd64 **release candidate**, not a signed Go Worker release.
-Local installation, database recovery and security tests have passed, but
-cross-built Worker binaries do not establish native installer compatibility.
-Worker distribution remains HTTP 503 pending approval; external HTTPS/OAuth
-and independent offsite recovery are not release-certified. See the
-[release checklist](docs/RELEASE_CHECKLIST.md) before any stable release.
+| Feature | Local development status |
+| --- | --- |
+| Docker fresh install + persistent SQLite | Verified |
+| Admin login, Users, OAuth 2.0 / PKCE | Verified |
+| MCP registry (15 tools) | Verified |
+| Go Worker WSS, authorization and execution | Verified in isolated integration tests |
+| Browser/Admin UI | Verified with Chromium |
+| Public signed Go Worker installer/binary downloads | **Unavailable — HTTP 503** |
+| External HTTPS / ChatGPT OAuth / native OS installers | Not yet certified for public release |
+
+**Important:** `/worker/install*` and `/worker/dist/*` deliberately return `503 WORKER_SIGNED_RELEASE_PENDING` until an owner-approved signed Worker release exists. The Docker server image may contain compiled Go binaries, but **that does not authorize unsigned public installation**. Do not bypass signature checks. For the future approved installation process, read [Worker documentation](worker/README.md).
+
+## Available MCP tools
+
+The server exposes exactly **15** authenticated tools:
+
+| Purpose | Tools |
+| --- | --- |
+| Runtime and Worker discovery | `runtime_info`, `terminal_list` |
+| Commands and artifacts | `workspace_exec`, `artifact_collect` |
+| Files | `file_read`, `file_write`, `file_patch` |
+| Source inspection | `repo_snapshot`, `git_diff`, `code_search` |
+| Tests | `check_run` |
+| Managed processes | `process_start`, `process_status`, `process_logs`, `process_stop` |
+
+The legacy `bot_report.*` OAuth scopes, `BOT_REPORT_*` settings and `systemtd` Worker CLI names are retained for compatibility; the interactive SSH tools have been retired.
+
+## Documentation and contributions
+
+- [Local setup](docs/QUICKSTART.md) · [Remote HTTPS / OAuth / ChatGPT](docs/REMOTE_MCP.md) · [Admin / development](docs/ADMIN_REFERENCE.md)
+- [Go Worker lifecycle](worker/README.md) · [Security model](docs/SECURITY_MODEL.md) · [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Release checklist](docs/RELEASE_CHECKLIST.md) · [Release engineering](docs/RELEASE_ENGINEERING.md) · [Dependencies and notices](docs/THIRD_PARTY_DEPENDENCIES.md)
+- [Contributing](CONTRIBUTING.md) · [Security reporting](SECURITY.md) · [Changelog](CHANGELOG.md)
+
+**License:** [MIT](LICENSE). Third-party dependencies retain their own licenses.
