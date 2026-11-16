@@ -23,7 +23,7 @@ services:
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?run setup.sh}
       MCP_PUBLIC_BASE_URL: http://127.0.0.1:${MCP_WORKER_PORT:-3333}
     ports:
-      - "127.0.0.1:${MCP_WORKER_PORT:-3333}:80"
+      - "0.0.0.0:${MCP_WORKER_PORT:-3333}:80"
     volumes:
       - app-data:/app/data
 volumes:

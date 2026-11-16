@@ -36,12 +36,21 @@ sh quick-setup.sh --init
 The script pulls `mathew15604/mcp-worker:dev-main`. A Node command *inside that image*
 creates a private **`.env.setup` on your host** (mode 0600) with three random
 secrets. The script initializes a new persistent volume (`mcp_worker_quick_app-data`)
-only when requested and binds the Admin UI to **http://127.0.0.1:3333/admin**.
-Read `ADMIN_PASSWORD` privately from `.env.setup` and log in as `admin`.
+only when requested and publishes port **3333 on `0.0.0.0`** (all IPv4 interfaces).
+Open **`http://YOUR_VPS_IP:3333/admin`** from another machine, or
+`http://127.0.0.1:3333/admin` on the VPS itself. Read `ADMIN_PASSWORD`
+privately from `.env.setup` and log in as `admin`.
+
+**Security:** This exposes the Admin login over plain HTTP wherever the VPS
+firewall allows port 3333. Restrict access to trusted IPs or put the server
+behind HTTPS before using it over the public Internet. For remote OAuth/MCP,
+configure an HTTPS public base URL separately; `0.0.0.0` is a listening address,
+not a client-facing URL.
 
 ```sh
-sh quick-setup.sh --down    # stop; keep credentials and database
-sh quick-setup.sh --start   # restart using the same image and volume
+sh quick-setup.sh --down     # stop; keep credentials and database
+sh quick-setup.sh --start    # restart using the same image and volume
+sh quick-setup.sh --rebind   # move existing localhost-only install to 0.0.0.0
 ```
 
 You can pin an immutable registry digest with `MCP_WORKER_IMAGE=docker.io/mathew15604/mcp-worker@sha256:...`
@@ -56,6 +65,9 @@ git clone https://github.com/mathew15064/mcp_worker.git
 cd mcp_worker
 ./setup.sh --init
 ```
+
+This mode also publishes port 3333 on `0.0.0.0`; the same firewall and HTTPS
+considerations apply.
 
 This mode checks for a **matching local build** using its embedded Git revision
 and source-tree SHA. When both match (including the locally cached Docker Hub image), it skips the build. Otherwise Docker builds

@@ -32,15 +32,27 @@ curl -fsS http://127.0.0.1:3333/readyz
 ```
 
 This reuses a matching local image or builds one from checked-out source, initializes
-a new SQLite database on the persistent app-data volume, and binds the service to loopback.
+a new SQLite database on the persistent app-data volume, and publishes port 3333 on **all IPv4 interfaces (`0.0.0.0`)**.
 There is no database server or exposed database port. A cold build needs network access and its duration
 depends on the host/cache. This release expects a fresh SQLite volume. Older SQLite filenames require the explicit offline migration documented in BACKUP_RESTORE.md.
 
-Open http://127.0.0.1:3333/admin, sign in as `admin`, and read the generated
+From another machine, open `http://YOUR_VPS_IP:3333/admin` (or use
+`http://127.0.0.1:3333/admin` on the VPS itself), sign in as `admin`, and read the generated
 `ADMIN_PASSWORD` privately from `.env.setup`. The installer creates this
 file (mode 0600) with three generated secrets (ADMIN_PASSWORD, SESSION_SECRET, APP_ENCRYPTION_KEY); **do not
 create `.env`, share the installer file, regenerate secrets over existing
 volumes, or expose the HTTP port to the Internet**.
+
+**Security warning:** The published port is reachable from every network interface
+unless restricted by the host/cloud firewall. Plain HTTP exposes Admin login
+credentials to network observers; allow only trusted IPs or add an HTTPS reverse
+proxy before Internet access. A bind address is not an OAuth issuer: configure
+the public HTTPS base URL separately for remote MCP clients.
+
+Existing Quick Setup installations that were bound to `127.0.0.1` can safely
+switch to the new host binding with `sh quick-setup.sh --rebind`; this recreates
+only the managed container and keeps the original image, SQLite volume and
+`.env.setup` secrets.
 
 `/healthz` checks that the server is alive; `/readyz` checks that the
 database is operational. In **Admin → Getting Started**, SQLite should be

@@ -3,11 +3,11 @@
 set -eu
 umask 077
 fail() { printf 'Quick setup: %s\n' "$*" >&2; exit 1; }
-usage() { echo 'Usage: sh quick-setup.sh [--init|--start|--down] (default: --init)'; }
+usage() { echo 'Usage: sh quick-setup.sh [--init|--start|--rebind|--down] (default: --init)'; }
 
 mode="${1:---init}"
 [ "$#" -le 1 ] || fail 'Unexpected argument.'
-case "$mode" in --init|--start|--down) ;; -h|--help) usage; exit 0 ;; *) usage; exit 2 ;; esac
+case "$mode" in --init|--start|--rebind|--down) ;; -h|--help) usage; exit 0 ;; *) usage; exit 2 ;; esac
 command -v docker >/dev/null 2>&1 || fail 'Docker Engine is required.'
 docker info >/dev/null 2>&1 || fail 'Docker daemon is unavailable.'
 name="${MCP_WORKER_CONTAINER:-mcp_worker-server}"
@@ -51,11 +51,49 @@ if [ -e "$envfile" ]; then
   [ -n "$saved_port" ] && [ "$saved_port" = "$port" ] || fail 'Saved port differs from requested port.'
 fi
 
-if [ "$mode" = --start ] && [ ! -e "$envfile" ]; then
+if [ "$mode" != --init ] && [ ! -e "$envfile" ]; then
   fail 'No installation found. Use --init for a fresh instance.'
 fi
 
-if container_exists; then
+# Host bind is deliberately public; inside the container the server already
+# listens on 0.0.0.0. Do not use 0.0.0.0 as the OAuth public URL.
+start_server() {
+  run_image="$1"
+  bind_host="${2:-0.0.0.0}"
+  docker run -d --name "$name" --init --restart unless-stopped \
+    --label mcp_worker.install=quick \
+    --env-file "$envfile" -e NODE_ENV=production -e PORT=80 -e HOST=0.0.0.0 \
+    -e TRUST_PROXY=false -e COOKIE_SECURE=false \
+    -e "MCP_PUBLIC_BASE_URL=http://127.0.0.1:$port" \
+    --publish "$bind_host:$port:80" \
+    --mount "type=volume,src=$volume,dst=/app/data" "$run_image" >/dev/null
+}
+
+if [ "$mode" = --rebind ]; then
+  container_exists || fail 'No installed Quick Setup container to rebind.'
+  verify_ownership
+  attached_volume="$(docker inspect "$name" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Name}}{{end}}{{end}}')"
+  [ "$attached_volume" = "$volume" ] || fail 'Unexpected SQLite volume; refusing to recreate container.'
+  published="$(docker port "$name" 80/tcp)"
+  case "$published" in
+    "0.0.0.0:$port")
+      if [ "$(docker inspect "$name" --format '{{.State.Running}}')" != true ]; then
+        docker start "$name" >/dev/null
+      fi
+      echo "Already listening on 0.0.0.0:$port." ;;
+    "127.0.0.1:$port")
+      original_image="$(docker inspect "$name" --format '{{.Image}}')"
+      docker stop "$name" >/dev/null
+      docker rm "$name" >/dev/null
+      if ! start_server "$original_image"; then
+        docker rm -f "$name" >/dev/null 2>&1 || true
+        start_server "$original_image" 127.0.0.1 || fail 'Rebind and restore both failed; SQLite and secrets retained.'
+        fail 'Rebind failed; original loopback binding restored.'
+      fi
+      echo "Updated host binding to 0.0.0.0:$port; SQLite and secrets retained." ;;
+    *) fail "Unexpected published port: $published" ;;
+  esac
+elif container_exists; then
   # An installed instance may restart even after the public dev-main tag moves.
   # Never pull a replacement automatically over an existing SQLite database.
   verify_ownership
@@ -93,13 +131,7 @@ else
       --mount "type=volume,src=$volume,dst=/app/data" --entrypoint node "$image" \
       scripts/init-bundled-db.js --init-fresh
   fi
-  docker run -d --name "$name" --init --restart unless-stopped \
-    --label mcp_worker.install=quick \
-    --env-file "$envfile" -e NODE_ENV=production -e PORT=80 -e HOST=0.0.0.0 \
-    -e TRUST_PROXY=false -e COOKIE_SECURE=false \
-    -e "MCP_PUBLIC_BASE_URL=http://127.0.0.1:$port" \
-    --publish "127.0.0.1:$port:80" \
-    --mount "type=volume,src=$volume,dst=/app/data" "$image" >/dev/null
+  start_server "$image"
 fi
 
 tries=0
@@ -108,4 +140,4 @@ until docker exec "$name" node -e "fetch('http://127.0.0.1:80/readyz').then(r=>p
   [ "$tries" -lt 40 ] || fail "Readiness failed. Check docker logs $name; data retained."
   sleep 1
 done
-echo "Ready: http://127.0.0.1:$port/admin (username admin; password in $envfile)"
+echo "Ready: listening on 0.0.0.0:$port; open http://YOUR_VPS_IP:$port/admin (username admin; password in $envfile)"
