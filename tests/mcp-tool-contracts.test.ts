@@ -30,7 +30,7 @@ void test('TS3 catalog preserves all 15 Worker-only tool schemas and order', () 
   );
   assert.equal(
     runtimeInfo._test.schemaFingerprint(TOOLS),
-    'a79786ed09ba2e8eef30ec778453b17c81963bf943542c1f2ea0f87952e4a032',
+    '8c2deb08d22abfd11a34827b461d1f22142dba368dd05ecda02db3c4a072b579',
   );
   assert.ok(TOOLS.every((tool) => typeof tool.handler === 'function'));
 });

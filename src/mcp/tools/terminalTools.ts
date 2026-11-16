@@ -32,7 +32,7 @@ export const listTerminals = defineTool({
     'List enrolled Worker execution target aliases. No SSH hostnames, credentials or direct connections.',
   schema: {},
   domain: 'Worker Execution',
-  requiredScope: 'bot_report.terminal',
+  requiredScope: 'mcp_worker.terminal',
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
   async handler(args = {}, service = checkedTerminalService) {
     void args;
@@ -69,7 +69,7 @@ export const workspaceExec = defineTool({
       .describe('Execution timeout in milliseconds (max 300000ms / 5 min)'),
   },
   domain: 'Worker Execution',
-  requiredScope: 'bot_report.terminal',
+  requiredScope: 'mcp_worker.terminal',
   annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: true },
   async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
@@ -105,7 +105,7 @@ export const artifactCollect = defineTool({
       .describe('Maximum allowed artifact size in bytes (default 2 MiB, max 10 MiB)'),
   },
   domain: 'Worker Execution',
-  requiredScope: 'bot_report.terminal',
+  requiredScope: 'mcp_worker.terminal',
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
   async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();

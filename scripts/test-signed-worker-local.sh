@@ -41,7 +41,7 @@ SOURCE_COMMIT="$(git rev-parse HEAD)"
 TEST_VERSION=0.0.0
 build_one() {
   os="$1"; arch="$2"; suffix="$3"; ext="$4"; arm="${5:-}"
-  dest="$TEMP_DIR/bot-report-worker-$os-$suffix$ext"
+  dest="$TEMP_DIR/worker_mcp-$os-$suffix$ext"
   echo "[T2] PC cross-build: $os/$arch ($suffix); native target execution NOT_TESTED unless linux/amd64"
   ( cd worker-go && CGO_ENABLED=0 GOTOOLCHAIN=auto GOOS="$os" GOARCH="$arch" GOARM="$arm" "$GO_BIN" build \
     -buildvcs=false -trimpath \
@@ -67,7 +67,7 @@ build_one windows amd64 amd64 .exe
 build_one windows arm64 arm64 .exe
 
 if [ "$(uname -s)" = Linux ] && [ "$(uname -m)" = x86_64 ]; then
-  OUTPUT="$("$TEMP_DIR/bot-report-worker-linux-amd64" version)"
+  OUTPUT="$("$TEMP_DIR/worker_mcp-linux-amd64" version)"
   case "$OUTPUT" in "worker_mcp $TEST_VERSION commit=$SOURCE_COMMIT runtime="*) ;;
     *) echo "[T2] locally built Go binary returned unexpected version/commit" >&2; exit 1;;
   esac

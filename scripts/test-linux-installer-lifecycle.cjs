@@ -38,7 +38,7 @@ function fingerprint(data) {
 async function main() {
   if (process.platform !== 'linux' || process.arch !== 'x64')
     throw new Error('Only supported on native Linux x64');
-  if (process.env.BOT_REPORT_LIFECYCLE_TEST_ORIGIN)
+  if (process.env.MCP_WORKER_LIFECYCLE_TEST_ORIGIN)
     throw new Error('External staging origin is no longer used; this fixture serves its own test-only loopback release');
 
   const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ts63-linux-worker-lifecycle-'));
@@ -93,14 +93,14 @@ async function main() {
     const publicKeyBase64 = Buffer.from(publicKey.export({ type: 'spki', format: 'pem' })).toString('base64');
     const publicKeySha256 = fingerprint(publicKey.export({ type: 'spki', format: 'der' }));
     const files = [
-      'bot-report-worker-darwin-amd64',
-      'bot-report-worker-darwin-arm64',
-      'bot-report-worker-linux-386',
-      'bot-report-worker-linux-amd64',
-      'bot-report-worker-linux-arm64',
-      'bot-report-worker-linux-armv7',
-      'bot-report-worker-windows-amd64.exe',
-      'bot-report-worker-windows-arm64.exe',
+      'worker_mcp-darwin-amd64',
+      'worker_mcp-darwin-arm64',
+      'worker_mcp-linux-386',
+      'worker_mcp-linux-amd64',
+      'worker_mcp-linux-arm64',
+      'worker_mcp-linux-armv7',
+      'worker_mcp-windows-amd64.exe',
+      'worker_mcp-windows-arm64.exe',
       'WORKER_RELEASE',
     ];
     let variant = 'A';
@@ -119,9 +119,9 @@ async function main() {
       const binary = binaries[variant];
       return files.map(file => {
         const data = file === 'WORKER_RELEASE' ? metadata()
-          : file === 'bot-report-worker-linux-amd64' ? binary
+          : file === 'worker_mcp-linux-amd64' ? binary
           : 'test-only-placeholder:' + file;
-        const checksum = badChecksum && file === 'bot-report-worker-linux-amd64'
+        const checksum = badChecksum && file === 'worker_mcp-linux-amd64'
           ? '0'.repeat(64) : fingerprint(data);
         return checksum + '  ' + file + '\n';
       }).join('');
@@ -129,7 +129,7 @@ async function main() {
     assert.equal(manifest().trimEnd().split('\n').length, 9);
     server = http.createServer((req, res) => {
       const file = binaries[variant];
-      if (req.url === '/worker/dist/bot-report-worker-linux-amd64') {
+      if (req.url === '/worker/dist/worker_mcp-linux-amd64') {
         res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
         res.end(file);
       } else if (req.url === '/worker/dist/SHA256SUMS') {
@@ -172,11 +172,11 @@ async function main() {
     const env = {
       HOME: home,
       PATH: process.env.PATH || '/usr/bin:/bin',
-      BOT_REPORT_WORKER_HOME: state,
-      BOT_REPORT_WORKER_INSTALL_ROOT: install,
-      BOT_REPORT_WORKER_BIN_DIR: bin,
-      BOT_REPORT_WORKER_SYSTEMD: '0',
-      BOT_REPORT_WORKER_SKIP_SERVICE: '1',
+      MCP_WORKER_WORKER_HOME: state,
+      MCP_WORKER_WORKER_INSTALL_ROOT: install,
+      MCP_WORKER_WORKER_BIN_DIR: bin,
+      MCP_WORKER_WORKER_SYSTEMD: '0',
+      MCP_WORKER_WORKER_SKIP_SERVICE: '1',
     };
     const opts = { env, cwd: testRoot, uid, gid };
     const current = path.join(install, 'current', 'worker_mcp');
@@ -193,7 +193,6 @@ async function main() {
     requireSuccess(await run(['sh', installer]), 'signed user-mode fresh install');
     assert.equal(fingerprint(fs.readFileSync(current)), fingerprint(binaryA));
     assert.equal(fs.readlinkSync(path.join(bin, 'worker_mcp')), current);
-    assert.equal(fs.existsSync(path.join(bin, 'bot-report-worker')), false);
     const identityMarker = fs.readFileSync(path.join(state, 'install-root'), 'utf8');
     assert.equal(identityMarker.trim(), install);
     requireSuccess(await run([current, 'version']), 'installed native Go binary executes');
@@ -264,7 +263,7 @@ async function main() {
     assert.equal(fingerprint(fs.readFileSync(previous)), fingerprint(binaryA));
     assert.equal(fs.readFileSync(path.join(state, 'install-root'), 'utf8'), identityMarker);
 
-    const unauthorizedRollback = await run(['sh', installer], { BOT_REPORT_WORKER_ACTION: 'rollback' });
+    const unauthorizedRollback = await run(['sh', installer], { MCP_WORKER_WORKER_ACTION: 'rollback' });
     assert.notEqual(unauthorizedRollback.code, 0, 'Unsigned manual rollback accepted');
     assert.equal(fingerprint(fs.readFileSync(current)), fingerprint(binaryB));
     console.log('PASS unauthorized manual rollback rejected');
@@ -296,7 +295,6 @@ async function main() {
     assert.ok(!fs.existsSync(install), 'Installer-managed binaries not removed');
     assert.ok(!fs.existsSync(state), 'Worker state not removed');
     assert.ok(!fs.existsSync(path.join(bin, 'worker_mcp')), 'CLI symlink not removed');
-    assert.ok(!fs.existsSync(path.join(bin, 'bot-report-worker')), 'Legacy CLI symlink must never be created');
     console.log('PASS native Linux test-only signed lifecycle with nine-entry manifest; no production signer or server used');
   } finally {
     if (server) await new Promise(resolve => server.close(resolve));

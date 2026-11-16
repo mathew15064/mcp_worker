@@ -7,7 +7,7 @@ for an isolated/custom installation.
 | Symptom | Check / safe action |
 |---|---|
 | Missing prerequisite | Install Docker Engine/Compose v2, Git, OpenSSL, flock on the Linux host; verify Docker is running. |
-| Port in use | Choose BOT_REPORT_SETUP_PORT before first setup; do not overwrite an existing installation or change its public URL accidentally. |
+| Port in use | Choose MCP_WORKER_SETUP_PORT before first setup; do not overwrite an existing installation or change its public URL accidentally. |
 | Web alive, MCP 503 | Check /readyz and Admin Database state. Initialize only a fresh SQLite volume; do not overwrite a nonempty database. |
 | UNCONFIGURED | For a truly fresh installation use ./setup.sh --init on a new project and empty volume. |
 | Obsolete bootstrap detected | Fresh installs require a clean SQLite data directory; never reuse an older database configuration or existing project volume implicitly. |
@@ -22,7 +22,7 @@ for an isolated/custom installation.
 Useful local diagnostics (review/redact output before sharing):
 
     docker compose --env-file .env.setup -p mcp_worker ps
-    docker compose --env-file .env.setup -p mcp_worker logs --tail=100 bot-report
+    docker compose --env-file .env.setup -p mcp_worker logs --tail=100 mcp_worker
     curl -fsS http://127.0.0.1:3333/healthz
     curl -fsS http://127.0.0.1:3333/readyz
     worker_mcp version

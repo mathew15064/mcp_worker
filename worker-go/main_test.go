@@ -97,9 +97,9 @@ func TestAllowedPathRejectsSymlinkEscape(t *testing.T) {
 }
 
 func TestLoginDefaultsToOSPermissionsWithoutWorkspaceRoots(t *testing.T) {
-	t.Setenv("BOT_REPORT_WORKER_HOME", filepath.Join(t.TempDir(), "worker-home"))
-	t.Setenv("BOT_REPORT_WORKER_ALLOWED_ROOTS", "")
-	t.Setenv("BOT_REPORT_WORKER_ALLOW_SHELL", "")
+	t.Setenv("MCP_WORKER_WORKER_HOME", filepath.Join(t.TempDir(), "worker-home"))
+	t.Setenv("MCP_WORKER_WORKER_ALLOWED_ROOTS", "")
+	t.Setenv("MCP_WORKER_WORKER_ALLOW_SHELL", "")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/worker/v1/enroll" {
 			http.NotFound(w, r)
@@ -154,7 +154,7 @@ func TestStandaloneAgentAuthenticatesAndExecutesTypedWorkspaceJob(t *testing.T) 
 	if err := os.MkdirAll(home, 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("BOT_REPORT_WORKER_HOME", home)
+	t.Setenv("MCP_WORKER_WORKER_HOME", home)
 
 	privatePEM, publicPEM, err := generateIdentity()
 	if err != nil {
@@ -244,7 +244,7 @@ func TestLiveWebSocketOwnerRevocationStopsWorkAndDisconnects(t *testing.T) {
 	}
 	root := t.TempDir()
 	home := filepath.Join(root, "worker-home")
-	t.Setenv("BOT_REPORT_WORKER_HOME", home)
+	t.Setenv("MCP_WORKER_WORKER_HOME", home)
 	t.Setenv("TMPDIR", t.TempDir())
 	privatePEM, publicPEM, err := generateIdentity()
 	if err != nil {
@@ -334,7 +334,7 @@ func TestHandshakeAuthRejectionStopsPreviouslyManagedWorkloads(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			t.Setenv("BOT_REPORT_WORKER_HOME", filepath.Join(root, "worker-home"))
+			t.Setenv("MCP_WORKER_WORKER_HOME", filepath.Join(root, "worker-home"))
 			t.Setenv("TMPDIR", t.TempDir())
 			privatePEM, publicPEM, err := generateIdentity()
 			if err != nil {
@@ -535,9 +535,9 @@ func TestStandaloneCleanupPlanRemovesOnlyInstallerManagedPaths(t *testing.T) {
 	base := t.TempDir()
 	userHome := filepath.Join(base, "user")
 	t.Setenv("HOME", userHome)
-	installRoot := filepath.Join(base, "share", "bot-report-worker")
+	installRoot := filepath.Join(base, "share", "worker_mcp")
 	runtimeDir := filepath.Join(installRoot, "current")
-	workerStateHome := filepath.Join(userHome, ".bot-report-worker")
+	workerStateHome := filepath.Join(userHome, ".worker_mcp")
 	binDir := filepath.Join(userHome, ".local", "bin")
 	binPath := filepath.Join(binDir, "worker_mcp")
 	if err := os.MkdirAll(runtimeDir, 0755); err != nil {

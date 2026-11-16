@@ -156,8 +156,8 @@ router.get('/admin', async (req, res, next) => {
       adminOverviewPage({
         runtime: {
           version: packageJson.version,
-          gitSha: process.env.BOT_REPORT_GIT_SHA || null,
-          buildTime: process.env.BOT_REPORT_BUILD_TIME || null,
+          gitSha: process.env.MCP_WORKER_GIT_SHA || null,
+          buildTime: process.env.MCP_WORKER_BUILD_TIME || null,
           startedAt,
           nodeEnv: process.env.NODE_ENV || 'development',
           toolCount: TOOLS.length,
@@ -210,7 +210,7 @@ router.get('/admin/onboarding', async (req, res, next) => {
       );
       clientReady = clients.some(
         (c) =>
-          !c.owner_user_id && c.status === 'active' && c.allowed_scopes.includes('bot_report.read'),
+          !c.owner_user_id && c.status === 'active' && c.allowed_scopes.includes('mcp_worker.read'),
       );
       firstCall = called && clientReady;
     }
@@ -255,8 +255,8 @@ router.get('/admin/settings/:section', async (req, res, next) => {
         telegram: await telegramConfig(),
         runtime: {
           version: packageJson.version,
-          gitSha: process.env.BOT_REPORT_GIT_SHA || null,
-          buildTime: process.env.BOT_REPORT_BUILD_TIME || null,
+          gitSha: process.env.MCP_WORKER_GIT_SHA || null,
+          buildTime: process.env.MCP_WORKER_BUILD_TIME || null,
           nodeEnv: process.env.NODE_ENV || 'development',
           toolCount: TOOLS.length,
         },

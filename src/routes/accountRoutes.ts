@@ -157,9 +157,9 @@ router.post('/account/clients', async (req, res) => {
       ownerUserId: req.currentUser.id,
       redirectUris,
       allowedScopes: [
-        'bot_report.read',
+        'mcp_worker.read',
         ...formList(req.body, 'scopes').filter(
-          (scope) => scope === 'bot_report.terminal' || scope === 'offline_access',
+          (scope) => scope === 'mcp_worker.terminal' || scope === 'offline_access',
         ),
       ],
     });

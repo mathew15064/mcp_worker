@@ -1,5 +1,5 @@
 // Compiled by the Docker builder and copied into a disposable app container.
-// Run with BOT_REPORT_STANDALONE_SMOKE=1; never invoke on a real deployment.
+// Run with MCP_WORKER_STANDALONE_SMOKE=1; never invoke on a real deployment.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -56,7 +56,7 @@ async function request(
   return response.result || {};
 }
 async function main() {
-  assert.equal(process.env.BOT_REPORT_STANDALONE_SMOKE, '1');
+  assert.equal(process.env.MCP_WORKER_STANDALONE_SMOKE, '1');
   assert.match(process.env.MCP_PUBLIC_BASE_URL || '', /^http:\/\/127\.0\.0\.1:\d+$/);
   const mode = process.argv[2];
   assert.ok(['seed', 'verify'].includes(mode));
@@ -67,7 +67,7 @@ async function main() {
   assert.equal(manager.status().engine, 'sqlite');
   assert.equal(manager.status().source?.ran, 13);
   assert.equal(
-    fs.statSync(process.env.DATABASE_PATH || '/app/data/bot_report.sqlite').mode & 0o777,
+    fs.statSync(process.env.DATABASE_PATH || '/app/data/mcp_worker.sqlite').mode & 0o777,
     0o600,
   );
   // Authenticate against the actual running local HTTP app, not a test-mode server.
@@ -109,7 +109,7 @@ async function main() {
       capabilities: ['workspace.exec'],
     });
     if (!worker) throw new Error('Smoke Worker fixture missing');
-    const scopes = ['bot_report.read', 'bot_report.terminal'];
+    const scopes = ['mcp_worker.read', 'mcp_worker.terminal'];
     const redirect = 'http://127.0.0.1/callback';
     const c = await oauth.registerClient({
       displayName: 'Standalone smoke ' + tag,
@@ -156,7 +156,7 @@ async function main() {
   assert.equal(runtime.structuredContent?.tool_count, 15);
   assert.equal(
     runtime.structuredContent?.tool_schema_hash,
-    'a79786ed09ba2e8eef30ec778453b17c81963bf943542c1f2ea0f87952e4a032',
+    '8c2deb08d22abfd11a34827b461d1f22142dba368dd05ecda02db3c4a072b579',
   );
   await request(fixture.token, 'tools/call', { name: 'terminal_list', arguments: {} });
   if (mode === 'verify') fs.unlinkSync(file);

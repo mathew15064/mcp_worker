@@ -6,7 +6,7 @@ import { getDb } from '../src/db/connection';
 import path from 'node:path';
 import fs from 'node:fs';
 import { runMigrations } from '../src/db/migrations';
-import { assertRailwaySqliteSchema } from '../src/db/sqliteSchemaValidation';
+import { assertSqliteSchema } from '../src/db/sqliteSchemaValidation';
 
 void test('typed SQLite adapter commits, rolls back and serializes transactions', async () => {
   const raw = new Database(':memory:');
@@ -85,21 +85,21 @@ void test('OAuth revoke UPDATE is atomically scoped to the authenticated client'
   }
 });
 
-void test('Railway SQLite readiness rejects missing indexes, foreign keys, and partial legacy tables', () => {
+void test('SQLite readiness rejects missing indexes, foreign keys, and partial legacy tables', () => {
   const valid = new Database(':memory:');
   const withoutFk = new Database(':memory:');
   const partial = new Database(':memory:');
   try {
     valid.pragma('foreign_keys = ON');
     runMigrations(valid);
-    assert.doesNotThrow(() => assertRailwaySqliteSchema(valid));
+    assert.doesNotThrow(() => assertSqliteSchema(valid));
     valid.exec('DROP INDEX idx_mcp_access_tokens_client');
     assert.throws(
-      () => assertRailwaySqliteSchema(valid),
+      () => assertSqliteSchema(valid),
       (error: unknown) =>
         error instanceof Error &&
         'code' in error &&
-        error.code === 'RAILWAY_SCHEMA_INCOMPATIBLE' &&
+        error.code === 'SQLITE_SCHEMA_INCOMPATIBLE' &&
         /index/.test(error.message),
     );
 
@@ -114,11 +114,11 @@ void test('Railway SQLite readiness rejects missing indexes, foreign keys, and p
       ),
     );
     runMigrations(withoutFk);
-    assert.throws(() => assertRailwaySqliteSchema(withoutFk), /foreign key/);
+    assert.throws(() => assertSqliteSchema(withoutFk), /foreign key/);
 
     partial.exec('CREATE TABLE users (id TEXT PRIMARY KEY)');
     runMigrations(partial);
-    assert.throws(() => assertRailwaySqliteSchema(partial), /column/);
+    assert.throws(() => assertSqliteSchema(partial), /column/);
   } finally {
     valid.close();
     withoutFk.close();
@@ -126,7 +126,7 @@ void test('Railway SQLite readiness rejects missing indexes, foreign keys, and p
   }
 });
 
-void test('Railway SQLite validation rejects orphaned ownership references', () => {
+void test('SQLite validation rejects orphaned ownership references', () => {
   const db = new Database(':memory:');
   try {
     db.pragma('foreign_keys = ON');
@@ -146,12 +146,12 @@ void test('Railway SQLite validation rejects orphaned ownership references', () 
       'profile:orphan',
       'no-such-user',
       '[]',
-      '["bot_report.read"]',
+      '["mcp_worker.read"]',
       new Date().toISOString(),
       new Date().toISOString(),
     );
     db.pragma('foreign_keys = ON');
-    assert.throws(() => assertRailwaySqliteSchema(db), /orphaned foreign key row/);
+    assert.throws(() => assertSqliteSchema(db), /orphaned foreign key row/);
   } finally {
     db.close();
   }
@@ -161,7 +161,7 @@ void test('compiled SQLite guard refuses project production database in test mod
   process.env.NODE_ENV = 'test';
   try {
     assert.throws(
-      () => getDb(path.resolve(__dirname, '../../data/bot_report.sqlite')),
+      () => getDb(path.resolve(__dirname, '../../data/mcp_worker.sqlite')),
       /DATA_SAFETY_VIOLATION/,
     );
   } finally {

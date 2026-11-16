@@ -45,47 +45,38 @@ function validateDatabase(db: Database.Database): string {
   if (db.pragma('quick_check', { simple: true }) !== 'ok') {
     throw new Error('SQLite quick_check failed');
   }
-  const versions = db.prepare('SELECT version FROM railway_schema_versions').all() as {
+  const versions = db.prepare('SELECT version FROM schema_versions').all() as {
     version: string;
   }[];
   if (versions.length !== 1 || versions[0].version !== SCHEMA) {
-    throw new Error('Unsupported Railway SQLite schema version');
+    throw new Error('Unsupported SQLite schema version');
   }
-  if (process.env.BACKUP_STANDALONE_SQLITE === '1' && process.env.MCP_PLATFORM !== 'railway') {
-    // Standalone administrators authenticate through the retained ENV secret,
-    // not Railway's database-backed owner claim. Validate full schema instead.
-    const tableNames = new Set(
-      (
-        db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
-      ).map((row) => row.name),
-    );
-    for (const name of [
-      'users',
-      'sessions',
-      'system_settings',
-      'workers',
-      'worker_profiles',
-      'worker_enrollment_tokens',
-      'mcp_oauth_clients',
-      'mcp_oauth_authorization_codes',
-      'mcp_oauth_access_tokens',
-      'mcp_oauth_refresh_tokens',
-      'mcp_request_audit',
-      'terminal_profiles',
-      'terminal_connection_audit',
-    ]) {
-      if (!tableNames.has(name)) throw new Error('Standalone SQLite schema missing required table');
-    }
-    if ((db.pragma('foreign_key_check') as unknown[]).length) {
-      throw new Error('SQLite foreign key check failed');
-    }
-    return versions[0].version;
+  // The standalone server authenticates the administrator using .env.setup,
+  // not a database-backed remote owner claim.
+  const tableNames = new Set(
+    (
+      db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
+    ).map((row) => row.name),
+  );
+  for (const name of [
+    'users',
+    'sessions',
+    'system_settings',
+    'workers',
+    'worker_profiles',
+    'worker_enrollment_tokens',
+    'mcp_oauth_clients',
+    'mcp_oauth_authorization_codes',
+    'mcp_oauth_access_tokens',
+    'mcp_oauth_refresh_tokens',
+    'mcp_request_audit',
+    'terminal_profiles',
+    'terminal_connection_audit',
+  ]) {
+    if (!tableNames.has(name)) throw new Error('SQLite schema missing required table');
   }
-  const owner = db
-    .prepare("SELECT value FROM system_settings WHERE key='bootstrap.admin_password_hash'")
-    .get() as { value?: string } | undefined;
-  if (!owner || typeof owner.value !== 'string' || !/^\$2[aby]\$/.test(owner.value)) {
-    throw new Error('Refusing export of unclaimed owner database');
+  if ((db.pragma('foreign_key_check') as unknown[]).length) {
+    throw new Error('SQLite foreign key check failed');
   }
   return versions[0].version;
 }
@@ -186,7 +177,7 @@ async function main(): Promise<void> {
   ) {
     throw new Error('Database must be an existing regular file (no symlinks)');
   }
-  const dataVolume = fs.realpathSync(process.env.RAILWAY_VOLUME_MOUNT_PATH || path.dirname(dbPath));
+  const dataVolume = fs.realpathSync(process.env.MCP_WORKER_DATA_DIR || path.dirname(dbPath));
   if (!contained(dbPath, dataVolume)) {
     throw new Error('DATABASE_PATH must be within its configured data volume');
   }
@@ -216,7 +207,7 @@ async function main(): Promise<void> {
   const key = encryptionKey(dataVolume, exportDir);
   const stagingDir = key ? encryptionStagingDir(dataVolume, exportDir) : exportDir;
   const name =
-    'bot_report_mcp_' + new Date().toISOString().replace(/[:.]/g, '-') + '_' + crypto.randomUUID();
+    'mcp_worker_mcp_' + new Date().toISOString().replace(/[:.]/g, '-') + '_' + crypto.randomUUID();
   const finished = path.join(exportDir, name + (key ? '.sqlite.enc' : '.sqlite'));
   const manifestPath = finished + '.manifest.json';
   const staged = path.join(stagingDir, '.' + name + '.partial.sqlite');
@@ -246,7 +237,7 @@ async function main(): Promise<void> {
     const bytes = fs.statSync(finalizedFile).size;
     const digest = sha256(finalizedFile);
     const manifest = {
-      format: key ? 'bot-report-sqlite-backup-encrypted-v1' : 'bot-report-sqlite-backup-v1',
+      format: key ? 'mcp_worker-sqlite-backup-encrypted-v1' : 'mcp_worker-sqlite-backup-v1',
       file: path.basename(finished),
       sha256: digest,
       bytes,
@@ -268,7 +259,7 @@ async function main(): Promise<void> {
                   crypto.hkdfSync(
                     'sha256',
                     key,
-                    Buffer.from('bot-report-railway-backup-v1'),
+                    Buffer.from('mcp_worker-railway-backup-v1'),
                     Buffer.from('manifest-authentication-v1'),
                     32,
                   ),

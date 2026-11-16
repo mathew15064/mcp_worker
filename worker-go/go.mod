@@ -1,4 +1,4 @@
-module bot-report-worker
+module worker_mcp
 
 go 1.24.0
 

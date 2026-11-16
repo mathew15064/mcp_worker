@@ -18,7 +18,7 @@ data/
 /reports/BOT-REPORT-UI-E2E-002/before-screenshots/
 
 # Generated standalone worker binaries
-worker/bin/bot-report-worker-*
+worker/bin/worker_mcp-*
 worker/bin/SHA256SUMS
 worker/bin/SHA256SUMS.sig
 worker/bin/WORKER_RELEASE

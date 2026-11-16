@@ -1,6 +1,6 @@
 /* Typed HTML rendering contract. Every dynamic value is escaped at the output boundary. */
 import {
-  railwayWorkerDistributionBlocked,
+  workerDistributionBlocked,
   workerSignedReleaseReadiness,
 } from '../services/workerReleaseGate';
 type HtmlValue = unknown;
@@ -344,14 +344,11 @@ function onboardingPage({
         mode = 'local';
     }
   } catch {}
-  // Railway requires a canonical HTTPS origin; loopback HTTP is for local PC tests only.
-  const endpointReady =
-    ready &&
-    enabled &&
-    (mode === 'https' || (mode === 'local' && process.env.MCP_PLATFORM !== 'railway'));
+  // Remote MCP clients require an explicit HTTPS origin; loopback HTTP is for local testing only.
+  const endpointReady = ready && enabled && (mode === 'https' || mode === 'local');
   // Same fail-closed distribution gate as the HTTP installer routes.
   // Neither an online Worker nor a read-only MCP call can approve a release.
-  const signedReleasePending = railwayWorkerDistributionBlocked();
+  const signedReleasePending = workerDistributionBlocked();
   const verifiedWorker = workerReady && !signedReleasePending;
   const next = !ready
     ? 2
@@ -400,7 +397,7 @@ function onboardingPage({
       'Enroll an approved signed Worker',
       ready && verifiedWorker,
       signedReleasePending
-        ? 'Blocked: Railway Worker installer returns HTTP 503 (WORKER_SIGNED_RELEASE_PENDING). A signed and approved Worker release is not available. Do not use unsigned downloads or bypass verification. No Worker is installed by this wizard; existing live Workers are not proof of installer approval.'
+        ? 'Blocked: Worker installer returns HTTP 503 (WORKER_SIGNED_RELEASE_PENDING). A signed and approved Worker release is not available. Do not use unsigned downloads or bypass verification. No Worker is installed by this wizard; existing live Workers are not proof of installer approval.'
         : 'Create a short-lived enrollment token in Workers, then install only on a machine you control and log in with an explicit allowed root. Shell authority is powerful; allowed roots are not a sandbox. Enrollment creates a profile automatically, but never installs software or grants shell permission without your action.',
       '/admin/workers',
       'Workers',
@@ -408,7 +405,7 @@ function onboardingPage({
     [
       'Create a read-only OAuth client',
       ready && clientReady,
-      'Open the prefilled ChatGPT client form. Confirm its callback against the exact URI shown by ChatGPT; only bot_report.read is selected. Copy the one-time Client ID and secret into secure connector fields, never a chat prompt. Client creation alone grants no access.',
+      'Open the prefilled ChatGPT client form. Confirm its callback against the exact URI shown by ChatGPT; only mcp_worker.read is selected. Copy the one-time Client ID and secret into secure connector fields, never a chat prompt. Client creation alone grants no access.',
       mode === 'local' ? '/admin/clients?first_call=local' : '/admin/clients?first_call=1',
       'OAuth clients',
     ],
@@ -445,7 +442,7 @@ function onboardingPage({
   <section class="section" data-onboarding-status="${signedReleasePending || (ready && !endpointReady) ? 'blocked' : 'pending'}" data-chatgpt-verification="unverified"><div class="section-body"><strong data-onboarding-summary>${escapeHtml(summary)}</strong><p class="muted">Canonical MCP endpoint (not an external connectivity check):</p><div class="copy-row"><code id="quickstart-mcp-url" style="flex:1">${mode === 'unsafe' ? 'Invalid or unsafe configuration' : escapeHtml(baseUrl) + '/mcp'}</code><button class="btn btn-sm" type="button" data-copy-target="quickstart-mcp-url" ${!endpointReady ? 'disabled' : ''}>${icon('copy')} Copy endpoint</button></div><p id="quickstart-endpoint-check" role="status">OAuth discovery has not yet been checked. HTTPS configuration alone does not prove external reachability.</p><p>Database, Worker connection and authenticated audit events are separate facts. A health check, online Worker or successful MCP audit cannot prove signed installer approval or ChatGPT connection.</p></div></section>
   <div class="stack">${rows}</div>
   <section class="section" id="chatgpt-connection"><div class="section-header"><div><h2 class="section-title">Connect ChatGPT (manual)</h2><p class="section-subtitle">Not automatically verified; an OAuth client or audit row is not a ChatGPT connection.</p></div><span class="badge badge-off">Manual verification</span></div><div class="section-body"><ol><li>In ChatGPT, open the setting for adding an MCP connector or app, and use the HTTPS endpoint copied above.</li><li>Copy the exact callback URI shown there into the OAuth client form. Keep the one-time client secret private.</li><li>Choose Connect and explicitly approve the displayed OAuth scopes; keep Read only for runtime_info; Worker execution and offline access require separate explicit consent.</li><li>Ask ChatGPT to call <code>runtime_info</code>, then refresh this wizard to verify the authenticated audit record. Check the connection in ChatGPT itself, as audit logs do not identify the UI that issued a call.</li></ol>${mode === 'local' ? '<p class="hint">A loopback endpoint cannot be reached by remote ChatGPT. Configure a trusted HTTPS public origin first.</p>' : ''}</div></section>
-  ${signedReleasePending ? '<section class="section" data-worker-installer-probe="/worker/install.sh"><div class="section-body"><strong>Signed Worker installer</strong><p data-worker-installer-message role="status">Blocked by the Railway signed-release gate (HTTP 503 expected). Checking the endpoint without executing any installer.</p></div></section>' : ''}`;
+  ${signedReleasePending ? '<section class="section" data-worker-installer-probe="/worker/install.sh"><div class="section-body"><strong>Signed Worker installer</strong><p data-worker-installer-message role="status">Blocked by the signed-release gate (HTTP 503 expected). Checking the endpoint without executing any installer.</p></div></section>' : ''}`;
   return shell('Getting Started — mcp_worker', body, {
     admin: true,
     active: 'onboarding',
@@ -480,8 +477,8 @@ function oauthClientCreateModal({
   const redirectId = `${id}-redirect`;
   const mcpId = `${id}-mcp-url`;
   const access = personal
-    ? `<div class="field full"><span class="field-label">Access scopes</span><div class="migration-note"><strong>Read access</strong><span><code>bot_report.read</code> is always included. Enable additional permissions only when needed.</span></div><div class="scope-options"><label class="scope-option"><input type="checkbox" name="scopes" value="bot_report.terminal"><span><strong>Worker execution</strong><small>Permit file, Git, process and execution tools on your Workers.</small></span></label><label class="scope-option"><input type="checkbox" name="scopes" value="offline_access"><span><strong>Offline access</strong><small>Allow refresh tokens for persistent connections.</small></span></label></div></div>`
-    : `<div class="field full"><span class="field-label">Access scopes</span><div class="scope-options"><label class="scope-option"><input type="checkbox" name="scopes" value="bot_report.read" checked><span><strong>Read</strong><small>Inspect runtime, repository and workspace state.</small></span></label><label class="scope-option"><input type="checkbox" name="scopes" value="bot_report.terminal"><span><strong>Worker execution</strong><small>Allow MCP file, Git, process and execution tools on enrolled Workers.</small></span></label><label class="scope-option"><input type="checkbox" name="scopes" value="offline_access"><span><strong>Offline access</strong><small>Allow refresh tokens for persistent connectors.</small></span></label></div></div>`;
+    ? `<div class="field full"><span class="field-label">Access scopes</span><div class="migration-note"><strong>Read access</strong><span><code>mcp_worker.read</code> is always included. Enable additional permissions only when needed.</span></div><div class="scope-options"><label class="scope-option"><input type="checkbox" name="scopes" value="mcp_worker.terminal"><span><strong>Worker execution</strong><small>Permit file, Git, process and execution tools on your Workers.</small></span></label><label class="scope-option"><input type="checkbox" name="scopes" value="offline_access"><span><strong>Offline access</strong><small>Allow refresh tokens for persistent connections.</small></span></label></div></div>`
+    : `<div class="field full"><span class="field-label">Access scopes</span><div class="scope-options"><label class="scope-option"><input type="checkbox" name="scopes" value="mcp_worker.read" checked><span><strong>Read</strong><small>Inspect runtime, repository and workspace state.</small></span></label><label class="scope-option"><input type="checkbox" name="scopes" value="mcp_worker.terminal"><span><strong>Worker execution</strong><small>Allow MCP file, Git, process and execution tools on enrolled Workers.</small></span></label><label class="scope-option"><input type="checkbox" name="scopes" value="offline_access"><span><strong>Offline access</strong><small>Allow refresh tokens for persistent connectors.</small></span></label></div></div>`;
   const identity = personal
     ? `<div class="migration-note"><strong>Personal identity</strong><span>This client is automatically bound to your existing user Principal ID and Profile ID.</span></div>`
     : `<div class="migration-note"><strong>Automatic identity</strong><span>Principal ID is generated by mcp_worker from the new Client ID after creation. It is immutable and cannot be entered manually.</span></div>`;

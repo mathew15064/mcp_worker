@@ -1,11 +1,11 @@
 services:
-  bot-report:
+  server:
     build:
       context: .
       args:
-        BOT_REPORT_GIT_SHA: ${BOT_REPORT_GIT_SHA:-unknown}
-        BOT_REPORT_TREE_SHA: ${BOT_REPORT_TREE_SHA:-unknown}
-        BOT_REPORT_BUILD_TIME: ${BOT_REPORT_BUILD_TIME:-unknown}
+        MCP_WORKER_GIT_SHA: ${MCP_WORKER_GIT_SHA:-unknown}
+        MCP_WORKER_TREE_SHA: ${MCP_WORKER_TREE_SHA:-unknown}
+        MCP_WORKER_BUILD_TIME: ${MCP_WORKER_BUILD_TIME:-unknown}
     image: ${COMPOSE_PROJECT_NAME:-mcp_worker}-app:local
     restart: unless-stopped
     init: true
@@ -21,9 +21,9 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?run setup.sh}
       SESSION_SECRET: ${SESSION_SECRET:?run setup.sh}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?run setup.sh}
-      MCP_PUBLIC_BASE_URL: http://127.0.0.1:${BOT_REPORT_PORT:-3333}
+      MCP_PUBLIC_BASE_URL: http://127.0.0.1:${MCP_WORKER_PORT:-3333}
     ports:
-      - "127.0.0.1:${BOT_REPORT_PORT:-3333}:80"
+      - "127.0.0.1:${MCP_WORKER_PORT:-3333}:80"
     volumes:
       - app-data:/app/data
 volumes:

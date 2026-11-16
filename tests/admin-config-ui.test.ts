@@ -131,7 +131,7 @@ void test('OAuth client can be created from admin UI and secret is shown once', 
       display_name: 'UI Client',
       principal_id: 'principal:ui_client',
       redirect_uris: 'https://chatgpt.com/connector_platform_oauth_redirect',
-      scopes: 'bot_report.read bot_report.terminal offline_access',
+      scopes: 'mcp_worker.read mcp_worker.terminal offline_access',
     }).toString(),
   });
   assert.equal(response.status, 302);
@@ -381,7 +381,7 @@ void test('legacy Telegram v2 token is migrated to DB-backed v3 envelope without
   const key = Buffer.from(legacyKey, 'base64');
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-  cipher.setAAD(Buffer.from('bot_report:telegram-token:v2', 'utf8'));
+  cipher.setAAD(Buffer.from('mcp_worker:telegram-token:v2', 'utf8'));
   const ciphertext = Buffer.concat([
     cipher.update('654321:LegacyTelegramToken', 'utf8'),
     cipher.final(),

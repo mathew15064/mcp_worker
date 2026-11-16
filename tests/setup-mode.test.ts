@@ -11,7 +11,7 @@ import authService from '../src/services/authService';
 import databaseManager from '../src/db/databaseManager';
 import runtimeSettings from '../src/services/runtimeSettingsService';
 import app from '../src/app';
-import { railwayWorkerDistributionBlocked } from '../src/services/workerReleaseGate';
+import { workerDistributionBlocked } from '../src/services/workerReleaseGate';
 import helper from './helper';
 const { setupEnv, cleanup } = helper;
 
@@ -75,7 +75,7 @@ void test('fresh SQLite install remains administrable but blocks data until expl
   assert.equal(onboarding.status, 200);
   assert.equal(onboarding.headers.get('cache-control'), 'no-store');
   const guide = await onboarding.text();
-  if (railwayWorkerDistributionBlocked()) {
+  if (workerDistributionBlocked()) {
     assert.match(guide, /data-onboarding-status="blocked"/);
     assert.match(guide, /Blocked: signed Worker release not approved/);
   } else {

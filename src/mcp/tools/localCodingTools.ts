@@ -54,7 +54,7 @@ export const fileRead = defineTool({
     end_line: z.number().int().min(1).optional(),
   },
   domain: 'Local Development',
-  requiredScope: 'bot_report.terminal',
+  requiredScope: 'mcp_worker.terminal',
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
   async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
@@ -90,7 +90,7 @@ export const fileWrite = defineTool({
       .optional(),
   },
   domain: 'Local Development',
-  requiredScope: 'bot_report.terminal',
+  requiredScope: 'mcp_worker.terminal',
   annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: true },
   async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
@@ -138,7 +138,7 @@ export const filePatch = defineTool({
       .default(2 * 1024 * 1024),
   },
   domain: 'Local Development',
-  requiredScope: 'bot_report.terminal',
+  requiredScope: 'mcp_worker.terminal',
   annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: true },
   async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
@@ -170,7 +170,7 @@ export const processStart = defineTool({
       .describe('Optional local user to execute as via sudo -n -u'),
   },
   domain: 'Local Development',
-  requiredScope: 'bot_report.terminal',
+  requiredScope: 'mcp_worker.terminal',
   annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: true },
   async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
@@ -195,7 +195,7 @@ export const processStatus = defineTool({
     lines: z.number().int().min(1).max(1000).optional().default(200),
   },
   domain: 'Local Development',
-  requiredScope: 'bot_report.terminal',
+  requiredScope: 'mcp_worker.terminal',
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
   async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
@@ -220,7 +220,7 @@ export const processStop = defineTool({
     lines: z.number().int().min(1).max(1000).optional().default(200),
   },
   domain: 'Local Development',
-  requiredScope: 'bot_report.terminal',
+  requiredScope: 'mcp_worker.terminal',
   annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: true },
   async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
@@ -256,7 +256,7 @@ export const repoSnapshot = defineTool({
       .describe('Optional Git base ref such as origin/main'),
   },
   domain: 'Local Development',
-  requiredScope: 'bot_report.terminal',
+  requiredScope: 'mcp_worker.terminal',
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
   async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
@@ -300,7 +300,7 @@ export const gitDiff = defineTool({
       .default(512 * 1024),
   },
   domain: 'Local Development',
-  requiredScope: 'bot_report.terminal',
+  requiredScope: 'mcp_worker.terminal',
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
   async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
@@ -337,7 +337,7 @@ export const codeSearch = defineTool({
     max_results: z.number().int().min(1).max(500).optional().default(50),
   },
   domain: 'Local Development',
-  requiredScope: 'bot_report.terminal',
+  requiredScope: 'mcp_worker.terminal',
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
   async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
@@ -372,7 +372,7 @@ export const checkRun = defineTool({
     tail_lines: z.number().int().min(10).max(1000).optional().default(200),
   },
   domain: 'Local Development',
-  requiredScope: 'bot_report.terminal',
+  requiredScope: 'mcp_worker.terminal',
   annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: false },
   async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
@@ -405,7 +405,7 @@ export const processLogs = defineTool({
       .default(64 * 1024),
   },
   domain: 'Local Development',
-  requiredScope: 'bot_report.terminal',
+  requiredScope: 'mcp_worker.terminal',
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
   async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();

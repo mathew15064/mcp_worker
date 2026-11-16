@@ -48,7 +48,7 @@ func scopeProbeArgs(unit string) []string {
 }
 
 func detectWorkloadScopeMode() {
-	if os.Getenv("BOT_REPORT_WORKER_DISABLE_SYSTEMD_SCOPES") == "1" || !serviceManaged() {
+	if os.Getenv("MCP_WORKER_WORKER_DISABLE_SYSTEMD_SCOPES") == "1" || !serviceManaged() {
 		return
 	}
 	systemdRun, err := exec.LookPath("systemd-run")

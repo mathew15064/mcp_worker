@@ -17,27 +17,21 @@ declare module 'express-session' {
 }
 import config from '../config/env';
 import BoundedMemorySessionStore from '../db/memorySessionStore';
-import SqliteSessionStore from '../db/sessionStore';
 
 const secureCookie =
-  process.env.MCP_PLATFORM === 'railway' ||
-  (config.NODE_ENV === 'production'
+  config.NODE_ENV === 'production'
     ? process.env.COOKIE_SECURE !== 'false'
-    : process.env.COOKIE_SECURE === 'true');
-
-const store =
-  process.env.MCP_PLATFORM === 'railway'
-    ? new SqliteSessionStore()
-    : new BoundedMemorySessionStore({
-        maxSessions: Number.parseInt(process.env.ADMIN_SESSION_MAX || '500', 10),
-      });
+    : process.env.COOKIE_SECURE === 'true';
+const store = new BoundedMemorySessionStore({
+  maxSessions: Number.parseInt(process.env.ADMIN_SESSION_MAX || '500', 10),
+});
 
 const sessionMiddleware = session({
   store,
   secret: config.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
-  name: 'bot_report.sid',
+  name: 'mcp_worker.sid',
   cookie: {
     httpOnly: true,
     secure: secureCookie,

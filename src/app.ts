@@ -6,8 +6,6 @@ import sessionMiddleware from './middleware/sessionMiddleware';
 import { csrfProtection } from './middleware/csrfMiddleware';
 import workerRoutes from './routes/workerRoutes';
 import authRoutes from './routes/authRoutes';
-import railwaySetupRoutes from './routes/railwaySetupRoutes';
-import { canonicalRailwayOrigin } from './config/railwayOrigin';
 import accountRoutes from './routes/accountRoutes';
 import adminRoutes from './routes/adminRoutes';
 import mcpOAuthRoutes from './routes/mcpOAuthRoutes';
@@ -29,45 +27,13 @@ app.get('/healthz', (req, res) => {
   const database = databaseManager.status();
   res.json({ ok: true, service: 'mcp_worker', mode: 'mcp-admin', database: database.state });
 });
-app.get('/readyz', async (req, res, next) => {
-  try {
-    const database = databaseManager.status();
-    let railwayOriginReady = true;
-    if (process.env.MCP_PLATFORM === 'railway') {
-      try {
-        railwayOriginReady = Boolean(canonicalRailwayOrigin());
-      } catch {
-        railwayOriginReady = false;
-      }
-    }
-    const ready =
-      database.operational &&
-      railwayOriginReady &&
-      (process.env.MCP_PLATFORM !== 'railway' || (await railwaySetupRoutes.isOwnerSetupComplete()));
-    return res.status(ready ? 200 : 503).json({
-      ready,
-      database: database.state,
-      workerTransportReady: true,
-      railwayOriginReady,
-    });
-  } catch (error) {
-    return next(error);
-  }
-});
-if (process.env.MCP_PLATFORM === 'railway') {
-  app.use('/', railwaySetupRoutes);
-  app.use(async (req, res, next) => {
-    try {
-      if (await railwaySetupRoutes.isOwnerSetupComplete()) return next();
-      res.set('Cache-Control', 'no-store');
-      if (req.method !== 'GET' && req.method !== 'HEAD')
-        return res.status(503).json({ code: 'SETUP_REQUIRED', error: 'Instance not initialized' });
-      return res.redirect('/setup');
-    } catch (error) {
-      next(error);
-    }
+app.get('/readyz', (_req, res) => {
+  const database = databaseManager.status();
+  return res.status(database.operational ? 200 : 503).json({
+    ready: database.operational,
+    database: database.state,
   });
-}
+});
 app.get('/', (req, res) => res.redirect('/admin'));
 
 app.use('/', workerRoutes);

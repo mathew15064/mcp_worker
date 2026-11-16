@@ -54,8 +54,8 @@ void test('tool schemas never accept raw SSH connection credentials and scopes s
       `${tool.name} needs usage guidance`,
     );
     if (tool.name === 'runtime_info')
-      assert.equal((tool as { requiredScope?: string }).requiredScope, 'bot_report.read');
-    else assert.equal((tool as { requiredScope?: string }).requiredScope, 'bot_report.terminal');
+      assert.equal((tool as { requiredScope?: string }).requiredScope, 'mcp_worker.read');
+    else assert.equal((tool as { requiredScope?: string }).requiredScope, 'mcp_worker.terminal');
   }
 });
 

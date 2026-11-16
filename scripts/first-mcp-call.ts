@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import readline from 'node:readline/promises';
 import { Writable } from 'node:stream';
 const CALLBACK = 'http://127.0.0.1:43871/callback';
-const SCOPE = 'bot_report.read';
+const SCOPE = 'mcp_worker.read';
 
 async function main() {
   const base = new URL(process.argv[2] || 'http://127.0.0.1:3333');
@@ -22,8 +22,8 @@ async function main() {
   );
   const origin = base.origin;
   const resource = origin + '/mcp';
-  let clientId = process.env.BOT_REPORT_FIRST_CLIENT_ID;
-  let secret = process.env.BOT_REPORT_FIRST_CLIENT_SECRET;
+  let clientId = process.env.MCP_WORKER_FIRST_CLIENT_ID;
+  let secret = process.env.MCP_WORKER_FIRST_CLIENT_SECRET;
   if (!clientId || !secret) {
     assert.ok(
       process.stdin.isTTY,

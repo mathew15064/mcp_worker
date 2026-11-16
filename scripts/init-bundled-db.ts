@@ -6,7 +6,7 @@ import manager from '../src/db/databaseManager';
 import { getDb, closeDb } from '../src/db/connection';
 import { runMigrations } from '../src/db/migrations';
 import { seedInitialAdmin } from '../src/db/seed';
-import { assertRailwaySqliteSchema } from '../src/db/sqliteSchemaValidation';
+import { assertSqliteSchema } from '../src/db/sqliteSchemaValidation';
 
 async function main() {
   if (process.argv[2] !== '--init-fresh') {
@@ -20,6 +20,18 @@ async function main() {
     throw new Error('Obsolete database bootstrap detected; use a clean SQLite data directory.');
   }
   const target = config.DATABASE_PATH;
+  // Do not silently initialize a blank database over an older named SQLite file.
+  const previous = path.join(path.dirname(target), 'bot_report.sqlite');
+  if (
+    !fs.existsSync(target) &&
+    path.basename(target) === 'mcp_worker.sqlite' &&
+    fs.existsSync(previous)
+  ) {
+    throw new Error(
+      'Legacy SQLite filename found; back up and explicitly migrate before installing.',
+    );
+  }
+
   if (fs.existsSync(target)) {
     await manager.initialize();
     if (!manager.isSqlReady()) throw new Error('Existing SQLite is not ready; data preserved.');
@@ -34,11 +46,11 @@ async function main() {
   db.transaction(() => {
     runMigrations(db);
     seedInitialAdmin(db);
-    assertRailwaySqliteSchema(db);
+    assertSqliteSchema(db);
     db.exec(
-      'CREATE TABLE IF NOT EXISTS railway_schema_versions (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)',
+      'CREATE TABLE IF NOT EXISTS schema_versions (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)',
     );
-    db.prepare('INSERT INTO railway_schema_versions(version, applied_at) VALUES (?, ?)').run(
+    db.prepare('INSERT INTO schema_versions(version, applied_at) VALUES (?, ?)').run(
       '2026-11-12-initial',
       new Date().toISOString(),
     );

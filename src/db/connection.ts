@@ -7,8 +7,8 @@ let dbInstance: Database.Database | null = null;
 let currentDbPath: string | null = null;
 
 const projectRoot = path.resolve(__dirname, '../../..');
-const PROD_DB_PATH = path.resolve(projectRoot, 'data/bot_report.sqlite');
-const COMPILED_DB_PATH = path.resolve(__dirname, '../../data/bot_report.sqlite');
+const PROD_DB_PATH = path.resolve(projectRoot, 'data/mcp_worker.sqlite');
+const COMPILED_DB_PATH = path.resolve(__dirname, '../../data/mcp_worker.sqlite');
 
 export function getDb(customPath: string | null = null) {
   const targetPath = customPath || config.DATABASE_PATH;

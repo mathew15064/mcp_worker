@@ -54,7 +54,7 @@ The intended v2 default is `worker`. SSH remains a compatibility path only and c
 
 1. Admin creates a short-lived one-time enrollment token.
 2. User installs the standalone CLI with the platform-specific installer: Linux `/worker/install-linux.sh`, macOS `/worker/install-macos.sh`, or Windows PowerShell `/worker/install.ps1`. Each installer verifies the downloaded binary against server-published SHA-256 sums; no language runtime is installed on the target.
-3. User runs `bot-report-worker login`; the CLI reads the one-time token with hidden input, selects local allowed roots and the explicit shell-execution policy.
+3. User runs `worker_mcp login`; the CLI reads the one-time token with hidden input, selects local allowed roots and the explicit shell-execution policy.
 4. CLI creates an Ed25519 key pair locally and POSTs only its public key to `/worker/v1/enroll`.
 5. mcp_worker validates and consumes the token, creates the worker identity and a unique Worker Profile alias, and returns both identifiers.
 6. CLI stores config, `worker_id`, and the private key locally with restrictive permissions. The one-time token is not persisted.
@@ -95,15 +95,15 @@ This fail-fast model is intentional. It is safer and easier to reason about than
 
 ## Local policy
 
-The installed CLI persists local policy under `~/.bot-report-worker/config.json`; machine identity/private key live in `~/.bot-report-worker/state.json`. Both are local files and the mcp_worker server cannot widen their policy remotely. Equivalent environment variables remain supported for compatibility and test/runtime overrides:
+The installed CLI persists local policy under `~/.worker_mcp/config.json`; machine identity/private key live in `~/.worker_mcp/state.json`. Both are local files and the mcp_worker server cannot widen their policy remotely. Equivalent environment variables remain supported for compatibility and test/runtime overrides:
 
 ```text
-BOT_REPORT_WORKER_SERVER_URL=https://bot-report.example.com
-BOT_REPORT_WORKER_ALLOW_INSECURE_HTTP=false
-BOT_REPORT_WORKER_STATE_PATH=~/.bot-report-worker/state.json
-BOT_REPORT_WORKER_ALLOWED_ROOTS=/home/user/work,/srv/projects
-BOT_REPORT_WORKER_ALLOW_SHELL=true
-BOT_REPORT_WORKER_MAX_JOB_MS=300000
+MCP_WORKER_WORKER_SERVER_URL=https://mcp-worker.example.com
+MCP_WORKER_WORKER_ALLOW_INSECURE_HTTP=false
+MCP_WORKER_WORKER_STATE_PATH=~/.worker_mcp/state.json
+MCP_WORKER_WORKER_ALLOWED_ROOTS=/home/user/work,/srv/projects
+MCP_WORKER_WORKER_ALLOW_SHELL=true
+MCP_WORKER_WORKER_MAX_JOB_MS=300000
 ```
 
 All path-bearing jobs must resolve inside an allowed root. When shell execution is disabled, `workspace.exec`, checks, git helpers, and managed processes are rejected locally. Allowed roots are a path-policy boundary, not a shell sandbox: once shell execution is enabled, a command has the normal filesystem/process authority of the OS user running the worker. Use a dedicated low-privilege account or an external OS/container sandbox when stronger isolation is required.

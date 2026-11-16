@@ -102,13 +102,13 @@ type EnrollmentResponse struct {
 type cliOptions map[string]string
 
 func workerHome() string {
-	if value := strings.TrimSpace(os.Getenv("BOT_REPORT_WORKER_HOME")); value != "" {
+	if value := strings.TrimSpace(os.Getenv("MCP_WORKER_WORKER_HOME")); value != "" {
 		if abs, err := filepath.Abs(value); err == nil {
 			return abs
 		}
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".bot-report-worker")
+	return filepath.Join(home, ".worker_mcp")
 }
 func configPath() string        { return filepath.Join(workerHome(), "config.json") }
 func statePath() string         { return filepath.Join(workerHome(), "state.json") }
@@ -455,7 +455,7 @@ func startDetached(wait bool) (int, error) {
 		return 0, fail("WORKER_NOT_LOGGED_IN", "Run worker_mcp login first.")
 	}
 	if pid := clearStalePID(); pid != 0 {
-		fmt.Printf("[bot-report-worker] already running pid=%d profile=%s\n", pid, cfg.ProfileName)
+		fmt.Printf("[worker_mcp] already running pid=%d profile=%s\n", pid, cfg.ProfileName)
 		return pid, nil
 	}
 	if err := ensureWorkerHome(); err != nil {
@@ -495,14 +495,14 @@ func startDetached(wait bool) (int, error) {
 			return 0, err
 		}
 	}
-	fmt.Printf("[bot-report-worker] connected profile=%s pid=%d\n", cfg.ProfileName, pid)
+	fmt.Printf("[worker_mcp] connected profile=%s pid=%d\n", cfg.ProfileName, pid)
 	return pid, nil
 }
 
 func stopWorker() error {
 	pid := clearStalePID()
 	if pid == 0 {
-		fmt.Println("[bot-report-worker] not running")
+		fmt.Println("[worker_mcp] not running")
 		return nil
 	}
 	_ = terminatePID(pid, false)
@@ -514,7 +514,7 @@ func stopWorker() error {
 		_ = terminatePID(pid, true)
 	}
 	_ = os.Remove(pidPath())
-	fmt.Printf("[bot-report-worker] stopped pid=%d\n", pid)
+	fmt.Printf("[worker_mcp] stopped pid=%d\n", pid)
 	return nil
 }
 
@@ -524,10 +524,10 @@ func login(options cliOptions) error {
 		return fail("WORKER_ALREADY_LOGGED_IN", "This machine is already enrolled as worker "+existing.WorkerID+".")
 	}
 	reader := bufio.NewReader(os.Stdin)
-	insecure := options["insecure-http"] == "true" || os.Getenv("BOT_REPORT_WORKER_ALLOW_INSECURE_HTTP") == "true"
+	insecure := options["insecure-http"] == "true" || os.Getenv("MCP_WORKER_WORKER_ALLOW_INSECURE_HTTP") == "true"
 	serverInput := options["server"]
 	if serverInput == "" {
-		serverInput = os.Getenv("BOT_REPORT_WORKER_SERVER_URL")
+		serverInput = os.Getenv("MCP_WORKER_WORKER_SERVER_URL")
 	}
 	if serverInput == "" {
 		serverInput = readText(defaultServerPath())
@@ -545,7 +545,7 @@ func login(options cliOptions) error {
 	}
 	token := options["token"]
 	if token == "" {
-		token = os.Getenv("BOT_REPORT_WORKER_ENROLLMENT_TOKEN")
+		token = os.Getenv("MCP_WORKER_WORKER_ENROLLMENT_TOKEN")
 	}
 	if token == "" {
 		token, err = hiddenPrompt("One-time enrollment token")
@@ -558,7 +558,7 @@ func login(options cliOptions) error {
 	}
 	rootInput := options["roots"]
 	if rootInput == "" {
-		rootInput = os.Getenv("BOT_REPORT_WORKER_ALLOWED_ROOTS")
+		rootInput = os.Getenv("MCP_WORKER_WORKER_ALLOWED_ROOTS")
 	}
 	// No roots means access to any path permitted by the Worker OS account.
 	roots, err := normalizeRoots(rootInput)
@@ -568,7 +568,7 @@ func login(options cliOptions) error {
 	host, _ := os.Hostname()
 	workerName := options["name"]
 	if workerName == "" {
-		workerName = os.Getenv("BOT_REPORT_WORKER_NAME")
+		workerName = os.Getenv("MCP_WORKER_WORKER_NAME")
 	}
 	if workerName == "" {
 		workerName = host
@@ -585,7 +585,7 @@ func login(options cliOptions) error {
 	if err != nil {
 		return err
 	}
-	allowShell := options["allow-shell"] == "true" || os.Getenv("BOT_REPORT_WORKER_ALLOW_SHELL") != "false"
+	allowShell := options["allow-shell"] == "true" || os.Getenv("MCP_WORKER_WORKER_ALLOW_SHELL") != "false"
 	if err := ensureWorkerHome(); err != nil {
 		return err
 	}
@@ -627,9 +627,9 @@ func login(options cliOptions) error {
 	if err := writeJSONAtomic(statePath(), &state); err != nil {
 		return err
 	}
-	fmt.Printf("[bot-report-worker] enrolled worker=%s id=%s\n", state.Name, state.WorkerID)
-	fmt.Printf("[bot-report-worker] execution profile=%s roots=%s\n", cfg.ProfileName, strings.Join(roots, ","))
-	fmt.Printf("[bot-report-worker] shell execution=%s\n", map[bool]string{true: "ENABLED", false: "disabled"}[allowShell])
+	fmt.Printf("[worker_mcp] enrolled worker=%s id=%s\n", state.Name, state.WorkerID)
+	fmt.Printf("[worker_mcp] execution profile=%s roots=%s\n", cfg.ProfileName, strings.Join(roots, ","))
+	fmt.Printf("[worker_mcp] shell execution=%s\n", map[bool]string{true: "ENABLED", false: "disabled"}[allowShell])
 	if options["no-start"] == "true" {
 		fmt.Println("[worker_mcp] enrollment complete; run worker_mcp start to connect.")
 		return nil
@@ -705,7 +705,7 @@ Login options:
   --roots <paths>      Optional restricted roots (default: any path allowed by OS)
   --name <name>        Worker display name; default = hostname
   --profile <name>     Execution alias; default = worker name
-  --allow-shell        Shell is enabled by default; set BOT_REPORT_WORKER_ALLOW_SHELL=false to disable
+  --allow-shell        Shell is enabled by default; set MCP_WORKER_WORKER_ALLOW_SHELL=false to disable
   --insecure-http      Permit HTTP only for trusted local development
   --no-start           Enroll only; do not connect the worker
 
@@ -1671,7 +1671,7 @@ func (a *Agent) startManagedProcessContext(ctx context.Context, p map[string]any
 	id := "brproc-" + randomHex(8)
 	logDir := a.processLogDir
 	if logDir == "" {
-		logDir = filepath.Join(os.TempDir(), "bot-report-worker-process")
+		logDir = filepath.Join(os.TempDir(), "worker_mcp-process")
 	}
 	if err := os.MkdirAll(logDir, 0700); err != nil {
 		return nil, err
@@ -2251,7 +2251,7 @@ func uninstallLocal() error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("[bot-report-worker] uninstalled local_state=%s installation=%s\n", boolWord(result["local_state_removed"]), boolWord(result["installation_removed"]))
+	fmt.Printf("[worker_mcp] uninstalled local_state=%s installation=%s\n", boolWord(result["local_state_removed"]), boolWord(result["installation_removed"]))
 	return nil
 }
 func boolWord(v any) string {
@@ -2316,7 +2316,7 @@ func runForeground(detached bool) (runErr error) {
 func main() {
 	command, options, err := parseArgs(os.Args[1:])
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[bot-report-worker] %s: %s\n", errorCode(err), err.Error())
+		fmt.Fprintf(os.Stderr, "[worker_mcp] %s: %s\n", errorCode(err), err.Error())
 		os.Exit(1)
 	}
 	switch command {
@@ -2363,7 +2363,7 @@ func main() {
 		err = fail("CLI_COMMAND_UNKNOWN", fmt.Sprintf("Unknown command '%s'. Run worker_mcp help.", command))
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[bot-report-worker] %s: %s\n", errorCode(err), err.Error())
+		fmt.Fprintf(os.Stderr, "[worker_mcp] %s: %s\n", errorCode(err), err.Error())
 		os.Exit(1)
 	}
 }

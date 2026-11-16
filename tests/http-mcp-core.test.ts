@@ -85,7 +85,7 @@ void test('signed Worker installer and distribution routes always reject unappro
     '/worker/dist/SHA256SUMS',
     '/worker/dist/SHA256SUMS.sig',
     '/worker/dist/WORKER_RELEASE',
-    '/worker/dist/bot-report-worker-linux-amd64',
+    '/worker/dist/worker_mcp-linux-amd64',
     '/worker/dist/cli.js',
     '/worker/dist/lifecycle.js',
     '/worker/dist/not-allowed',
@@ -99,17 +99,17 @@ void test('signed Worker installer and distribution routes always reject unappro
 });
 
 void test('unapproved curl installer fails closed without installing a Worker binary', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-report-worker-pending-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'worker_mcp-pending-'));
   try {
     const binDir = path.join(home, '.local', 'bin');
-    const installRoot = path.join(home, '.local', 'share', 'bot-report-worker');
+    const installRoot = path.join(home, '.local', 'share', 'worker_mcp');
     const env = {
       ...process.env,
       HOME: home,
-      BOT_REPORT_WORKER_HOME: path.join(home, '.bot-report-worker'),
-      BOT_REPORT_WORKER_INSTALL_ROOT: installRoot,
-      BOT_REPORT_WORKER_BIN_DIR: binDir,
-      BOT_REPORT_WORKER_SKIP_SERVICE: '1',
+      MCP_WORKER_WORKER_HOME: path.join(home, '.worker_mcp'),
+      MCP_WORKER_WORKER_INSTALL_ROOT: installRoot,
+      MCP_WORKER_WORKER_BIN_DIR: binDir,
+      MCP_WORKER_WORKER_SKIP_SERVICE: '1',
     };
     const result = await runProcess(
       'sh',
@@ -122,8 +122,8 @@ void test('unapproved curl installer fails closed without installing a Worker bi
     assert.notEqual(result.code, 0, 'unapproved public install unexpectedly succeeded');
     assert.match(result.stderr, /(?:503|signed release not approved)/i);
     assert.equal(fs.existsSync(path.join(installRoot, 'current', 'worker_mcp')), false);
-    assert.equal(fs.existsSync(path.join(binDir, 'bot-report-worker')), false);
-    assert.equal(fs.existsSync(path.join(env.BOT_REPORT_WORKER_HOME, 'state.json')), false);
+    assert.equal(fs.existsSync(path.join(binDir, 'worker_mcp')), false);
+    assert.equal(fs.existsSync(path.join(env.MCP_WORKER_WORKER_HOME, 'state.json')), false);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -178,7 +178,7 @@ void test('administrator login can authorize an OAuth client through the minimal
     displayName: 'Consent Test Client',
     principalId: 'principal:consent_test',
     redirectUris: ['https://chatgpt.com/connector_platform_oauth_redirect'],
-    allowedScopes: ['bot_report.read', 'bot_report.terminal'],
+    allowedScopes: ['mcp_worker.read', 'mcp_worker.terminal'],
   });
   assert.ok(registered.client);
   const verifier = 'consent-test-verifier-abcdefghijklmnopqrstuvwxyz-0123456789';
@@ -187,7 +187,7 @@ void test('administrator login can authorize an OAuth client through the minimal
     client_id: registered.client.client_id,
     redirect_uri: 'https://chatgpt.com/connector_platform_oauth_redirect',
     response_type: 'code',
-    scope: 'bot_report.read bot_report.terminal',
+    scope: 'mcp_worker.read mcp_worker.terminal',
     state: 'consent-state',
     code_challenge: challenge,
     code_challenge_method: 'S256',
@@ -201,7 +201,7 @@ void test('administrator login can authorize an OAuth client through the minimal
   const consentHtml = await consent.text();
   assert.match(consentHtml, /Authorize MCP Access/);
   assert.match(consentHtml, /Consent Test Client/);
-  assert.match(consentHtml, /bot_report\.terminal/);
+  assert.match(consentHtml, /mcp_worker\.terminal/);
   const consentCsrf = consentHtml.match(/name="_csrf" value="([^"]+)"/)?.[1];
   assert.ok(consentCsrf);
 
@@ -209,7 +209,7 @@ void test('administrator login can authorize an OAuth client through the minimal
     _csrf: consentCsrf,
     client_id: registered.client.client_id,
     redirect_uri: 'https://chatgpt.com/connector_platform_oauth_redirect',
-    scope: 'bot_report.read bot_report.terminal',
+    scope: 'mcp_worker.read mcp_worker.terminal',
     state: 'consent-state',
     code_challenge: challenge,
     code_challenge_method: 'S256',
@@ -251,12 +251,12 @@ void test('administrator login can authorize an OAuth client through the minimal
   assert.ok('access_token' in tokenBody && typeof tokenBody.access_token === 'string');
   assert.ok('scope' in tokenBody && typeof tokenBody.scope === 'string');
   assert.match(tokenBody.access_token, /^br_at_/);
-  assert.equal(tokenBody.scope, 'bot_report.read bot_report.terminal');
+  assert.equal(tokenBody.scope, 'mcp_worker.read mcp_worker.terminal');
 });
 
 void test('OAuth rejects malformed scope without consuming a valid refresh token', async () => {
   const { default: config } = await import('../src/config/mcpConfig.js');
-  const fixture = (await issueToken({ scopes: ['bot_report.read', 'offline_access'] })) as Awaited<
+  const fixture = (await issueToken({ scopes: ['mcp_worker.read', 'offline_access'] })) as Awaited<
     ReturnType<typeof OAuthServiceModule.registerClient>
   > & { token: Awaited<ReturnType<typeof OAuthServiceModule.exchangeAuthorizationCode>> };
   assert.ok(fixture.client);
@@ -275,7 +275,7 @@ void test('OAuth rejects malformed scope without consuming a valid refresh token
   const malformed = await fetch(baseUrl + '/oauth/token', {
     method: 'POST',
     headers,
-    body: JSON.stringify({ ...body, scope: ['bot_report.read'] }),
+    body: JSON.stringify({ ...body, scope: ['mcp_worker.read'] }),
   });
   assert.equal(malformed.status, 400);
   const error: unknown = await malformed.json();
@@ -284,12 +284,12 @@ void test('OAuth rejects malformed scope without consuming a valid refresh token
   const valid = await fetch(baseUrl + '/oauth/token', {
     method: 'POST',
     headers,
-    body: JSON.stringify({ ...body, scope: 'bot_report.read' }),
+    body: JSON.stringify({ ...body, scope: 'mcp_worker.read' }),
   });
   assert.equal(valid.status, 200);
   const result: unknown = await valid.json();
   assert.ok(result && typeof result === 'object' && 'scope' in result);
-  assert.equal(result.scope, 'bot_report.read');
+  assert.equal(result.scope, 'mcp_worker.read');
 });
 
 void test('authenticated MCP initialize returns instructions and exactly 15 tools', async () => {

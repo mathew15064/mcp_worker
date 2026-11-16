@@ -6,7 +6,7 @@ import { SqliteAdapter } from './adapters/sqliteAdapter';
 import type { DatabaseAdapter } from './contracts';
 import type Database from 'better-sqlite3';
 import { runMigrations } from './migrations';
-import { assertRailwaySqliteSchema } from './sqliteSchemaValidation';
+import { assertSqliteSchema } from './sqliteSchemaValidation';
 
 const STATES = Object.freeze({
   UNCONFIGURED: 'UNCONFIGURED',
@@ -35,11 +35,6 @@ class DatabaseManager {
   async initialize() {
     if (this.initialized) return this.status();
     this.initialized = true;
-    if (process.env.MCP_PLATFORM === 'railway') {
-      const state = this.connectRailwaySqlite();
-      await this.adapter?.ping();
-      return state;
-    }
     // Refuse silent reuse of a pre-SQLite installation's configuration.
     // A fresh development installation must explicitly use a new project/volume.
     const oldBootstrap = path.resolve(
@@ -55,6 +50,15 @@ class DatabaseManager {
           code: 'OBSOLETE_BOOTSTRAP_REFUSED',
         },
       );
+    }
+    if (
+      path.basename(config.DATABASE_PATH) === 'mcp_worker.sqlite' &&
+      !fs.existsSync(config.DATABASE_PATH) &&
+      fs.existsSync(path.join(path.dirname(config.DATABASE_PATH), 'bot_report.sqlite'))
+    ) {
+      throw Object.assign(new Error('Legacy SQLite filename found; manual migration required.'), {
+        code: 'LEGACY_SQLITE_MIGRATION_REQUIRED',
+      });
     }
     if (!fs.existsSync(config.DATABASE_PATH)) {
       this.state = STATES.UNCONFIGURED;
@@ -89,32 +93,40 @@ class DatabaseManager {
         });
       }
       db.transaction(() => {
-        const ledger = db
-          .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
-          .get('railway_schema_versions');
-        if (ledger) {
-          const versions = db.prepare('SELECT version FROM railway_schema_versions').all() as {
+        // Preserve existing data during the one-time ledger rename.
+        const oldLedger = db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='railway_schema_versions'",
+          )
+          .get();
+        const newLedger = db
+          .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_versions'")
+          .get();
+        if (oldLedger && newLedger)
+          throw Object.assign(
+            new Error('Ambiguous SQLite schema ledgers; manual recovery required.'),
+            { code: 'SQLITE_SCHEMA_UNSUPPORTED' },
+          );
+        if (oldLedger) db.exec('ALTER TABLE railway_schema_versions RENAME TO schema_versions');
+        if (oldLedger || newLedger) {
+          const versions = db.prepare('SELECT version FROM schema_versions').all() as {
             version: string;
           }[];
           if (versions.length !== 1 || versions[0]?.version !== SCHEMA_VERSION) {
-            throw Object.assign(
-              new Error(
-                process.env.MCP_PLATFORM === 'railway'
-                  ? 'Unsupported Railway SQLite schema version.'
-                  : 'Unsupported SQLite schema version.',
-              ),
-              { code: 'SQLITE_SCHEMA_UNSUPPORTED' },
-            );
+            throw Object.assign(new Error('Unsupported SQLite schema version.'), {
+              code: 'SQLITE_SCHEMA_UNSUPPORTED',
+            });
           }
         }
         runMigrations(db);
-        assertRailwaySqliteSchema(db);
+        assertSqliteSchema(db);
         db.exec(
-          'CREATE TABLE IF NOT EXISTS railway_schema_versions (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)',
+          'CREATE TABLE IF NOT EXISTS schema_versions (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)',
         );
-        db.prepare(
-          'INSERT OR IGNORE INTO railway_schema_versions (version, applied_at) VALUES (?, ?)',
-        ).run(SCHEMA_VERSION, new Date().toISOString());
+        db.prepare('INSERT OR IGNORE INTO schema_versions (version, applied_at) VALUES (?, ?)').run(
+          SCHEMA_VERSION,
+          new Date().toISOString(),
+        );
       })();
       if (db.pragma('integrity_check', { simple: true }) !== 'ok') {
         throw Object.assign(new Error('SQLite integrity check failed.'), {
@@ -139,46 +151,6 @@ class DatabaseManager {
       };
       throw error;
     }
-  }
-
-  /** Enforce the old Railway persistent-volume safety contract when that deployment mode is selected. */
-  connectRailwaySqlite() {
-    const volumePath = process.env.RAILWAY_VOLUME_MOUNT_PATH;
-    if (!volumePath || !path.isAbsolute(volumePath)) {
-      throw Object.assign(new Error('Railway persistent volume is required.'), {
-        code: 'RAILWAY_VOLUME_MISSING',
-      });
-    }
-    const dbPath = config.DATABASE_PATH;
-    const expected = path.dirname(dbPath);
-    // Reject aliases and symlinked ancestors, not just a symlink at the DB file.
-    if (path.resolve(volumePath) !== expected || fs.realpathSync(volumePath) !== expected) {
-      throw Object.assign(new Error('SQLite database must be inside the Railway volume.'), {
-        code: 'RAILWAY_VOLUME_PATH_MISMATCH',
-      });
-    }
-    if (!fs.statSync(volumePath).isDirectory()) {
-      throw new Error('Railway volume mount must be a directory.');
-    }
-    fs.accessSync(volumePath, fs.constants.R_OK | fs.constants.W_OK);
-    for (const file of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`, `${dbPath}-journal`]) {
-      const entry = fs.lstatSync(file, { throwIfNoEntry: false });
-      if (entry && (!entry.isFile() || entry.isSymbolicLink())) {
-        throw Object.assign(new Error('Railway SQLite files must be regular files.'), {
-          code: 'RAILWAY_DB_SYMLINK_DENIED',
-        });
-      }
-    }
-    if (fs.existsSync(dbPath)) fs.accessSync(dbPath, fs.constants.R_OK | fs.constants.W_OK);
-    // A writable directory flag is insufficient when mounted read-only.
-    const probe = fs.mkdtempSync(path.join(volumePath, '.mcp-worker-write-'));
-    try {
-      fs.writeFileSync(path.join(probe, 'check'), 'ok', { flag: 'wx', mode: 0o600 });
-    } finally {
-      fs.rmSync(probe, { recursive: true, force: true });
-    }
-
-    return this.activateSqlite();
   }
 
   useSqliteForTests(db: Database.Database | null = null) {
@@ -206,13 +178,6 @@ class DatabaseManager {
 
   isOperational() {
     return !!this.adapter && (this.state === STATES.READY || this.state === STATES.TEST_SQLITE);
-  }
-  isRailwaySqliteReady() {
-    return (
-      this.state === STATES.READY &&
-      this.adapter?.kind === 'sqlite' &&
-      process.env.MCP_PLATFORM === 'railway'
-    );
   }
   isSqlReady() {
     return this.state === STATES.READY && this.adapter?.kind === 'sqlite';

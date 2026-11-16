@@ -25,8 +25,8 @@ function foreignKeys(db: SqliteDatabase.Database, table: string): string[] {
     .sort();
 }
 function fail(table: string, detail: string): never {
-  throw Object.assign(new Error(`Incompatible Railway SQLite schema: ${table} (${detail})`), {
-    code: 'RAILWAY_SCHEMA_INCOMPATIBLE',
+  throw Object.assign(new Error(`Incompatible SQLite schema: ${table} (${detail})`), {
+    code: 'SQLITE_SCHEMA_INCOMPATIBLE',
   });
 }
 
@@ -35,7 +35,7 @@ function fail(table: string, detail: string): never {
  * freshly migrated, disposable reference before advertising READY.
  * Only additive extra tables/columns/indexes are tolerated.
  */
-export function assertRailwaySqliteSchema(db: SqliteDatabase.Database) {
+export function assertSqliteSchema(db: SqliteDatabase.Database) {
   const reference = new Database(':memory:');
   try {
     reference.pragma('foreign_keys = ON');

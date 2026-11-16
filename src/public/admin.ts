@@ -37,7 +37,7 @@ interface WorkerStatusResponse {
 
   function setTheme(theme: string) {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem('bot-report-theme', theme);
+    localStorage.setItem('mcp_worker-theme', theme);
     $$('[data-theme-toggle]').forEach((button) => {
       button.setAttribute(
         'aria-label',
@@ -50,7 +50,7 @@ interface WorkerStatusResponse {
     });
   }
 
-  setTheme(localStorage.getItem('bot-report-theme') || 'dark');
+  setTheme(localStorage.getItem('mcp_worker-theme') || 'dark');
   $$<HTMLInputElement>('[data-account-return-to]').forEach((input) => {
     input.value = `${window.location.pathname}${window.location.search}`;
   });
@@ -538,7 +538,7 @@ interface WorkerStatusResponse {
   const mobileMenu = $('[data-mobile-menu]');
   const sidebarScrim = $('[data-sidebar-scrim]');
   const sidebarCollapse = $('[data-sidebar-collapse]');
-  const sidebarCollapseKey = 'bot-report-sidebar-collapsed';
+  const sidebarCollapseKey = 'mcp_worker-sidebar-collapsed';
 
   function setSidebar(open: boolean) {
     if (!sidebar || !mobileMenu) return;

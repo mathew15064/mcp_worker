@@ -18,8 +18,8 @@ external reachability and the certificate from an independent network.
 
 Check discovery from a remote machine (replace the example hostname):
 
-    curl -fsS https://bot-report.example.com/.well-known/oauth-protected-resource/mcp
-    curl -fsS https://bot-report.example.com/.well-known/oauth-authorization-server
+    curl -fsS https://mcp-worker.example.com/.well-known/oauth-protected-resource/mcp
+    curl -fsS https://mcp-worker.example.com/.well-known/oauth-authorization-server
 
 Verify that resource, issuer, authorization and token endpoint URLs all
 match the intended HTTPS origin. An unauthenticated POST to /mcp must not

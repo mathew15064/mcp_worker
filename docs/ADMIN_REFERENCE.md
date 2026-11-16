@@ -4,7 +4,7 @@ This document describes the **SQLite-only development branch** and its baseline 
 
 ## Storage
 
-The application uses a local **better-sqlite3** database at `DATABASE_PATH` (Docker default `/app/data/bot_report.sqlite`), with WAL, foreign keys, `busy_timeout=5000`, schema validation and `integrity_check`. Docker uses **one app container and one persistent app-data volume**. Do not run writable replicas against the same SQLite file and do not host the database on a shared network filesystem.
+The application uses a local **better-sqlite3** database at `DATABASE_PATH` (Docker default `/app/data/mcp_worker.sqlite`), with WAL, foreign keys, `busy_timeout=5000`, schema validation and `integrity_check`. Docker uses **one app container and one persistent app-data volume**. Do not run writable replicas against the same SQLite file and do not host the database on a shared network filesystem.
 
 `./setup.sh --init` is for an entirely new installation. It initializes 13 SQLite application tables and an initial admin identity; `./setup.sh` subsequently starts/restarts without reset. Admin → Settings → Database is **read-only status**; there is no database-connection form or server-side setup action.
 

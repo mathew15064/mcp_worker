@@ -7,8 +7,8 @@
 # ------------------------------------------------------------------------------
 # Stage 1: Native Dependency Builder
 # ------------------------------------------------------------------------------
-ARG BOT_REPORT_NODE_IMAGE=node:22.22.3-alpine@sha256:e58326d0d441090181ac150dc2078d3e2cf6a0d42e809aebba3ef5880935ffdd
-FROM ${BOT_REPORT_NODE_IMAGE} AS builder
+ARG MCP_WORKER_NODE_IMAGE=node:22.22.3-alpine@sha256:e58326d0d441090181ac150dc2078d3e2cf6a0d42e809aebba3ef5880935ffdd
+FROM ${MCP_WORKER_NODE_IMAGE} AS builder
 
 WORKDIR /app
 
@@ -40,38 +40,38 @@ COPY worker-go/go.mod worker-go/go.sum ./worker-go/
 RUN cd worker-go && go mod download
 COPY worker-go/ ./worker-go/
 COPY scripts/build-worker-go.sh ./scripts/build-worker-go.sh
-ARG BOT_REPORT_GIT_SHA=unknown
-ARG BOT_REPORT_WORKER_VERSION=2.3.4
-RUN chmod +x ./scripts/build-worker-go.sh && VERSION="$BOT_REPORT_WORKER_VERSION" COMMIT="$BOT_REPORT_GIT_SHA" ./scripts/build-worker-go.sh
+ARG MCP_WORKER_GIT_SHA=unknown
+ARG MCP_WORKER_WORKER_VERSION=2.3.4
+RUN chmod +x ./scripts/build-worker-go.sh && VERSION="$MCP_WORKER_WORKER_VERSION" COMMIT="$MCP_WORKER_GIT_SHA" ./scripts/build-worker-go.sh --runtime-only
 
 # ------------------------------------------------------------------------------
 # Stage 3: Minimal Production Runtime
 # ------------------------------------------------------------------------------
-FROM ${BOT_REPORT_NODE_IMAGE} AS runner
+FROM ${MCP_WORKER_NODE_IMAGE} AS runner
 
 WORKDIR /app
 
 # Optional build provenance. Deploy tooling injects these; direct/manual builds may leave them as unknown.
-ARG BOT_REPORT_GIT_SHA=unknown
-ARG BOT_REPORT_BUILD_TIME=unknown
-ARG BOT_REPORT_TREE_SHA=unknown
-ARG BOT_REPORT_NODE_IMAGE
-LABEL org.opencontainers.image.revision="${BOT_REPORT_GIT_SHA}" \
-      org.opencontainers.image.created="${BOT_REPORT_BUILD_TIME}" \
+ARG MCP_WORKER_GIT_SHA=unknown
+ARG MCP_WORKER_BUILD_TIME=unknown
+ARG MCP_WORKER_TREE_SHA=unknown
+ARG MCP_WORKER_NODE_IMAGE
+LABEL org.opencontainers.image.revision="${MCP_WORKER_GIT_SHA}" \
+      org.opencontainers.image.created="${MCP_WORKER_BUILD_TIME}" \
       org.opencontainers.image.source="https://github.com/mathew15064/mcp_worker" \
-      org.bot-report.source-tree="${BOT_REPORT_TREE_SHA}" \
-      org.bot-report.image-flavor="standalone" \
-      org.bot-report.build-origin="local-pc-only" \
-      org.bot-report.go-base="golang:1.26.10-alpine@sha256:87c65a688975c0b1d4585d204874c45ca78354670e3a5f11368c5a492303d696" \
-      org.bot-report.node-base="${BOT_REPORT_NODE_IMAGE}"
+      org.mcp_worker.source-tree="${MCP_WORKER_TREE_SHA}" \
+      org.mcp_worker.image-flavor="standalone" \
+      org.mcp_worker.build-origin="local-pc-only" \
+      org.mcp_worker.go-base="golang:1.26.10-alpine@sha256:87c65a688975c0b1d4585d204874c45ca78354670e3a5f11368c5a492303d696" \
+      org.mcp_worker.node-base="${MCP_WORKER_NODE_IMAGE}"
 
 # Persistent SQLite lives under /app/data; no external database service.
 ENV NODE_ENV=production \
     PORT=80 \
     HOST=0.0.0.0 \
-    DATABASE_PATH=/app/data/bot_report.sqlite \
-    BOT_REPORT_GIT_SHA=${BOT_REPORT_GIT_SHA} \
-    BOT_REPORT_BUILD_TIME=${BOT_REPORT_BUILD_TIME}
+    DATABASE_PATH=/app/data/mcp_worker.sqlite \
+    MCP_WORKER_GIT_SHA=${MCP_WORKER_GIT_SHA} \
+    MCP_WORKER_BUILD_TIME=${MCP_WORKER_BUILD_TIME}
 
 # Copy compiled production node_modules from builder stage
 COPY --from=builder /app/node_modules ./node_modules

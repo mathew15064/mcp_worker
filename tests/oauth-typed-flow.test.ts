@@ -20,7 +20,7 @@ void test('typed OAuth flow preserves PKCE, refresh rotation, replay protection,
     const client = await service.registerClient({
       displayName: 'Typed OAuth Regression',
       redirectUris: [redirectUri],
-      allowedScopes: ['bot_report.read', 'offline_access'],
+      allowedScopes: ['mcp_worker.read', 'offline_access'],
     });
     assert.ok(client.client);
     const clientId = client.client.client_id;
@@ -31,13 +31,13 @@ void test('typed OAuth flow preserves PKCE, refresh rotation, replay protection,
       clientId,
       redirectUri,
       responseType: 'code',
-      scope: 'bot_report.read offline_access',
+      scope: 'mcp_worker.read offline_access',
       state: 'regression',
       codeChallenge: challenge,
       codeChallengeMethod: 'S256',
       resource,
     });
-    assert.deepEqual(authorized.scopes, ['bot_report.read', 'offline_access']);
+    assert.deepEqual(authorized.scopes, ['mcp_worker.read', 'offline_access']);
     await assert.rejects(
       service.validateAuthorizeRequest({
         clientId,

@@ -49,7 +49,7 @@ function plan(snapshot, approved) {
       return {
         client_id: row.client_id,
         current_scopes: current,
-        disposition: current.some((s) => s !== 'bot_report.read')
+        disposition: current.some((s) => s !== 'mcp_worker.read')
           ? 'OWNER_GRANT_EVIDENCE_REQUIRED'
           : 'READ_ONLY_NO_CHANGE',
         proposed_scopes: null,

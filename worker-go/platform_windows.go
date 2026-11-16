@@ -167,7 +167,7 @@ func platformRemoveInstallRoot(installRoot string) error {
 	if !isWithinRoot(currentExe, installRoot) {
 		return firstErr
 	}
-	tempExe := filepath.Join(os.TempDir(), "bot-report-worker-delete-"+randomHex(8)+".exe")
+	tempExe := filepath.Join(os.TempDir(), "worker_mcp-delete-"+randomHex(8)+".exe")
 	from, err := windows.UTF16PtrFromString(currentExe)
 	if err != nil {
 		return firstErr

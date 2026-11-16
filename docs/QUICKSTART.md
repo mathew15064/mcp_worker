@@ -1,17 +1,23 @@
-# Install from source — local Docker
+# Quick Setup and Source Setup — local Docker
 
-This is the recommended **local-only** setup of the mcp_worker server and
-persistent SQLite. No public domain, inbound SSH port, Railway deployment or
-ChatGPT subscription is needed. Worker installation is a separate gated
-release step described below.
+**Quick Setup (recommended for users):** download the standalone
+[`quick-setup.sh`](../quick-setup.sh) script, run `sh quick-setup.sh --init`
+and let the published Docker image generate `.env.setup` in the current directory.
+No source checkout, build toolchain, or Docker Compose is needed. Only Docker
+Engine and a network connection to pull the image are required. The script must
+be reviewed before execution; see the [README](../README.md#quick-setup--image-first-no-source-checkout).
 
-## Requirements
+**Source Setup (developers):** clone the repository and run `./setup.sh --init`.
+This reuses an exact matching local image, including a previously pulled Docker Hub image (Git commit **and** tree), and builds
+only on cache miss or `MCP_WORKER_FORCE_BUILD=1`. Fresh source installs use
+Docker Compose and a *separate* SQLite volume from Quick Setup.
+
+## Requirements for Source Setup
 
 A Linux machine with Docker Engine, Docker Compose v2, Git, OpenSSL and
 `flock` (plus `curl` for the optional health checks); network access for
 pinned base images and build dependencies; enough
-disk space for images and persistent volumes. The Docker image builds Node.js
-22 and Go Worker binaries inside Docker: **Node.js is not required on the
+disk space for images and persistent volumes. Source mode builds Node.js 22 and the Linux Go Worker inside Docker: **Node.js is not required on the
 host** for installation. Node.js **22.x** is required only if you choose the
 optional OAuth helper or manual development setup.
 
@@ -25,10 +31,10 @@ curl -fsS http://127.0.0.1:3333/healthz
 curl -fsS http://127.0.0.1:3333/readyz
 ```
 
-This builds one application image from the checked-out source, initializes
+This reuses a matching local image or builds one from checked-out source, initializes
 a new SQLite database on the persistent app-data volume, and binds the service to loopback.
 There is no database server or exposed database port. A cold build needs network access and its duration
-depends on the host/cache. This SQLite-only development release expects a fresh data volume; it does not import earlier database formats.
+depends on the host/cache. This release expects a fresh SQLite volume. Older SQLite filenames require the explicit offline migration documented in BACKUP_RESTORE.md.
 
 Open http://127.0.0.1:3333/admin, sign in as `admin`, and read the generated
 `ADMIN_PASSWORD` privately from `.env.setup`. The installer creates this
@@ -59,7 +65,7 @@ requirements.
 On the **same machine** as the server and browser, install Node.js **22.x**
 only for this helper. In the same repository checkout, create an Admin OAuth
 client with exact redirect URI `http://127.0.0.1:43871/callback`, select only
-`bot_report.read`, and save the one-time secret privately.
+`mcp_worker.read`, and save the one-time secret privately.
 
 ```sh
 npm ci

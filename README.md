@@ -20,29 +20,52 @@ flowchart TD
 - **15 MCP tools:** runtime info, Worker discovery, workspace commands, files, Git review, checks and managed processes.
 - **Security boundaries:** OAuth scopes, Worker identity, owner access controls and audit records. A Worker executes with its **operating-system user's permissions**; allowed workspace paths do not sandbox arbitrary shell commands.
 
-## Quick start: local Docker
+## Quick Setup — image first, no source checkout
 
-Use the **source installer** for first-time setup. It builds the application image locally and generates the three required secrets. Requirements: Linux, Docker Engine, Compose v2, Git, OpenSSL, `flock` and network access to build dependencies.
+Requires only Linux, Docker Engine and a small downloaded installer script. The server
+image is already compiled on Docker Hub: **no Git, Go, Node.js, npm or Compose build**
+required on the host.
+
+```sh
+mkdir mcp_worker && cd mcp_worker
+curl -fsSLO https://raw.githubusercontent.com/mathew15064/mcp_worker/main/quick-setup.sh
+# Review the downloaded script before running it; it controls your local Docker daemon.
+sh quick-setup.sh --init
+```
+
+The script pulls `mathew15604/mcp-worker:dev-main`. A Node command *inside that image*
+creates a private **`.env.setup` on your host** (mode 0600) with three random
+secrets. The script initializes a new persistent volume (`mcp_worker_quick_app-data`)
+only when requested and binds the Admin UI to **http://127.0.0.1:3333/admin**.
+Read `ADMIN_PASSWORD` privately from `.env.setup` and log in as `admin`.
+
+```sh
+sh quick-setup.sh --down    # stop; keep credentials and database
+sh quick-setup.sh --start   # restart using the same image and volume
+```
+
+You can pin an immutable registry digest with `MCP_WORKER_IMAGE=docker.io/mathew15604/mcp-worker@sha256:...`
+when starting a fresh installation. A newer image is **not** silently swapped
+under an existing container: verify and explicitly migrate before upgrading.
+Keep `.env.setup` and the volume together; never delete either to troubleshoot.
+
+## Source Setup — developer workflow
 
 ```sh
 git clone https://github.com/mathew15064/mcp_worker.git
 cd mcp_worker
 ./setup.sh --init
-curl -fsS http://127.0.0.1:3333/readyz
 ```
 
-Open **http://127.0.0.1:3333/admin**. Sign in as `admin` with `ADMIN_PASSWORD` from the private `.env.setup` file. The installer binds HTTP to **localhost only**, creates a persistent SQLite volume and stores the password, session secret and encryption key in `.env.setup` (file mode `0600`).
+This mode checks for a **matching local build** using its embedded Git revision
+and source-tree SHA. When both match (including the locally cached Docker Hub image), it skips the build. Otherwise Docker builds
+from the checked-out source. Use `MCP_WORKER_FORCE_BUILD=1 ./setup.sh` to force a
+rebuild. `./setup.sh --down` preserves the source-mode SQLite volume
+(`mcp_worker_app-data`) and `.env.setup`.
 
-To stop and restart without deleting data:
-
-```sh
-./setup.sh --down
-./setup.sh
-```
-
-**Never run `docker compose down -v` on an installation whose data you need.** Keep `.env.setup` and the named `app-data` volume together for recovery. The `--init` command is for a **fresh** database, not an upgrade from MySQL.
-
-For prerequisites, troubleshooting, OAuth testing and data recovery, see the [full installation guide](docs/QUICKSTART.md) and [backup/restore guide](docs/BACKUP_RESTORE.md).
+Both install modes require a **fresh SQLite volume**. Quick and Source modes use
+**different** volume names to prevent concurrent writers. See the
+[setup guide](docs/QUICKSTART.md) and [backup/restore](docs/BACKUP_RESTORE.md).
 
 ## Docker Hub images
 
@@ -54,7 +77,7 @@ You can pull a chosen tag with:
 docker pull mathew15604/mcp-worker:<tag>
 ```
 
-A pull only downloads an image. The recommended `./setup.sh --init` path above **builds from checked-out source**, initializes SQLite and configures credentials and the volume; it does not automatically use an image you just pulled. The previous `2.0.0-rc.2` image is historical, not this SQLite-only baseline.
+A pull only downloads an image. Use **Quick Setup** for a no-clone install (Docker runs the image and generates credentials); use **Source Setup** when working on code. The historical `2.0.0-rc.2` tag is not this SQLite-only baseline.
 
 ## What can I test today?
 
@@ -83,7 +106,7 @@ The server exposes exactly **15** authenticated tools:
 | Tests | `check_run` |
 | Managed processes | `process_start`, `process_status`, `process_logs`, `process_stop` |
 
-The legacy `bot_report.*` OAuth scopes, `BOT_REPORT_*` settings are retained for compatibility; the Go Worker CLI is `worker_mcp`; the interactive SSH tools have been retired.
+Current OAuth scopes are `mcp_worker.read` and `mcp_worker.terminal`; new runtime settings use `MCP_WORKER_*`. The Go Worker CLI/service is `worker_mcp`. The retired SSH commands and legacy names are not installed.
 
 ## Documentation and contributions
 

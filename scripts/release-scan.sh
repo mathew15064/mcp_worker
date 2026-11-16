@@ -15,7 +15,7 @@ for image in "$TRIVY" "$1"; do
     echo "NOT_TESTED: required local scanner/image not cached (never pull): $image" >&2; exit 3;
   }
 done
-[ -n "${BOT_REPORT_TRIVY_CACHE:-}" ] && [ -d "$BOT_REPORT_TRIVY_CACHE/db" ] || {
+[ -n "${MCP_WORKER_TRIVY_CACHE:-}" ] && [ -d "$MCP_WORKER_TRIVY_CACHE/db" ] || {
   echo 'NOT_TESTED: offline Trivy DB cache absent; cannot claim fresh vulnerability coverage' >&2; exit 3;
 }
 OUT="$2"
@@ -25,7 +25,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 trap 'exit 1' HUP INT TERM
 mkdir "$TMP/cache"
-cp -R "$BOT_REPORT_TRIVY_CACHE/db" "$TMP/cache/db"
+cp -R "$MCP_WORKER_TRIVY_CACHE/db" "$TMP/cache/db"
 scan() {
   docker run --rm --pull=never --network=none --security-opt no-new-privileges \
     --user "$(id -u):$(id -g)" -v "$TMP:/scan" -v "$OUT:/evidence" "$TRIVY" \

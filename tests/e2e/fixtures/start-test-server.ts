@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-report-playwright-'));
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp_worker-playwright-'));
 const databasePath = path.join(dir, 'playwright.sqlite');
 const applicationKey = crypto
   .createHash('sha256')
@@ -63,7 +63,7 @@ async function main() {
       displayName: name,
       principalId: `principal:playwright-${index + 1}`,
       redirectUris: [`http://localhost:${4400 + index}/oauth/callback`],
-      allowedScopes: ['bot_report.read', 'bot_report.terminal', 'offline_access'],
+      allowedScopes: ['mcp_worker.read', 'mcp_worker.terminal', 'offline_access'],
     });
   }
 

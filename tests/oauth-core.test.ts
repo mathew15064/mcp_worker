@@ -19,17 +19,17 @@ void test('local OAuth issues terminal-scoped token without control-plane bindin
   const principal = await oauthResourceServer.verifyToken(issued.token.access_token);
   assert.equal(principal.principal_id, 'principal:gpt_client');
   assert.equal(principal.actor_id, 'principal:gpt_client');
-  assert.equal(principal.hasScope('bot_report.read'), true);
-  assert.equal(principal.hasScope('bot_report.terminal'), true);
+  assert.equal(principal.hasScope('mcp_worker.read'), true);
+  assert.equal(principal.hasScope('mcp_worker.terminal'), true);
 });
 
 void test('terminal scope is enforced independently of read scope', () => {
   const principal = new AuthenticatedPrincipal({
     principalId: 'principal:read_only',
-    scopes: ['bot_report.read'],
+    scopes: ['mcp_worker.read'],
   });
   assert.throws(
-    () => principal.assertScope('bot_report.terminal'),
+    () => principal.assertScope('mcp_worker.terminal'),
     (error: unknown) =>
       error instanceof Error && 'code' in error && error.code === 'INSUFFICIENT_SCOPE',
   );
@@ -39,7 +39,7 @@ void test('admin OAuth client principal is generated from its immutable client i
   const registered = await oauthService.registerClient({
     displayName: 'Auto Principal Client',
     redirectUris: ['https://chatgpt.com/connector_platform_oauth_redirect'],
-    allowedScopes: ['bot_report.read'],
+    allowedScopes: ['mcp_worker.read'],
   });
   assert.ok(registered.client);
   assert.equal(registered.client.principal_id, `principal:client:${registered.client.client_id}`);
@@ -128,7 +128,7 @@ void test('OAuth registration rejects unsafe redirect URI schemes and URI fragme
       oauthService.registerClient({
         displayName: 'Unsafe Redirect Negative',
         redirectUris: [uri],
-        allowedScopes: ['bot_report.read'],
+        allowedScopes: ['mcp_worker.read'],
       }),
       { error: 'invalid_client_metadata' },
       uri,
@@ -143,7 +143,7 @@ void test('OAuth registration rejects unsafe redirect URI schemes and URI fragme
     const registered = await oauthService.registerClient({
       displayName: 'Safe Redirect Positive',
       redirectUris: [uri],
-      allowedScopes: ['bot_report.read'],
+      allowedScopes: ['mcp_worker.read'],
     });
     assert.ok(registered.client);
     assert.deepEqual(registered.client.redirect_uris, [uri]);
@@ -161,7 +161,7 @@ void test('authorization blocks legacy unsafe callbacks and malformed PKCE S256'
         status: 'active',
         owner_user_id: null,
         redirect_uris: [storedRedirect],
-        allowed_scopes: ['bot_report.read'],
+        allowed_scopes: ['mcp_worker.read'],
       }),
   };
   const service = new oauthService.McpOAuthService(repo as unknown as typeof oauthService.repo);
@@ -169,14 +169,14 @@ void test('authorization blocks legacy unsafe callbacks and malformed PKCE S256'
     clientId,
     redirectUri: safeRedirect,
     responseType: 'code',
-    scope: 'bot_report.read',
+    scope: 'mcp_worker.read',
     state: 'csrf-state',
     codeChallenge: 'a'.repeat(43),
     codeChallengeMethod: 'S256',
     resource: service.config.resourceUrl,
   };
   const valid = await service.validateAuthorizeRequest(request);
-  assert.deepEqual(valid.scopes, ['bot_report.read']);
+  assert.deepEqual(valid.scopes, ['mcp_worker.read']);
   for (const redirectUri of [
     'https://attacker.invalid/#',
     'https://@client.example.invalid/callback',
@@ -209,7 +209,7 @@ void test('authorization blocks legacy unsafe callbacks and malformed PKCE S256'
 
 void test('OAuth config can be injected as a narrow policy without widening scopes', async () => {
   const policy: OAuthConfig = {
-    supportedScopes: ['bot_report.read'],
+    supportedScopes: ['mcp_worker.read'],
     resourceUrl: 'http://127.0.0.1:3333/mcp',
     accessTokenTtlSeconds: 900,
     refreshTokenTtlSeconds: 2592000,
@@ -219,10 +219,10 @@ void test('OAuth config can be injected as a narrow policy without widening scop
   const created = await service.registerClient({
     displayName: 'Policy constrained client',
     redirectUris: ['https://chatgpt.com/connector_platform_oauth_redirect'],
-    allowedScopes: ['bot_report.read', 'bot_report.terminal', 'offline_access'],
+    allowedScopes: ['mcp_worker.read', 'mcp_worker.terminal', 'offline_access'],
   });
   assert.ok(created.client);
-  assert.deepEqual(created.client.allowed_scopes, ['bot_report.read']);
+  assert.deepEqual(created.client.allowed_scopes, ['mcp_worker.read']);
 });
 
 void test('new OAuth clients and requests default to read-only', async () => {
@@ -232,12 +232,12 @@ void test('new OAuth clients and requests default to read-only', async () => {
     redirectUris: [redirectUri],
   });
   assert.ok(readOnly.client);
-  assert.deepEqual(readOnly.client.allowed_scopes, ['bot_report.read']);
+  assert.deepEqual(readOnly.client.allowed_scopes, ['mcp_worker.read']);
 
   const elevated = await oauthService.registerClient({
     displayName: 'Explicitly elevated client',
     redirectUris: [redirectUri],
-    allowedScopes: ['bot_report.read', 'bot_report.terminal', 'offline_access'],
+    allowedScopes: ['mcp_worker.read', 'mcp_worker.terminal', 'offline_access'],
   });
   assert.ok(elevated.client);
   const request = await oauthService.validateAuthorizeRequest({
@@ -249,5 +249,5 @@ void test('new OAuth clients and requests default to read-only', async () => {
     codeChallengeMethod: 'S256',
     resource: oauthService.config.resourceUrl,
   });
-  assert.deepEqual(request.scopes, ['bot_report.read']);
+  assert.deepEqual(request.scopes, ['mcp_worker.read']);
 });

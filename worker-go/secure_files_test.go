@@ -268,7 +268,7 @@ func TestCancelledJobDoesNotLaunchProcessOrDelayedShellWrite(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		return
 	}
-	t.Setenv("BOT_REPORT_WORKER_DISABLE_SYSTEMD_SCOPES", "1")
+	t.Setenv("MCP_WORKER_WORKER_DISABLE_SYSTEMD_SCOPES", "1")
 	ctx, stop := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer stop()
 	_, err = a.runShellContext(ctx, "sleep 0.25; printf unauthorized > started.txt", root, time.Second, 1024)

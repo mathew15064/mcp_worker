@@ -2,7 +2,7 @@
 
 **Status:** DRY-RUN ONLY. No automatic migration, token revocation, or production database access is authorized.
 
-The earlier version of `2026_11_02_000012_add_user_ownership_to_workers` could overwrite existing OAuth client scopes with `bot_report.read`, `bot_report.terminal` and `offline_access`. The corrected migration no longer adds grants, but a database that already executed the historical version can retain the broadened scopes. The migration ledger alone cannot distinguish a legitimate elevated grant from one introduced by the bug.
+The earlier version of `2026_11_02_000012_add_user_ownership_to_workers` could overwrite existing OAuth client scopes with `mcp_worker.read`, `mcp_worker.terminal` and `offline_access`. The corrected migration no longer adds grants, but a database that already executed the historical version can retain the broadened scopes. The migration ledger alone cannot distinguish a legitimate elevated grant from one introduced by the bug.
 
 ## Audit without touching production
 

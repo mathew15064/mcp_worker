@@ -60,14 +60,14 @@ function bundle(
   const metadata = Buffer.from('version=' + version + '\ncommit=' + commit + '\n');
   // A real release must carry the complete, ordered eight-platform inventory.
   const platforms = [
-    'bot-report-worker-darwin-amd64',
-    'bot-report-worker-darwin-arm64',
-    'bot-report-worker-linux-386',
-    'bot-report-worker-linux-amd64',
-    'bot-report-worker-linux-arm64',
-    'bot-report-worker-linux-armv7',
-    'bot-report-worker-windows-amd64.exe',
-    'bot-report-worker-windows-arm64.exe',
+    'worker_mcp-darwin-amd64',
+    'worker_mcp-darwin-arm64',
+    'worker_mcp-linux-386',
+    'worker_mcp-linux-amd64',
+    'worker_mcp-linux-arm64',
+    'worker_mcp-linux-armv7',
+    'worker_mcp-windows-amd64.exe',
+    'worker_mcp-windows-arm64.exe',
   ];
   const sums = Buffer.from(
     platforms
@@ -123,7 +123,7 @@ void test('read-only source gate cannot self-authorize a production release', ()
     signingKeyApproved: false,
     signedArtifactsApproved: false,
     productionDistributionApproved: false,
-    railwayInstallerHttpStatus: 503,
+    installerHttpStatus: 503,
   });
   assert.equal(Object.isFrozen(workerSignedReleaseReadiness()), true);
 });
@@ -136,7 +136,7 @@ void test('no approved release is embedded in any downloadable installer', () =>
     workerRoutes.windowsInstallerPayloadScript('https://example.test'),
   ]) {
     assert.match(source, /[Ss]igned release not approved/);
-    assert.doesNotMatch(source, /openssl dgst -sha256 -verify \$env:BOT_REPORT_WORKER_TRUSTED_KEY/);
+    assert.doesNotMatch(source, /openssl dgst -sha256 -verify \$env:MCP_WORKER_WORKER_TRUSTED_KEY/);
   }
   assert.equal(
     workerRoutes.windowsInstallerScript('https://example.test'),
@@ -164,7 +164,7 @@ void test('installer protocols refuse public plaintext and redirect downgrade', 
   assert.doesNotMatch(windows, /if \(\[version\]\$PinnedVersion/);
 });
 
-void test('Railway installer and binary distribution stay HTTP 503 without approval', async () => {
+void test('Worker installer and binary distribution stay HTTP 503 without approval', async () => {
   const previousPlatform = process.env.MCP_PLATFORM;
   const previousApproval = process.env.WORKER_SIGNED_RELEASE_APPROVED;
   const previousKey = process.env.WORKER_TRUSTED_PUBLIC_KEY;
@@ -185,7 +185,7 @@ void test('Railway installer and binary distribution stay HTTP 503 without appro
     assert.ok(address && typeof address !== 'string');
     // Any platform flag, including an unset/typo value, must fail closed.
     // A runtime environment variable is never signed-release authorization.
-    for (const platform of [undefined, '', 'railway', 'RAILWAY', 'railwai', 'local']) {
+    for (const platform of [undefined, '', 'dev', 'invalid', 'local']) {
       if (platform === undefined) delete process.env.MCP_PLATFORM;
       else process.env.MCP_PLATFORM = platform;
       for (const endpoint of [
@@ -197,7 +197,7 @@ void test('Railway installer and binary distribution stay HTTP 503 without appro
         '/worker/dist/SHA256SUMS',
         '/worker/dist/SHA256SUMS.sig',
         '/worker/dist/WORKER_RELEASE',
-        '/worker/dist/bot-report-worker-linux-amd64',
+        '/worker/dist/worker_mcp-linux-amd64',
         '/worker/dist/cli.js',
       ]) {
         const response: Response = await fetch('http://127.0.0.1:' + address.port + endpoint);
@@ -235,8 +235,7 @@ void test(
       return;
     }
     const arch = process.arch === 'arm64' ? 'arm64' : 'amd64';
-    const file =
-      'bot-report-worker-' + (win ? 'windows-' + arch + '.exe' : process.platform + '-' + arch);
+    const file = 'worker_mcp-' + (win ? 'windows-' + arch + '.exe' : process.platform + '-' + arch);
     const installed = path.join(root, 'install', 'current', win ? 'worker_mcp.exe' : 'worker_mcp');
     const stateRoot = path.join(root, 'state');
     const tempHome = path.join(root, 'home');
@@ -343,12 +342,12 @@ void test(
       const env: NodeJS.ProcessEnv = {
         ...process.env,
         HOME: tempHome,
-        BOT_REPORT_WORKER_HOME: stateRoot,
-        BOT_REPORT_WORKER_INSTALL_ROOT: path.join(root, 'install'),
-        BOT_REPORT_WORKER_BIN_DIR: path.join(root, 'bin'),
-        BOT_REPORT_WORKER_SYSTEMD: '0',
-        BOT_REPORT_WORKER_SKIP_SERVICE: '1',
-        BOT_REPORT_WORKER_SKIP_PATH: '1',
+        MCP_WORKER_WORKER_HOME: stateRoot,
+        MCP_WORKER_WORKER_INSTALL_ROOT: path.join(root, 'install'),
+        MCP_WORKER_WORKER_BIN_DIR: path.join(root, 'bin'),
+        MCP_WORKER_WORKER_SYSTEMD: '0',
+        MCP_WORKER_WORKER_SKIP_SERVICE: '1',
+        MCP_WORKER_WORKER_SKIP_PATH: '1',
       };
       async function install(
         approval: ApprovedRelease = {
@@ -454,10 +453,8 @@ void test(
         for (const invalid of [
           packageA.sums.toString().split('\n').slice(0, -2).join('\n') + '\n',
           packageA.sums.toString() + hash('unexpected') + '  extra-file\n',
-          packageA.sums.toString().replace('bot-report-worker-linux-386', '../unauthorized-file'),
-          packageA.sums
-            .toString()
-            .replace('bot-report-worker-darwin-amd64', 'bot-report-worker-Darwin-amd64'),
+          packageA.sums.toString().replace('worker_mcp-linux-386', '../unauthorized-file'),
+          packageA.sums.toString().replace('worker_mcp-darwin-amd64', 'worker_mcp-Darwin-amd64'),
         ]) {
           const sums = Buffer.from(invalid);
           active = { ...packageA, sums, signature: crypto.sign('sha256', sums, key.privateKey) };
@@ -610,7 +607,7 @@ void test(
       await t.test('manual rollback rejected', async () => {
         await unchanged(
           'manual rollback',
-          install(undefined, { BOT_REPORT_WORKER_ACTION: 'rollback' }),
+          install(undefined, { MCP_WORKER_WORKER_ACTION: 'rollback' }),
         );
       });
       await t.test('valid signed version upgrade', async () => {
@@ -834,14 +831,14 @@ void test(
       assert.equal(head.code, 0, head.output);
       const approvedCommit = head.output.trim();
       const names = [
-        'bot-report-worker-darwin-amd64',
-        'bot-report-worker-darwin-arm64',
-        'bot-report-worker-linux-386',
-        'bot-report-worker-linux-amd64',
-        'bot-report-worker-linux-arm64',
-        'bot-report-worker-linux-armv7',
-        'bot-report-worker-windows-amd64.exe',
-        'bot-report-worker-windows-arm64.exe',
+        'worker_mcp-darwin-amd64',
+        'worker_mcp-darwin-arm64',
+        'worker_mcp-linux-386',
+        'worker_mcp-linux-amd64',
+        'worker_mcp-linux-arm64',
+        'worker_mcp-linux-armv7',
+        'worker_mcp-windows-amd64.exe',
+        'worker_mcp-windows-arm64.exe',
         'WORKER_RELEASE',
       ];
       for (const name of names) {
@@ -986,7 +983,7 @@ void test(
   async (t) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-systemd-transaction-'));
     const key = signer();
-    const file = 'bot-report-worker-linux-' + (process.arch === 'arm64' ? 'arm64' : 'amd64');
+    const file = 'worker_mcp-linux-' + (process.arch === 'arm64' ? 'arm64' : 'amd64');
     const target = path.join(root, 'install', 'current', 'worker_mcp');
     const serviceBinary = path.join(root, 'fake-systemd', 'sbin', 'worker_mcp');
     const serviceUnit = path.join(root, 'fake-systemd', 'units', 'worker_mcp.service');
@@ -1102,11 +1099,11 @@ void test(
         ...process.env,
         HOME: root,
         PATH: mockBin + ':' + process.env.PATH,
-        BOT_REPORT_WORKER_INSTALL_ROOT: path.join(root, 'install'),
-        BOT_REPORT_WORKER_HOME: workerHome,
-        BOT_REPORT_WORKER_BIN_DIR: aliasBin,
-        BOT_REPORT_WORKER_SYSTEMD: '1',
-        BOT_REPORT_WORKER_SKIP_SERVICE: '0',
+        MCP_WORKER_WORKER_INSTALL_ROOT: path.join(root, 'install'),
+        MCP_WORKER_WORKER_HOME: workerHome,
+        MCP_WORKER_WORKER_BIN_DIR: aliasBin,
+        MCP_WORKER_WORKER_SYSTEMD: '1',
+        MCP_WORKER_WORKER_SKIP_SERVICE: '0',
         MOCK_SYSTEMCTL_STATE: mockState,
         MOCK_SERVICE_BINARY: serviceBinary,
         MOCK_SERVICE_UNIT: serviceUnit,

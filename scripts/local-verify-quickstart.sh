@@ -103,27 +103,27 @@ recovery_nonroot_docker() {
     --mount "type=bind,source=$stage/app,target=/app,readonly" \
     --workdir /app -e NODE_ENV=test node:22 \
     node --test --test-concurrency=1 \
-      dist/tests/railway-disaster-recovery.test.js \
-      dist/tests/railway-instance-isolation.test.js || rc=$?
+      dist/tests/sqlite-migration.test.js \
+      dist/tests/database-contracts.test.js || rc=$?
   rm -rf "$stage"
   return "$rc"
 }
 if (( NODE_OK )); then
-  run railway_sqlite yes "SQLite HTTP/OAuth fixture; optional Chromium subtest must count as TAP skip" node --test --test-concurrency=1 dist/tests/railway-sqlite-quickstart.test.js
+  run standalone_sqlite yes "SQLite HTTP/OAuth fixture; optional Chromium subtest must count as TAP skip" node --test --test-concurrency=1 dist/tests/setup-mode.test.js
   run signed_release_unit yes "test-only signer, canonical inventory and negative trust" node --test --test-concurrency=1 dist/tests/worker-signed-release.test.js
   if [[ "$MODE" == --full && "${T5_RECOVERY_NONROOT_CONTAINER_TEST:-0}" == 1 ]]; then
     if command -v docker >/dev/null && docker info >/dev/null 2>&1 && docker image inspect node:22 >/dev/null 2>&1; then
-      run railway_recovery yes "cached Node22 non-root Docker; offline SQLite backup/restore, no root skip" recovery_nonroot_docker
+      run standalone_recovery yes "cached Node22 non-root Docker; offline SQLite backup/restore, no root skip" recovery_nonroot_docker
     else
-      missing railway_recovery yes "non-root recovery opt-in requires Docker and cached node:22"
+      missing standalone_recovery yes "non-root recovery opt-in requires Docker and cached node:22"
     fi
   else
-    run railway_recovery yes "local SQLite backup/restore; root-only permissions test may skip" node --test --test-concurrency=1 dist/tests/railway-disaster-recovery.test.js dist/tests/railway-instance-isolation.test.js
+    run standalone_recovery yes "local SQLite backup/restore; root-only permissions test may skip" node --test --test-concurrency=1 dist/tests/sqlite-migration.test.js dist/tests/database-contracts.test.js
   fi
 else
-  missing railway_sqlite yes "compiled tests require working Node 22 dependencies"
+  missing standalone_sqlite yes "compiled tests require working Node 22 dependencies"
   missing signed_release_unit yes "compiled signed tests unavailable"
-  missing railway_recovery yes "compiled recovery tests unavailable"
+  missing standalone_recovery yes "compiled recovery tests unavailable"
 fi
 if [[ "$MODE" == --full ]]; then
   if (( NODE_OK )) && [[ -n "$GO_BIN" ]] && command -v openssl >/dev/null; then
@@ -137,16 +137,15 @@ if [[ "$MODE" == --full ]]; then
     for gate in go_test go_race go_vet; do missing "$gate" yes "offline Go1.24 toolchain missing"; done
   fi
   if (( NODE_OK )) && [[ -n "$GO_BIN" ]] && command -v openssl >/dev/null; then
-    run wss_worker yes "real localhost WSS, Go Worker, OAuth PKCE" env PATH="$(dirname "$GO_BIN"):$PATH" GOPROXY=off GOTOOLCHAIN=local BOT_REPORT_W2_T03_GO_E2E=1 node --test dist/tests/railway-worker-wss-e2e.test.js
-    run go_isolation yes "two Go Workers in isolated SQLite local sandboxes" env PATH="$(dirname "$GO_BIN"):$PATH" GOPROXY=off GOTOOLCHAIN=local BOT_REPORT_W3_T04_GO_E2E=1 node --test dist/tests/railway-instance-isolation-go.test.js
-  else missing wss_worker yes "requires built Node tests, offline Go1.24 and OpenSSL"; missing go_isolation yes "requires built Node tests, offline Go1.24 and OpenSSL"; fi
+    run wss_worker yes "localhost WSS signature, replay, capacity and owner revocation" node --test dist/tests/worker-wss-e2e.test.js
+  else missing wss_worker yes "requires built Node tests and OpenSSL"; fi
   # Real outbound Worker runs entirely inside a fresh disposable Docker
   # container with read-only source; no MySQL or host Worker installation.
   sqlite_worker_docker() {
     local deps
     deps="$(realpath node_modules)" || return 1
     mkdir -p dist/worker/bin || return 1
-    (cd worker-go && GOTOOLCHAIN=local GOPROXY=off "$GO_BIN" build -o ../dist/worker/bin/bot-report-worker-linux-amd64 .) || return 1
+    (cd worker-go && GOTOOLCHAIN=local GOPROXY=off "$GO_BIN" build -o ../dist/worker/bin/worker_mcp-linux-amd64 .) || return 1
     local mounts=(--mount "type=bind,source=$ROOT,target=$ROOT,readonly")
     if [[ "$deps" != "$ROOT/node_modules" ]]; then
       mounts+=(--mount "type=bind,source=$deps,target=$deps,readonly")
@@ -155,7 +154,7 @@ if [[ "$MODE" == --full ]]; then
       --cap-drop=ALL --security-opt=no-new-privileges --pids-limit=256 --memory=2g \
       "${mounts[@]}" \
       --mount type=bind,source="$(command -v rg)",target=/usr/local/bin/rg,readonly \
-      --workdir "$ROOT" -e NODE_ENV=test -e BOT_REPORT_ISOLATED_WORKER_TEST=1 \
+      --workdir "$ROOT" -e NODE_ENV=test -e MCP_WORKER_ISOLATED_WORKER_TEST=1 \
       node:22 node --test --test-concurrency=1 dist/tests/worker-live-integration.test.js
   }
   if (( NODE_OK )) && [[ -n "$GO_BIN" ]] && command -v docker >/dev/null && \
@@ -172,13 +171,13 @@ if [[ "$MODE" == --full ]]; then
     BUILD_NETWORK=none
     [[ "${T5_ALLOW_BUILD_NETWORK:-0}" == 1 ]] && BUILD_NETWORK=default
     STANDALONE="mcp-worker-local:$(git rev-parse --short=12 HEAD)"
-    run standalone_build yes "local Docker; pinned Node22 / Go1.26.10 bases, no image pulls" docker build --pull=false --network="$BUILD_NETWORK" -f Dockerfile --build-arg "BOT_REPORT_GIT_SHA=$BASE" --build-arg "BOT_REPORT_TREE_SHA=$TREE" --build-arg "BOT_REPORT_BUILD_TIME=$(git show -s --format=%cI HEAD)" -t "$STANDALONE" .
+    run standalone_build yes "local Docker; pinned Node22 / Go1.26.10 bases, no image pulls" docker build --pull=false --network="$BUILD_NETWORK" -f Dockerfile --build-arg "MCP_WORKER_GIT_SHA=$BASE" --build-arg "MCP_WORKER_TREE_SHA=$TREE" --build-arg "MCP_WORKER_BUILD_TIME=$(git show -s --format=%cI HEAD)" -t "$STANDALONE" .
     run standalone_provenance yes "exact committed SHA/tree, runtime and nonroot entrypoint" bash scripts/verify-oci-image-local.sh "$STANDALONE" standalone
   else
     for gate in standalone_build standalone_provenance; do missing "$gate" yes "needs T5_ALLOW_DOCKER_BUILD=1, clean source, cached bases and local Docker; no silent pulls"; done
   fi
 else
-  for gate in linux_installer_lifecycle go_test go_race go_vet wss_worker go_isolation sqlite_worker_live playwright_browser standalone_build standalone_provenance; do missing "$gate" yes "targeted mode; use --full with exact disposable prerequisites"; done
+  for gate in linux_installer_lifecycle go_test go_race go_vet wss_worker sqlite_worker_live playwright_browser standalone_build standalone_provenance; do missing "$gate" yes "targeted mode; use --full with exact disposable prerequisites"; done
 fi
 # Network audit and Trivy are always separately approved and never implicitly executed.
 missing dependency_audit yes "npm audit requires explicit approved network access and fresh registry evidence"

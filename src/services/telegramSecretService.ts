@@ -4,9 +4,9 @@ import config from '../config/env';
 const LEGACY_V1_PREFIX = 'enc:v1';
 const LEGACY_V2_PREFIX = 'enc:v2';
 const PREFIX = 'enc:v3';
-const LEGACY_V1_AAD = Buffer.from('bot_report:telegram-token:v1', 'utf8');
-const LEGACY_V2_AAD = Buffer.from('bot_report:telegram-token:v2', 'utf8');
-const AAD = Buffer.from('bot_report:telegram-token:v3', 'utf8');
+const LEGACY_V1_AAD = Buffer.from('mcp_worker:telegram-token:v1', 'utf8');
+const LEGACY_V2_AAD = Buffer.from('mcp_worker:telegram-token:v2', 'utf8');
+const AAD = Buffer.from('mcp_worker:telegram-token:v3', 'utf8');
 
 function secretError(message: string) {
   return Object.assign(new Error(message), { code: 'TELEGRAM_SECRET_DECRYPT_FAILED' });
@@ -46,7 +46,7 @@ function readLegacyV1Key() {
   }
   return crypto
     .createHash('sha256')
-    .update('bot_report:telegram-key:v1\0', 'utf8')
+    .update('mcp_worker:telegram-key:v1\0', 'utf8')
     .update(sessionSecret, 'utf8')
     .digest();
 }

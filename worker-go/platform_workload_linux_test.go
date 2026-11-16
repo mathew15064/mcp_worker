@@ -35,7 +35,7 @@ func TestSanitizeWorkloadKind(t *testing.T) {
 
 func TestManagedLinuxWorkloadRunsInSiblingSystemdScopeWhenAvailable(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("BOT_REPORT_WORKER_HOME", home)
+	t.Setenv("MCP_WORKER_WORKER_HOME", home)
 	if err := os.WriteFile(serviceModePath(), []byte("systemd\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestManagedLinuxWorkloadRunsInSiblingSystemdScopeWhenAvailable(t *testing.T
 
 func TestManagedScopeWorkspaceTimeout(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("BOT_REPORT_WORKER_HOME", home)
+	t.Setenv("MCP_WORKER_WORKER_HOME", home)
 	if err := os.WriteFile(serviceModePath(), []byte("systemd\n"), 0600); err != nil {
 		t.Fatal(err)
 	}

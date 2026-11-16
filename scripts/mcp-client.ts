@@ -29,14 +29,14 @@ function parse(argv: string[]): Args {
   return out;
 }
 function scopes(value: unknown) {
-  return stringifyUnknown(value || 'bot_report.read bot_report.terminal offline_access')
+  return stringifyUnknown(value || 'mcp_worker.read mcp_worker.terminal offline_access')
     .split(/[\s,]+/)
     .filter(Boolean);
 }
 function usage() {
   console.log(`Usage:
   npm run mcp-client -- list
-  npm run mcp-client -- add --name NAME --principal PRINCIPAL --redirect URI [--redirect URI2] [--scopes "bot_report.read bot_report.terminal offline_access"]
+  npm run mcp-client -- add --name NAME --principal PRINCIPAL --redirect URI [--redirect URI2] [--scopes "mcp_worker.read mcp_worker.terminal offline_access"]
   npm run mcp-client -- rotate CLIENT_ID
   npm run mcp-client -- enable CLIENT_ID
   npm run mcp-client -- disable CLIENT_ID

@@ -9,8 +9,8 @@ export class AuthorizationError extends Error {
   }
 }
 export const SCOPES = Object.freeze({
-  READ: 'bot_report.read',
-  TERMINAL: 'bot_report.terminal',
+  READ: 'mcp_worker.read',
+  TERMINAL: 'mcp_worker.terminal',
 } as const);
 export interface PrincipalOptions {
   principalId: string;

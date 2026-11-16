@@ -39,7 +39,7 @@ void test(
   'existing user identities retain isolated OAuth profiles and sessions without Users management routes',
   { skip: !enabled },
   async (t) => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-report-user-integration-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp_worker-user-integration-'));
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     const appKey = crypto
       .createHash('sha256')
@@ -146,7 +146,7 @@ void test(
         _csrf: aliceClientsPage.csrf,
         display_name: 'Alice ChatGPT',
         redirect_uris: 'https://chatgpt.com/connector_platform_oauth_redirect',
-        scopes: 'bot_report.terminal',
+        scopes: 'mcp_worker.terminal',
       }).toString(),
     });
     assert.equal(createAliceClient.status, 302);
@@ -159,7 +159,7 @@ void test(
     assert.equal(aliceClient.profile_id, alice.profile_id);
     assert.deepEqual(
       aliceClient.allowed_scopes.sort(),
-      ['bot_report.read', 'bot_report.terminal'].sort(),
+      ['mcp_worker.read', 'mcp_worker.terminal'].sort(),
     );
 
     const workerRepo = (await import('../src/repositories/workerRepository.js')).default;
@@ -260,7 +260,7 @@ void test(
       clientId: aliceClient.client_id,
       principalId: alice.principal_id,
       resource: 'http://127.0.0.1:3333/mcp',
-      scopes: ['bot_report.read', 'bot_report.terminal'],
+      scopes: ['mcp_worker.read', 'mcp_worker.terminal'],
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     });
     const { OAuthResourceServer } = (await import('../src/auth/oauthResourceServer.js')).default;
@@ -302,7 +302,7 @@ void test(
         client_id: client.client_id,
         redirect_uri: client.redirect_uris[0],
         response_type: 'code',
-        scope: 'bot_report.read',
+        scope: 'mcp_worker.read',
         state: 'state-user-test',
         code_challenge: challenge,
         code_challenge_method: 'S256',
@@ -385,7 +385,7 @@ void test(
           clientId: aliceClient.client_id,
           redirectUri: aliceClient.redirect_uris[0],
           responseType: 'code',
-          scope: 'bot_report.read',
+          scope: 'mcp_worker.read',
           state: 'disabled-user',
           codeChallenge: challenge,
           codeChallengeMethod: 'S256',

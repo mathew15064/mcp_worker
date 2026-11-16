@@ -1,7 +1,7 @@
 # Signed Go Worker — local-only release candidate and trust-root policy (T2)
 
 **Status: NO-GO.** No production signing key, approved version/commit, or approved
-release artifacts exist. Railway routes `/worker/install*` and `/worker/dist/*`
+release artifacts exist. Public routes `/worker/install*` and `/worker/dist/*`
 must continue to return HTTP 503 `WORKER_SIGNED_RELEASE_PENDING`.
 This document defines a future owner-operated process; it authorizes **no**
 public tag, GitHub Release, installer, binary, deployment or key creation.
@@ -97,7 +97,7 @@ HTTP header, user input or self-signed manifest as authority to change roots.
    (replace examples with approved real values). Check
    `cat worker/bin/WORKER_RELEASE`, verify the commit matches the checked-out
    source, `(cd worker/bin && sha256sum -c SHA256SUMS)`, and inspect all nine
-   manifest entries. Execute `worker/bin/bot-report-worker-linux-amd64 version`
+   manifest entries. Execute `worker/bin/worker_mcp-linux-amd64 version`
    and compare **both** embedded version/commit to metadata. Independently
    verify macOS/Windows binary version output in native environments.
 3. Run `npm ci --prefer-offline --no-audit --no-fund` **on the PC**,
@@ -132,17 +132,16 @@ HTTP header, user input or self-signed manifest as authority to change roots.
    rotation record (if any), and maintenance/restore procedure.
    The owner explicitly approves the exact tuple and pinned installer code,
    then separately approves a narrowly scoped publication/deployment change.
-   The existing unconditional Railway HTTP 503 must **not** be removed by
+   The existing unconditional Worker HTTP 503 must **not** be removed by
    this task or implicitly by a key update.
 
 ## Read-only status contract for Admin/onboarding consumers (T5)
 
 Use `workerSignedReleaseReadiness()` for an immutable NO_GO contract,
 `WORKER_SIGNED_RELEASE_PENDING` and HTTP 503;
-use `railwayWorkerDistributionBlocked()` for route suppression. Both are
+use `workerDistributionBlocked()` for route suppression. Both are
 exported from `src/services/workerReleaseGate.ts`. The gate is **always true**
-until a separately approved source change, regardless of unset, local,
-Railway, or unrecognized `MCP_PLATFORM` values. Every `/worker/install*`
+until a separately approved source change, on every server. Every `/worker/install*`
 and `/worker/dist/*` route responds 503 with `Cache-Control: no-store`.
 Do not infer approval from any runtime flag, HTTP HEAD response, local build,
 or connected Worker. No environment variable authorizes signing, a trust-root
@@ -216,11 +215,11 @@ T2 creates no production key, binary, signature, tag, deployment or publish.
       base64 PEM, detached signature, hashes, build logs and all native results.
       Authenticated HTTPS alone does not authenticate an untrusted installer.
 - [ ] Confirm GitHub Actions disabled before any later push; obtain distinct
-      approvals for signing, source push, registry digest, billing, Railway deploy
+      approvals for signing, source push, registry digest, billing, deployment
       and template publish. No env var substitutes for source-controlled approval.
 - [ ] Owner and key custodian explicitly approve or reject the exact tuple,
       authorized rollout ring, monitoring/freeze triggers and rollback contact.
-      Only a later separately reviewed code change can remove the Railway 503.
+      Only a later separately reviewed code change can remove the Worker 503.
 
 ## Native acceptance requirements — NOT_TESTED means no native evidence
 
@@ -240,7 +239,7 @@ privileged systemd run was performed in this T2 task.
 ## Freeze, revoke, rollback and trust-root recovery
 
 On suspicion of compromise, immediately freeze public distribution, keep
-Railway /worker/install* and /worker/dist/* returning HTTP 503, preserve
+/worker/install* and /worker/dist/* returning HTTP 503, preserve
 cryptographic evidence, notify operators and revoke affected endpoints.
 Never bypass with env flags, unsigned artifacts or unreviewed public keys.
 
@@ -270,4 +269,4 @@ Legacy records lacking a signed manifest digest fail closed and require
 separate audited migration; never silently inherit prior trust.
 
 **NO-GO remains in effect:** no production key, approval, binary or artifact
-has been published, and the Railway installer HTTP 503 must remain active.
+has been published, and the Worker installer HTTP 503 must remain active.

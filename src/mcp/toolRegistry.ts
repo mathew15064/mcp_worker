@@ -18,7 +18,7 @@ import {
 } from './tools/localCodingTools';
 
 // Preserve the original static wire schema and catalog order.
-Object.assign(runtimeInfo, { domain: 'System', requiredScope: 'bot_report.read' });
+Object.assign(runtimeInfo, { domain: 'System', requiredScope: 'mcp_worker.read' });
 
 export const TOOLS = [
   runtimeInfo,

@@ -90,12 +90,12 @@ async function handleRuntimeInfo(): Promise<ToolResponse> {
     app_name: packageIdentity.name,
     app_version: packageIdentity.version,
     git_sha:
-      process.env.BOT_REPORT_GIT_SHA && process.env.BOT_REPORT_GIT_SHA !== 'unknown'
-        ? process.env.BOT_REPORT_GIT_SHA
+      process.env.MCP_WORKER_GIT_SHA && process.env.MCP_WORKER_GIT_SHA !== 'unknown'
+        ? process.env.MCP_WORKER_GIT_SHA
         : null,
     build_time:
-      process.env.BOT_REPORT_BUILD_TIME && process.env.BOT_REPORT_BUILD_TIME !== 'unknown'
-        ? process.env.BOT_REPORT_BUILD_TIME
+      process.env.MCP_WORKER_BUILD_TIME && process.env.MCP_WORKER_BUILD_TIME !== 'unknown'
+        ? process.env.MCP_WORKER_BUILD_TIME
         : null,
     source_fingerprint: sourceFingerprint(),
     tool_schema_hash: schemaFingerprint(TOOLS),

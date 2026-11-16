@@ -30,19 +30,19 @@ sha="$(git rev-parse HEAD)"
 tree="$(git rev-parse 'HEAD^{tree}')"
 test -z "$(git status --porcelain)"
 docker build --pull=false -f Dockerfile \
-  --build-arg "BOT_REPORT_GIT_SHA=$sha" \
-  --build-arg "BOT_REPORT_TREE_SHA=$tree" \
-  --build-arg "BOT_REPORT_BUILD_TIME=$(git show -s --format=%cI HEAD)" \
+  --build-arg "MCP_WORKER_GIT_SHA=$sha" \
+  --build-arg "MCP_WORKER_TREE_SHA=$tree" \
+  --build-arg "MCP_WORKER_BUILD_TIME=$(git show -s --format=%cI HEAD)" \
   -t mcp-worker-local:review .
 bash scripts/verify-oci-image-local.sh mcp-worker-local:review standalone
 ```
 
-Test a new Compose project with `BOT_REPORT_SETUP_PROJECT` and `BOT_REPORT_SETUP_PORT` on an unused loopback port. Check `./setup.sh --init`, Admin login, readiness, OAuth PKCE, 15 MCP tools, Worker identity, stop/restart persistence, and the Worker installer 503 gate. Keep user volumes out of tests.
+Test a new Compose project with `MCP_WORKER_SETUP_PROJECT` and `MCP_WORKER_SETUP_PORT` on an unused loopback port. Check `./setup.sh --init`, Admin login, readiness, OAuth PKCE, 15 MCP tools, Worker identity, stop/restart persistence, and the Worker installer 503 gate. Keep user volumes out of tests.
 
 The separately approved offline Trivy / CycloneDX gate now accepts only the application image:
 
 ```sh
-T5_ALLOW_LOCAL_TRIVY_SCAN=1 BOT_REPORT_TRIVY_CACHE=/private/scanner-cache \
+T5_ALLOW_LOCAL_TRIVY_SCAN=1 MCP_WORKER_TRIVY_CACHE=/private/scanner-cache \
   sh scripts/release-scan.sh mcp-worker-local:review /private/evidence
 ```
 

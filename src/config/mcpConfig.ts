@@ -1,20 +1,14 @@
 import { URL } from 'node:url';
 import runtimeSettings from '../services/runtimeSettingsService';
 import databaseManager from '../db/databaseManager';
-import { canonicalRailwayOrigin } from './railwayOrigin';
 
-const DEFAULT_SCOPES = Object.freeze(['bot_report.read', 'bot_report.terminal', 'offline_access']);
+const DEFAULT_SCOPES = Object.freeze(['mcp_worker.read', 'mcp_worker.terminal', 'offline_access']);
 
 class McpConfig {
   get enabled() {
     return databaseManager.isOperational() && runtimeSettings.bool('mcp.enabled', true);
   }
   get publicBaseUrl() {
-    if (process.env.MCP_PLATFORM === 'railway') {
-      const origin = canonicalRailwayOrigin();
-      if (!origin) throw new Error('Railway canonical origin is unavailable.');
-      return origin;
-    }
     return String(runtimeSettings.get('mcp.public_base_url', 'http://localhost:3333')).replace(
       /\/+$/,
       '',

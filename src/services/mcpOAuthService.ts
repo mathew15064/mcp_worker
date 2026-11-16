@@ -176,7 +176,7 @@ class McpOAuthService {
     const scopes = Array.isArray(allowedScopes) ? allowedScopes : [allowedScopes];
     const cleanedScopes = scopes.filter((s) => this.config.supportedScopes.includes(s));
     if (cleanedScopes.length === 0) {
-      cleanedScopes.push('bot_report.read');
+      cleanedScopes.push('mcp_worker.read');
     }
 
     const rawClientSecret = `br_sec_${crypto.randomBytes(32).toString('base64url')}`;
@@ -323,7 +323,7 @@ class McpOAuthService {
       requestedScopes = scope.trim().split(/\s+/).filter(Boolean);
     }
     if (requestedScopes.length === 0) {
-      requestedScopes = ['bot_report.read'];
+      requestedScopes = ['mcp_worker.read'];
     }
 
     const allowedScopes = requestedScopes.filter((s) => client.allowed_scopes.includes(s));

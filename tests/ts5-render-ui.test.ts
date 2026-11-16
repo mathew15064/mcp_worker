@@ -18,7 +18,7 @@ void test('TS5 renderer preserves Admin and OAuth secure controls', () => {
   const html = pages.clientsPage({ clients: [], csrfToken: 'test-token' });
   assert.match(html, /New Client/);
   assert.match(html, /name="_csrf"/);
-  assert.match(html, /bot_report\.read/);
+  assert.match(html, /mcp_worker\.read/);
   assert.match(html, /offline_access/);
 });
 

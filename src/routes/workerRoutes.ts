@@ -5,8 +5,7 @@ import { rateLimit } from 'express-rate-limit';
 import databaseManager from '../db/databaseManager';
 import workerAuthService from '../services/workerAuthService';
 import workerRepository from '../repositories/workerRepository';
-import { canonicalRailwayOrigin } from '../config/railwayOrigin';
-import { railwayWorkerDistributionBlocked } from '../services/workerReleaseGate';
+import { workerDistributionBlocked } from '../services/workerReleaseGate';
 
 // No approved signing key/release exists. Populate only by reviewed code change.
 type ApprovedWorkerRelease = Readonly<{
@@ -29,14 +28,14 @@ const router = express.Router();
 const WORKER_DIR = path.resolve(__dirname, '../../worker');
 const WORKER_BIN_DIR = path.join(WORKER_DIR, 'bin');
 const BINARY_DIST_FILES = Object.freeze([
-  'bot-report-worker-linux-amd64',
-  'bot-report-worker-linux-arm64',
-  'bot-report-worker-linux-386',
-  'bot-report-worker-linux-armv7',
-  'bot-report-worker-darwin-amd64',
-  'bot-report-worker-darwin-arm64',
-  'bot-report-worker-windows-amd64.exe',
-  'bot-report-worker-windows-arm64.exe',
+  'worker_mcp-linux-amd64',
+  'worker_mcp-linux-arm64',
+  'worker_mcp-linux-386',
+  'worker_mcp-linux-armv7',
+  'worker_mcp-darwin-amd64',
+  'worker_mcp-darwin-arm64',
+  'worker_mcp-windows-amd64.exe',
+  'worker_mcp-windows-arm64.exe',
 ]);
 const DIST_FILES = BINARY_DIST_FILES;
 
@@ -48,11 +47,12 @@ const enrollmentLimiter = rateLimit({
 });
 
 function publicBaseUrl(req: Request) {
-  // Railway Worker installer URLs must ignore caller-controlled Host headers.
-  if (process.env.MCP_PLATFORM === 'railway') {
-    const origin = canonicalRailwayOrigin();
-    if (!origin) throw new Error('Missing canonical Railway origin for Worker installer.');
-    return origin;
+  // Public installer remains signed-release gated; prefer explicit origin over Host.
+  if (process.env.MCP_PUBLIC_BASE_URL) {
+    const value = new URL(process.env.MCP_PUBLIC_BASE_URL);
+    if (value.username || value.password || value.pathname !== '/' || value.search || value.hash)
+      throw new Error('Invalid configured MCP public origin.');
+    return value.origin;
   }
   const value = `${req.protocol}://${req.get('host')}`;
   const parsed = new URL(value);
@@ -97,9 +97,9 @@ PINNED_COMMIT=${pinnedCommit}
 PINNED_PUBLIC_KEY_B64=${pinnedKey}
 PINNED_PUBLIC_KEY_SHA256=${pinnedKeySha256}
 PINNED_PREVIOUS_KEY_SHA256=${previousKey}
-INSTALL_ROOT="${'${BOT_REPORT_WORKER_INSTALL_ROOT:-$HOME/.local/share/bot-report-worker}'}"
-BIN_DIR="${'${BOT_REPORT_WORKER_BIN_DIR:-$HOME/.local/bin}'}"
-WORKER_HOME="${'${BOT_REPORT_WORKER_HOME:-$HOME/.bot-report-worker}'}"
+INSTALL_ROOT="${'${MCP_WORKER_WORKER_INSTALL_ROOT:-$HOME/.local/share/worker_mcp}'}"
+BIN_DIR="${'${MCP_WORKER_WORKER_BIN_DIR:-$HOME/.local/bin}'}"
+WORKER_HOME="${'${MCP_WORKER_WORKER_HOME:-$HOME/.worker_mcp}'}"
 SYSTEM_BIN=${serviceBinary}
 SERVICE_UNIT=${serviceUnit}
 TARGET="$INSTALL_ROOT/current"
@@ -124,9 +124,9 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
-ACTION="${'${BOT_REPORT_WORKER_ACTION:-install}'}"
-SERVICE="${'${BOT_REPORT_WORKER_SYSTEMD:-0}'}"
-if [ "${'${BOT_REPORT_WORKER_SKIP_SERVICE:-0}'}" = 1 ]; then SERVICE=0; fi
+ACTION="${'${MCP_WORKER_WORKER_ACTION:-install}'}"
+SERVICE="${'${MCP_WORKER_WORKER_SYSTEMD:-0}'}"
+if [ "${'${MCP_WORKER_WORKER_SKIP_SERVICE:-0}'}" = 1 ]; then SERVICE=0; fi
 case "$SERVICE" in 0|1) ;; *) echo "[worker_mcp] invalid service mode" >&2; exit 1;; esac
 case "$ACTION" in install|rollback) ;; *) echo "[worker_mcp] invalid action" >&2; exit 1;; esac
 if [ -f "$WORKER_HOME/service-mode" ] && [ "$(cat "$WORKER_HOME/service-mode")" = systemd ] && [ "$SERVICE" != 1 ]; then
@@ -192,7 +192,7 @@ case "$OS:$ARCH_RAW" in
   linux:armv7l|linux:armv7*) ARCH="armv7" ;;
   *) echo "[worker_mcp] unsupported platform: $OS/$ARCH_RAW" >&2; exit 1 ;;
 esac
-FILE="bot-report-worker-$OS-$ARCH"
+FILE="worker_mcp-$OS-$ARCH"
 
 mkdir -p "$INSTALL_ROOT" "$BIN_DIR"
 if [ -L "$INSTALL_ROOT" ] || [ -L "$TARGET" ] || [ -L "$WORKER_MCP" ] || [ -L "$WORKER_HOME" ] || [ -L "$INSTALL_ROOT/previous" ]; then
@@ -225,7 +225,7 @@ openssl dgst -sha256 -verify "$TMP/release-key.pem" -signature "$TMP/SHA256SUMS.
 # Signed release must contain exactly the canonical, sorted nine-entry inventory.
 [ "$(wc -l < "$TMP/SHA256SUMS" | tr -d ' ')" = 9 ] &&
 LC_ALL=C awk '
-  BEGIN { split("bot-report-worker-darwin-amd64 bot-report-worker-darwin-arm64 bot-report-worker-linux-386 bot-report-worker-linux-amd64 bot-report-worker-linux-arm64 bot-report-worker-linux-armv7 bot-report-worker-windows-amd64.exe bot-report-worker-windows-arm64.exe WORKER_RELEASE", names, " ") }
+  BEGIN { split("worker_mcp-darwin-amd64 worker_mcp-darwin-arm64 worker_mcp-linux-386 worker_mcp-linux-amd64 worker_mcp-linux-arm64 worker_mcp-linux-armv7 worker_mcp-windows-amd64.exe worker_mcp-windows-arm64.exe WORKER_RELEASE", names, " ") }
   {
     digest=substr($0,1,64)
     if (NR>9 || length($0)!=66+length(names[NR]) ||
@@ -444,7 +444,7 @@ StartLimitBurst=5
 User=$RUN_USER
 Group=$RUN_GROUP
 Environment="HOME=$RUN_HOME"
-Environment="BOT_REPORT_WORKER_HOME=$WORKER_HOME"
+Environment="MCP_WORKER_WORKER_HOME=$WORKER_HOME"
 ExecStart=$SYSTEM_BIN run
 Restart=always
 RestartSec=3
@@ -694,14 +694,14 @@ if ($BaseUrl -cnotmatch '^https://[a-zA-Z0-9.-]+(:[0-9]{1,5})?$' -and $BaseUrl -
 if ($PinnedVersion -cnotmatch '^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$' -or $PinnedCommit -cnotmatch '^[0-9a-f]{40}$') { throw 'Invalid release pin' }
 if ($PinnedPreviousKeySha256 -and $PinnedPreviousKeySha256 -cnotmatch '^[0-9a-f]{64}$') { throw 'Invalid prior trust root' }
 Get-Command openssl -ErrorAction Stop | Out-Null
-$InstallRoot = if ($env:BOT_REPORT_WORKER_INSTALL_ROOT) { $env:BOT_REPORT_WORKER_INSTALL_ROOT } else { Join-Path $env:LOCALAPPDATA 'BotReportWorker' }
+$InstallRoot = if ($env:MCP_WORKER_WORKER_INSTALL_ROOT) { $env:MCP_WORKER_WORKER_INSTALL_ROOT } else { Join-Path $env:LOCALAPPDATA 'BotReportWorker' }
 $Target = Join-Path $InstallRoot 'current'
 $Previous = Join-Path $InstallRoot 'previous'
-$Action = if ($env:BOT_REPORT_WORKER_ACTION) { $env:BOT_REPORT_WORKER_ACTION } else { 'install' }
+$Action = if ($env:MCP_WORKER_WORKER_ACTION) { $env:MCP_WORKER_WORKER_ACTION } else { 'install' }
 if ($Action -notin @('install','rollback')) { throw 'Invalid installer action' }
 if ($Action -eq 'rollback') { throw 'Manual rollback prohibited; explicitly approve signed release' }
-$WorkerHome = if ($env:BOT_REPORT_WORKER_HOME) { $env:BOT_REPORT_WORKER_HOME } else { Join-Path $HOME '.bot-report-worker' }
-$Tmp = Join-Path ([IO.Path]::GetTempPath()) ('bot-report-worker-' + [guid]::NewGuid().ToString('N'))
+$WorkerHome = if ($env:MCP_WORKER_WORKER_HOME) { $env:MCP_WORKER_WORKER_HOME } else { Join-Path $HOME '.worker_mcp' }
+$Tmp = Join-Path ([IO.Path]::GetTempPath()) ('worker_mcp-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
 $Lock = Join-Path $InstallRoot '.install-lock'
 $LockOwned = $false
@@ -722,7 +722,7 @@ try {
     'arm64' { $Arch = 'arm64' }
     default { throw "Unsupported Windows architecture: $ArchRaw" }
   }
-  $File = "bot-report-worker-windows-$Arch.exe"
+  $File = "worker_mcp-windows-$Arch.exe"
   $Downloaded = Join-Path $Tmp 'worker_mcp.exe'
   $Sums = Join-Path $Tmp 'SHA256SUMS'
   $Signature = Join-Path $Tmp 'SHA256SUMS.sig'
@@ -743,10 +743,10 @@ try {
   # Enforce the same nine-entry canonical manifest accepted by the offline signer.
   $RawSums = [IO.File]::ReadAllText($Sums, [Text.Encoding]::ASCII)
   if (-not $RawSums.EndsWith("\`n") -or $RawSums.Contains("\`r")) { throw 'Noncanonical checksum line endings' }
-  $ManifestNames = @('bot-report-worker-darwin-amd64','bot-report-worker-darwin-arm64',
-    'bot-report-worker-linux-386','bot-report-worker-linux-amd64','bot-report-worker-linux-arm64',
-    'bot-report-worker-linux-armv7','bot-report-worker-windows-amd64.exe',
-    'bot-report-worker-windows-arm64.exe','WORKER_RELEASE')
+  $ManifestNames = @('worker_mcp-darwin-amd64','worker_mcp-darwin-arm64',
+    'worker_mcp-linux-386','worker_mcp-linux-amd64','worker_mcp-linux-arm64',
+    'worker_mcp-linux-armv7','worker_mcp-windows-amd64.exe',
+    'worker_mcp-windows-arm64.exe','WORKER_RELEASE')
   $CanonicalLines = @($RawSums.Substring(0, $RawSums.Length - 1).Split("\`n"))
   if ($CanonicalLines.Count -ne $ManifestNames.Count) { throw 'Invalid signed checksum inventory size' }
   for ($i=0; $i -lt $ManifestNames.Count; $i++) {
@@ -860,7 +860,7 @@ try {
   Set-Content -Encoding ascii -Path (Join-Path $WorkerHome 'bin-path') -Value (Join-Path $Target 'worker_mcp.exe')
 
 
-  if ($env:BOT_REPORT_WORKER_SKIP_PATH -ne '1') {
+  if ($env:MCP_WORKER_WORKER_SKIP_PATH -ne '1') {
     $UserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     $PathItems = @($UserPath -split ';' | Where-Object { $_ })
     if (-not ($PathItems | Where-Object { [string]::Equals([IO.Path]::GetFullPath($_), [IO.Path]::GetFullPath($Target), [StringComparison]::OrdinalIgnoreCase) })) {
@@ -926,12 +926,12 @@ async function createEnrollmentProfile(
   });
 }
 
-// Local build artifacts are unsigned. Railway distribution remains blocked
+// Local build artifacts are unsigned. distribution remains blocked
 // until an owner-approved, independently verified signed release exists.
 // This gate is shared with the Admin onboarding readiness display.
 router.use((req, res, next) => {
   if (
-    railwayWorkerDistributionBlocked() &&
+    workerDistributionBlocked() &&
     (req.path.startsWith('/worker/install') || req.path.startsWith('/worker/dist/'))
   ) {
     return res.status(503).set('Cache-Control', 'no-store').json({

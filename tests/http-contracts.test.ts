@@ -8,12 +8,12 @@ void test('form contract permits legacy HTML scalar, repeated scopes and empty c
   assert.equal(formString({}, 'name'), '');
   assert.equal(formFlag({ enabled: 'true' }, 'enabled'), true);
   assert.equal(formFlag({ enabled: 'false' }, 'enabled'), false);
-  assert.deepEqual(formList({ scopes: ['bot_report.read', 'offline_access'] }, 'scopes'), [
-    'bot_report.read',
+  assert.deepEqual(formList({ scopes: ['mcp_worker.read', 'offline_access'] }, 'scopes'), [
+    'mcp_worker.read',
     'offline_access',
   ]);
-  assert.deepEqual(formList({ scopes: 'bot_report.read,offline_access' }, 'scopes'), [
-    'bot_report.read',
+  assert.deepEqual(formList({ scopes: 'mcp_worker.read,offline_access' }, 'scopes'), [
+    'mcp_worker.read',
     'offline_access',
   ]);
 });

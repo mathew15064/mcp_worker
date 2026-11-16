@@ -8,7 +8,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, spawnSync, type SpawnOptionsWithoutStdio } from 'node:child_process';
 
-const enabled = process.env.BOT_REPORT_ISOLATED_WORKER_TEST === '1';
+const enabled = process.env.MCP_WORKER_ISOLATED_WORKER_TEST === '1';
 
 async function waitFor<T>(
   check: () => Promise<T> | T,
@@ -58,7 +58,7 @@ void test(
       fs.existsSync('/.dockerenv'),
       'Worker installer test must run inside a disposable Docker container',
     );
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-report-worker-live-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'worker_mcp-live-'));
     const workRoot = path.join(dir, 'workspace');
     fs.mkdirSync(workRoot, { recursive: true });
     const appKey = crypto.createHash('sha256').update('worker-live-app-key').digest('base64');
@@ -99,16 +99,16 @@ void test(
 
     const userHome = path.join(dir, 'worker-user');
     fs.mkdirSync(userHome, { recursive: true });
-    const workerHome = path.join(userHome, '.bot-report-worker');
+    const workerHome = path.join(userHome, '.worker_mcp');
     const statePath = path.join(workerHome, 'state.json');
     const cliPath = path.join(userHome, '.local', 'bin', 'worker_mcp');
     const cliEnv = {
       ...process.env,
       HOME: userHome,
-      BOT_REPORT_WORKER_HOME: workerHome,
-      BOT_REPORT_WORKER_SKIP_SERVICE: '1',
-      BOT_REPORT_WORKER_INSTALL_ROOT: path.join(userHome, '.local', 'share', 'bot-report-worker'),
-      BOT_REPORT_WORKER_BIN_DIR: path.join(userHome, '.local', 'bin'),
+      MCP_WORKER_WORKER_HOME: workerHome,
+      MCP_WORKER_WORKER_SKIP_SERVICE: '1',
+      MCP_WORKER_WORKER_INSTALL_ROOT: path.join(userHome, '.local', 'share', 'worker_mcp'),
+      MCP_WORKER_WORKER_BIN_DIR: path.join(userHome, '.local', 'bin'),
       PATH: `${path.join(userHome, '.local', 'bin')}:${process.env.PATH}`,
     };
     t.after(async () => {
@@ -187,16 +187,13 @@ void test(
     // E2E starts a trusted, locally compiled Go test fixture in disposable Docker.
     // Public unsigned download is forbidden; the dedicated signed-release suite
     // verifies the cryptographic installer on each native runner.
-    const installRoot = cliEnv.BOT_REPORT_WORKER_INSTALL_ROOT;
+    const installRoot = cliEnv.MCP_WORKER_WORKER_INSTALL_ROOT;
     const currentDir = path.join(installRoot, 'current');
     const currentBinary = path.join(currentDir, 'worker_mcp');
     fs.mkdirSync(currentDir, { recursive: true });
     fs.mkdirSync(path.dirname(cliPath), { recursive: true });
     fs.mkdirSync(workerHome, { recursive: true });
-    fs.copyFileSync(
-      path.resolve(__dirname, '../worker/bin/bot-report-worker-linux-amd64'),
-      currentBinary,
-    );
+    fs.copyFileSync(path.resolve(__dirname, '../worker/bin/worker_mcp-linux-amd64'), currentBinary);
     fs.chmodSync(currentBinary, 0o755);
     fs.symlinkSync(currentBinary, cliPath);
     fs.writeFileSync(path.join(workerHome, 'default-server'), baseUrl + '\n');
@@ -289,13 +286,13 @@ void test(
     assert.match(await getPage('/admin/onboarding'), /data-onboarding-status="blocked"/);
     const clientsHtml = await getPage('/admin/clients?first_call=local');
     assert.match(clientsHtml, /http:\/\/127\.0\.0\.1:43871\/callback/);
-    assert.doesNotMatch(clientsHtml, /value="bot_report.terminal" checked/);
+    assert.doesNotMatch(clientsHtml, /value="mcp_worker.terminal" checked/);
     assert.doesNotMatch(clientsHtml, /value="offline_access" checked/);
     const created = await submit('/admin/clients', {
       _csrf: csrf(clientsHtml),
       display_name: 'First read-only client',
       redirect_uris: 'http://127.0.0.1:43871/callback',
-      scopes: 'bot_report.read',
+      scopes: 'mcp_worker.read',
     });
     assert.equal(created.status, 302);
     const oneTime = await getPage('/admin/clients');
@@ -312,8 +309,8 @@ void test(
       {
         env: {
           ...process.env,
-          BOT_REPORT_FIRST_CLIENT_ID: firstId,
-          BOT_REPORT_FIRST_CLIENT_SECRET: firstSecret,
+          MCP_WORKER_FIRST_CLIENT_ID: firstId,
+          MCP_WORKER_FIRST_CLIENT_SECRET: firstSecret,
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       },
@@ -410,7 +407,7 @@ void test(
     assert.equal(runtime.tool_count, 15);
     assert.equal(
       runtime.tool_schema_hash,
-      'a79786ed09ba2e8eef30ec778453b17c81963bf943542c1f2ea0f87952e4a032',
+      '8c2deb08d22abfd11a34827b461d1f22142dba368dd05ecda02db3c4a072b579',
     );
     await call('terminal_list');
     assert.equal(
@@ -513,7 +510,7 @@ void test(
     assert.equal(uninstallResult.status, 0, `${uninstallResult.stdout}${uninstallResult.stderr}`);
     assert.match(uninstallResult.stdout, /uninstalled local_state=removed installation=removed/);
     assert.equal(fs.existsSync(workerHome), false);
-    assert.equal(fs.existsSync(path.join(userHome, '.local', 'share', 'bot-report-worker')), false);
+    assert.equal(fs.existsSync(path.join(userHome, '.local', 'share', 'worker_mcp')), false);
     assert.equal(fs.existsSync(cliPath), false);
   },
 );

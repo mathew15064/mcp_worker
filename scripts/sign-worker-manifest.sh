@@ -34,16 +34,16 @@ printf 'version=%s\ncommit=%s\n' "$WORKER_RELEASE_EXPECTED_VERSION" "$WORKER_REL
 }
 # Reproduce manifest canonically: rejects missing/extra paths and duplicated hashes.
 set -- \
-  bot-report-worker-darwin-amd64 bot-report-worker-darwin-arm64 \
-  bot-report-worker-linux-386 bot-report-worker-linux-amd64 \
-  bot-report-worker-linux-arm64 bot-report-worker-linux-armv7 \
-  bot-report-worker-windows-amd64.exe bot-report-worker-windows-arm64.exe WORKER_RELEASE
+  worker_mcp-darwin-amd64 worker_mcp-darwin-arm64 \
+  worker_mcp-linux-386 worker_mcp-linux-amd64 \
+  worker_mcp-linux-arm64 worker_mcp-linux-armv7 \
+  worker_mcp-windows-amd64.exe worker_mcp-windows-arm64.exe WORKER_RELEASE
 for file do
   test -f "$file" && test ! -L "$file" || { echo "Missing or unsafe artifact: $file" >&2; exit 1; }
 done
 [ ! -e SHA256SUMS.sig ] || { echo 'Remove previous signature before signing a candidate' >&2; exit 1; }
 test "$(wc -l < SHA256SUMS | tr -d ' ')" = 9 || { echo 'Invalid manifest entry count' >&2; exit 1; }
-sha256sum bot-report-worker-* WORKER_RELEASE | cmp -s - SHA256SUMS || {
+sha256sum worker_mcp-* WORKER_RELEASE | cmp -s - SHA256SUMS || {
   echo 'Noncanonical or modified SHA256SUMS' >&2; exit 1;
 }
 sha256sum -c SHA256SUMS >/dev/null

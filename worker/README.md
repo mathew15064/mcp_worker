@@ -29,19 +29,19 @@ enrollment token from **Workers**, then use the installer for the target OS.
 Linux:
 
 ```bash
-curl -fsSL https://bot-report.example.com/worker/install-linux.sh | sh
+curl -fsSL https://mcp-worker.example.com/worker/install-linux.sh | sh
 ```
 
 macOS:
 
 ```bash
-curl -fsSL https://bot-report.example.com/worker/install-macos.sh | sh
+curl -fsSL https://mcp-worker.example.com/worker/install-macos.sh | sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-irm https://bot-report.example.com/worker/install.ps1 | iex
+irm https://mcp-worker.example.com/worker/install.ps1 | iex
 ```
 
 Once an approved release is pinned, all installers download the matching binary from `/worker/dist/`, verify a mandatory signature and `SHA256SUMS`, preserve an existing Worker identity during upgrades, and print the next `login` or `start` command. Windows adds the managed `current` directory to the user PATH; Linux installs the OS-facing CLI as `worker_mcp`; there is no legacy CLI alias. The default is user-mode, without systemd or sudo. macOS keeps the standalone CLI flow for now.
@@ -62,7 +62,7 @@ older signed release requires a separately reviewed release/pin change.
 A stale .install-lock after interruption requires manual inspection.
 
 Linux systemd is advanced opt-in:
-`curl .../worker/install-linux.sh | BOT_REPORT_WORKER_SYSTEMD=1 sh`.
+`curl .../worker/install-linux.sh | MCP_WORKER_WORKER_SYSTEMD=1 sh`.
 For a managed upgrade, the installer saves the previous installed binary,
 root-owned unit, active/enabled status, local aliases, and signed release records
 before changing the service. It installs the verified replacement, reloads the
@@ -102,7 +102,7 @@ contains an independently reviewed, pinned RSA public verification key
 manifest signature **before** trusting any checksum; then checks metadata,
 binary SHA-256, release identity, stored SPKI public-key fingerprint and monotonic installed version. An
 unsigned, altered, wrong-key, wrong-version or older signed release is rejected
-without replacing the running binary. `BOT_REPORT_WORKER_TRUSTED_KEY` is no
+without replacing the running binary. `MCP_WORKER_WORKER_TRUSTED_KEY` is no
 longer an override. All platforms require OpenSSL; Windows also requires
 PowerShell. The Windows URL runs a single stage rather than executing an
 unverified downloaded PowerShell payload.
@@ -134,7 +134,7 @@ Release candidate procedure (offline, only after human approval):
    Neither the manual artifact workflow nor tests create a public GitHub
    Release, tag, or trusted production key.
 
-**Rollback policy:** manual `BOT_REPORT_WORKER_ACTION=rollback` is rejected,
+**Rollback policy:** manual `MCP_WORKER_WORKER_ACTION=rollback` is rejected,
 including for older binaries with locally stored SHA256 checksums. An
 automated start-failure recovery may restore the *previously running* binary
 during a failed replacement; this is not permission to install an older
@@ -165,7 +165,7 @@ Interactive login asks for the one-time enrollment token and allowed workspace r
 1. generates an Ed25519 key pair locally,
 2. sends only the public key to mcp_worker,
 3. creates a Worker Profile alias automatically,
-4. stores identity/config under `~/.bot-report-worker/` with restrictive permissions,
+4. stores identity/config under `~/.worker_mcp/` with restrictive permissions,
 5. starts the standalone Worker in the background,
 6. waits until outbound WebSocket authentication succeeds before reporting `connected`.
 
@@ -226,7 +226,7 @@ intact and diagnose the connection before starting again.
 The Go runtime intentionally uses the same JSON state/config schema and the same PKCS#8/SPKI Ed25519 PEM format as the Node runtime. Existing enrolled identities can therefore be upgraded in place:
 
 ```bash
-curl -fsSL https://bot-report.example.com/worker/install.sh | sh
+curl -fsSL https://mcp-worker.example.com/worker/install.sh | sh
 worker_mcp start
 ```
 
@@ -244,7 +244,7 @@ Artifacts are written to `worker/bin/` for Linux (`amd64`, `arm64`, `386`, `armv
 
 ## Local security policy
 
-The Worker keeps these settings in `~/.bot-report-worker/config.json` and its Ed25519 private key in `~/.bot-report-worker/state.json` (mode `0600` where supported):
+The Worker keeps these settings in `~/.worker_mcp/config.json` and its Ed25519 private key in `~/.worker_mcp/state.json` (mode `0600` where supported):
 
 ```text
 server_url             required mcp_worker HTTPS base URL
@@ -257,4 +257,4 @@ allow_insecure_http    local/dev only; production should remain HTTPS/WSS
 max_job_ms             local job timeout ceiling, max 300000
 ```
 
-The owner selected unrestricted OS-account access for newly enrolled Workers. No `--roots` or `--allow-shell` flags are required: paths are governed by OS permissions and local shell execution is enabled. To intentionally restrict a Worker, supply `--roots` at enrollment; `BOT_REPORT_WORKER_ALLOW_SHELL=false` disables local shell execution. Existing installed Workers retain their saved settings until explicitly changed: set `allowed_roots` to `[]` and `allow_shell` to `true` in the local `config.json`, then restart the Worker. Running as Administrator/root grants that account's authority, including the ability to modify sensitive OS files. This choice does **not** disable owner authentication, Worker capabilities, OAuth scopes, key verification, or revocation.
+The owner selected unrestricted OS-account access for newly enrolled Workers. No `--roots` or `--allow-shell` flags are required: paths are governed by OS permissions and local shell execution is enabled. To intentionally restrict a Worker, supply `--roots` at enrollment; `MCP_WORKER_WORKER_ALLOW_SHELL=false` disables local shell execution. Existing installed Workers retain their saved settings until explicitly changed: set `allowed_roots` to `[]` and `allow_shell` to `true` in the local `config.json`, then restart the Worker. Running as Administrator/root grants that account's authority, including the ability to modify sensitive OS files. This choice does **not** disable owner authentication, Worker capabilities, OAuth scopes, key verification, or revocation.

@@ -34,7 +34,7 @@ func TestWorkspaceTimeoutStopsChildHoldingOutputPipe(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix child process group fixture")
 	}
-	t.Setenv("BOT_REPORT_WORKER_DISABLE_SYSTEMD_SCOPES", "1")
+	t.Setenv("MCP_WORKER_WORKER_DISABLE_SYSTEMD_SCOPES", "1")
 	root := t.TempDir()
 	a := &Agent{cfg: Config{AllowShell: true}, roots: []string{root}, commands: map[int]*exec.Cmd{}}
 	began := time.Now()

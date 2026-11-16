@@ -9,7 +9,7 @@ import type RuntimeSettings from '../src/services/runtimeSettingsService';
 import type * as DbConnection from '../src/db/connection';
 import type * as DbMigrations from '../src/db/migrations';
 
-function setupEnv(prefix: string = 'bot_report_mcp_test') {
+function setupEnv(prefix: string = 'mcp_worker_mcp_test') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}_`));
   process.env.NODE_ENV = 'test';
   const dbPath = path.join(dir, 'test.sqlite');
@@ -64,7 +64,7 @@ function pkce(verifier: string) {
 
 async function issueToken({
   principalId = 'principal:gpt_client',
-  scopes = ['bot_report.read', 'bot_report.terminal', 'offline_access'],
+  scopes = ['mcp_worker.read', 'mcp_worker.terminal', 'offline_access'],
 }: { principalId?: string; scopes?: string[] } = {}) {
   const { default: service } = await import('../src/services/mcpOAuthService.js');
   const { default: config } = await import('../src/config/mcpConfig.js');

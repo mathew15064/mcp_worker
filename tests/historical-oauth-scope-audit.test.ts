@@ -18,8 +18,8 @@ void test('historical OAuth grant audit dry-runs only, requires per-client evide
       CREATE TABLE mcp_oauth_refresh_tokens (client_id TEXT, revoked_at TEXT);
     `);
     const insert = db.prepare('INSERT INTO mcp_oauth_clients VALUES (?, ?, ?)');
-    const read = 'bot_report.read';
-    const terminal = 'bot_report.terminal';
+    const read = 'mcp_worker.read';
+    const terminal = 'mcp_worker.terminal';
     const offline = 'offline_access';
     insert.run('legacy-widened', 'active', JSON.stringify([read, terminal, offline]));
     insert.run('approved-terminal', 'active', JSON.stringify([read, terminal]));
@@ -178,8 +178,8 @@ void test('historical OAuth audit rejects malformed or duplicated input without 
       snap,
       JSON.stringify({
         clients: [
-          { client_id: 'dup', allowed_scopes_json: '["bot_report.read"]' },
-          { client_id: 'dup', allowed_scopes_json: '["bot_report.read"]' },
+          { client_id: 'dup', allowed_scopes_json: '["mcp_worker.read"]' },
+          { client_id: 'dup', allowed_scopes_json: '["mcp_worker.read"]' },
         ],
       }),
     );
@@ -207,13 +207,13 @@ void test('historical OAuth audit rejects malformed or duplicated input without 
     fs.writeFileSync(
       snap,
       JSON.stringify({
-        clients: [{ client_id: 'grant-conflict', allowed_scopes_json: '["bot_report.read"]' }],
+        clients: [{ client_id: 'grant-conflict', allowed_scopes_json: '["mcp_worker.read"]' }],
       }),
     );
     fs.writeFileSync(
       approved,
       JSON.stringify({
-        approved_scopes_by_client: { 'grant-conflict': ['bot_report.read', 'bot_report.terminal'] },
+        approved_scopes_by_client: { 'grant-conflict': ['mcp_worker.read', 'mcp_worker.terminal'] },
       }),
     );
     const output = run();

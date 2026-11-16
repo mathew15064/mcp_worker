@@ -130,18 +130,18 @@ test('new Admin OAuth clients default to Read only and keep secrets one-time', a
   await expect(modal.getByLabel('Redirect URI(s)')).toHaveValue(
     'https://chatgpt.com/connector_platform_oauth_redirect',
   );
-  await expect(modal.locator('input[name="scopes"][value="bot_report.read"]')).toBeChecked();
+  await expect(modal.locator('input[name="scopes"][value="mcp_worker.read"]')).toBeChecked();
   await expect(
-    modal.locator('input[name="scopes"][value="bot_report.terminal"]'),
+    modal.locator('input[name="scopes"][value="mcp_worker.terminal"]'),
   ).not.toBeChecked();
   await expect(modal.locator('input[name="scopes"][value="offline_access"]')).not.toBeChecked();
   await modal.getByRole('button', { name: 'Cancel' }).click();
   await page.goto('/admin/clients');
   await page.getByRole('button', { name: 'New Client' }).first().click();
   const ordinary = page.getByRole('dialog', { name: 'New OAuth Client' });
-  await expect(ordinary.locator('input[name="scopes"][value="bot_report.read"]')).toBeChecked();
+  await expect(ordinary.locator('input[name="scopes"][value="mcp_worker.read"]')).toBeChecked();
   await expect(
-    ordinary.locator('input[name="scopes"][value="bot_report.terminal"]'),
+    ordinary.locator('input[name="scopes"][value="mcp_worker.terminal"]'),
   ).not.toBeChecked();
   await expect(ordinary.locator('input[name="scopes"][value="offline_access"]')).not.toBeChecked();
 });
