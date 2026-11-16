@@ -150,7 +150,7 @@ provision_host_tls() {
     rm -f "$helper"
     fail 'Cannot download trusted TLS provisioning helper.'
   fi
-  if [ "$(sha256sum "$helper" | awk '{print $1}')" != '56671b77fa177a24fece8afb53a2375c187a7b9c83a78500915abca2f4bf814b' ]; then
+  if [ "$(sha256sum "$helper" | awk '{print $1}')" != '015395b8c2d9371dc6b9651e9707497e3d5d72156f0c4e0056051fcccba8dbbd' ]; then
     rm -f "$helper"
     fail 'TLS helper SHA-256 mismatch; refusing remote code execution.'
   fi
