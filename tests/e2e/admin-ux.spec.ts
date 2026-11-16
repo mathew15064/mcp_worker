@@ -405,6 +405,14 @@ test('Workers show install before generating a token while signed downloads stay
   await page.getByRole('button', { name: 'Install / Connect Worker' }).click();
   const enrollmentDialog = page.getByRole('dialog', { name: 'Install & Connect Worker' });
   await expect(enrollmentDialog).toBeVisible();
+  await expect(
+    enrollmentDialog.getByText('Signed one-command installation unavailable'),
+  ).toBeVisible();
+  const developerFallback = enrollmentDialog.locator('details');
+  await expect(developerFallback).not.toHaveAttribute('open');
+  await expect(enrollmentDialog.getByText('Development installation — Go 1.24+')).toBeHidden();
+  await developerFallback.getByText('Developer fallback', { exact: false }).click();
+  await expect(developerFallback).toHaveAttribute('open', '');
   await expect(enrollmentDialog.getByText('Development installation — Go 1.24+')).toBeVisible();
   await expect(enrollmentDialog.locator('#worker-enrollment-token')).toHaveCount(0);
   await expect(enrollmentDialog.locator('#worker-dev-unix-command')).toContainText('go build');
