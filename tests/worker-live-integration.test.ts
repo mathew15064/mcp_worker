@@ -171,18 +171,23 @@ void test(
     );
     await runtimeSettings.set('mcp.enabled', 'true');
     const workersHtml = await getPage('/admin/workers');
-    const blockedEnrollment = await submit('/admin/workers/enrollment', {
+    const enrollmentResponse = await submit('/admin/workers/enrollment', {
       _csrf: csrf(workersHtml),
       ttl_seconds: '600',
     });
-    assert.equal(blockedEnrollment.status, 503, 'Unapproved public enrollment must remain closed');
-    assert.equal(blockedEnrollment.headers.get('cache-control'), 'no-store');
+    assert.equal(
+      enrollmentResponse.status,
+      302,
+      'Admin may enroll manually built development Workers',
+    );
+    const installPage = await getPage('/admin/workers');
+    assert.match(installPage, /id="worker-enrollment-token"/);
+    const enrollmentToken = installPage.match(/br_enroll_[A-Za-z0-9_-]+/)?.[0];
+    assert.ok(enrollmentToken);
     assert.doesNotMatch(await getPage('/admin/workers'), /id="worker-enrollment-token"/);
 
-    // Generate only a disposable database fixture token; do not open public issuance.
-    const enrollment = {
-      token: (await workerRepo.createEnrollmentToken({ ttlSeconds: 600 })).token,
-    };
+    // E2E exercises a manually compiled Worker. Public signed downloads remain HTTP 503.
+    const enrollment = { token: enrollmentToken };
 
     // E2E starts a trusted, locally compiled Go test fixture in disposable Docker.
     // Public unsigned download is forbidden; the dedicated signed-release suite

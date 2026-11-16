@@ -6,6 +6,13 @@ must continue to return HTTP 503 `WORKER_SIGNED_RELEASE_PENDING`.
 This document defines a future owner-operated process; it authorizes **no**
 public tag, GitHub Release, installer, binary, deployment or key creation.
 
+Authenticated Admin may separately generate a one-use token to enroll a
+**manually built development Worker** from reviewed source. This is not a
+signed release approval, does not make any public download available, and
+must not be treated as permission to distribute prebuilt unsigned binaries.
+Remote Worker connectivity requires trusted HTTPS; avoid plaintext HTTP over
+the public Internet. Ordinary account-user token issuance stays fail-closed.
+
 ## Trust model and enforced invariants
 
 - The owner independently authenticates the installer script and its embedded

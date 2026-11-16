@@ -286,16 +286,26 @@ void test('Admin manages Worker execution targets from the Workers page', async 
   assert.match(html, /UI-Admin-Worker/);
   assert.match(html, /id="worker-profile-modal"/);
   assert.match(html, /New Execution Target/);
-  assert.match(html, /Signed Worker release approval pending/);
-  assert.doesNotMatch(html, /Generate Enrollment Token/);
-  const pendingEnrollment = await fetch(`${baseUrl}/admin/workers/enrollment`, {
+  assert.match(html, /Install \/ Connect Worker/);
+  assert.doesNotMatch(html, /New Execution Target · connect a Worker first/);
+  const createEnrollment = await fetch(`${baseUrl}/admin/workers/enrollment`, {
     method: 'POST',
     redirect: 'manual',
     headers: { 'content-type': 'application/x-www-form-urlencoded', cookie },
     body: new URLSearchParams({ _csrf: csrf, ttl_seconds: '600' }).toString(),
   });
-  assert.equal(pendingEnrollment.status, 503);
-  assert.equal(pendingEnrollment.headers.get('cache-control'), 'no-store');
+  assert.equal(createEnrollment.status, 302);
+  assert.equal(createEnrollment.headers.get('location'), '/admin/workers');
+  const installPage = await fetch(`${baseUrl}/admin/workers`, { headers: { cookie } });
+  assert.equal(installPage.headers.get('cache-control'), 'no-store');
+  const installHtml = await installPage.text();
+  assert.match(installHtml, /Install & Connect Worker/);
+  assert.match(installHtml, /id="worker-enrollment-token"/);
+  assert.match(installHtml, /br_enroll_[A-Za-z0-9_-]+/);
+  assert.match(installHtml, /go build -trimpath -o worker_mcp/);
+  assert.doesNotMatch(installHtml, /id="worker-install-linux-command"/);
+  const revisit = await fetch(`${baseUrl}/admin/workers`, { headers: { cookie } });
+  assert.doesNotMatch(await revisit.text(), /id="worker-enrollment-token"/);
   assert.doesNotMatch(html, /name="host"|name="port"|name="username"|name="password"/);
   assert.doesNotMatch(html, /Attach Shell|Test Shell|SSH Profiles/);
 });

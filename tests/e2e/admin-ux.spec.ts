@@ -356,7 +356,7 @@ test('Worker-only execution targets replace SSH profiles and browser consoles', 
   await page.getByRole('button', { name: 'New Execution Target' }).click();
   const dialog = page.getByRole('dialog', { name: 'New Worker Profile' });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByLabel('Worker', { exact: true })).toBeVisible();
+  await expect(dialog.locator('[name="worker_id"]')).toHaveCount(1);
   await expect(dialog.getByLabel('Name')).toBeVisible();
   await expect(dialog.getByLabel('SSH password')).toHaveCount(0);
   await dialog.getByRole('button', { name: 'Cancel' }).click();
@@ -366,7 +366,7 @@ test('Worker-only execution targets replace SSH profiles and browser consoles', 
   }
 });
 
-test('Workers block unapproved enrollment while profiles remain manageable without SSH', async ({
+test('Workers show install before generating a token while signed downloads stay blocked', async ({
   page,
 }) => {
   await login(page);
@@ -401,18 +401,19 @@ test('Workers block unapproved enrollment while profiles remain manageable witho
   await expect(page.getByText('No matching workers.')).toBeVisible();
   await workerSearch.fill('');
 
-  await expect(page.getByText('Signed Worker release approval pending')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Generate Enrollment Token' })).toHaveCount(0);
-  await expect(page.getByRole('dialog', { name: 'One-time Enrollment Token' })).toHaveCount(0);
-  const csrf = await page.locator('input[name="_csrf"]').first().inputValue();
-  const blockedEnrollment = await page.request.post('/admin/workers/enrollment', {
-    form: { _csrf: csrf, ttl_seconds: '600' },
-    maxRedirects: 0,
-  });
-  expect(blockedEnrollment.status()).toBe(503);
-  expect(blockedEnrollment.headers()['cache-control']).toBe('no-store');
+  await expect(page.getByRole('button', { name: 'Install / Connect Worker' })).toBeVisible();
+  await page.getByRole('button', { name: 'Install / Connect Worker' }).click();
+  const enrollmentDialog = page.getByRole('dialog', { name: 'Install & Connect Worker' });
+  await expect(enrollmentDialog).toBeVisible();
+  await expect(enrollmentDialog.getByText('Development installation — Go 1.24+')).toBeVisible();
+  await expect(enrollmentDialog.locator('#worker-enrollment-token')).toHaveCount(0);
+  await expect(enrollmentDialog.locator('#worker-dev-unix-command')).toContainText('go build');
+  await expect(enrollmentDialog.locator('#worker-install-linux-command')).toHaveCount(0);
+  await enrollmentDialog.getByRole('button', { name: 'Generate one-time token' }).click();
+  await expect(enrollmentDialog.locator('#worker-enrollment-token')).toContainText('br_enroll_');
+  await enrollmentDialog.getByRole('button', { name: "I've saved the token" }).click();
   await page.reload();
-  await expect(page.getByRole('dialog', { name: 'One-time Enrollment Token' })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Install & Connect Worker' })).toHaveCount(0);
 
   await expect(page.getByRole('link', { name: 'SSH Profiles' })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Execution Targets' })).toBeVisible();

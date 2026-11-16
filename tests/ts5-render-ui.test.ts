@@ -22,12 +22,47 @@ void test('TS5 renderer preserves Admin and OAuth secure controls', () => {
   assert.match(html, /offline_access/);
 });
 
-void test('TS5 Worker dashboard has execution targets, not SSH profile forms', () => {
+void test('Admin Worker page always offers first-time Worker installation', () => {
   const html = pages.workersPage({ workers: [], profiles: [], csrfToken: 'test' });
-  assert.match(html, /New Execution Target/);
-  assert.match(html, /worker-profile-modal/);
-  assert.match(html, /New Execution Target · connect a Worker first/);
+  assert.match(html, /Install \/ Connect Worker/);
+  assert.match(html, /action="\/admin\/workers\/enrollment"/);
+  assert.match(html, /Start with Install \/ Connect Worker above/);
+  assert.match(html, /data-modal-open="worker-enrollment-modal"/);
+  assert.match(html, /Generate one-time token/);
+  assert.match(html, /go build -trimpath -o worker_mcp/);
+  assert.doesNotMatch(html, /id="worker-enrollment-token"/);
+  assert.doesNotMatch(html, /data-auto-open="true"/);
+  assert.doesNotMatch(html, /New Execution Target · connect a Worker first/);
   assert.doesNotMatch(html, /SSH Profiles|account-ssh-modal|Attach Shell/);
+});
+
+void test('Admin Worker setup shows a real one-time token and manual build path while signed binary distribution stays blocked', () => {
+  const html = pages.workersPage({
+    workers: [],
+    profiles: [],
+    csrfToken: 'test',
+    enrollment: { token: 'br_enroll_test_fixture_only', expires_at: '2026-11-16T18:00:00Z' },
+    workerInstallUrl: 'https://mcp.example.test/worker/install.sh',
+  });
+  assert.match(html, /Install & Connect Worker/);
+  assert.match(html, /br_enroll_test_fixture_only/);
+  assert.match(html, /data-auto-open="true"/);
+  assert.doesNotMatch(html, /Generate one-time token<\/button>/);
+  assert.match(html, /go build -trimpath -o worker_mcp/);
+  assert.match(html, /worker_mcp login --server https:\/\/mcp\.example\.test/);
+  assert.match(html, /Profile is created automatically/);
+  assert.doesNotMatch(html, /id="worker-install-linux-command"/);
+});
+
+void test('User Worker page cannot bypass signed-release enrollment gating', () => {
+  const html = pages.workersPage({
+    workers: [],
+    profiles: [],
+    csrfToken: 'test',
+    accountUser: { id: 'user-1' },
+  });
+  assert.doesNotMatch(html, /action="\/account\/workers\/enrollment"/);
+  assert.match(html, /Signed Worker release approval pending/);
 });
 
 void test('Worker Profile automatically selects its only online Worker', () => {

@@ -10,7 +10,6 @@ const { currentAdmin } = authRoutes;
 import oauthRepo from '../repositories/mcpOAuthRepository';
 import oauthService from '../services/mcpOAuthService';
 import workerRepo from '../repositories/workerRepository';
-import { workerSignedReleaseReadiness } from '../services/workerReleaseGate';
 import workerBroker from '../services/workerConnectionBroker';
 import workerLifecycleService from '../services/workerLifecycleService';
 import settingsRepo from '../repositories/settingsRepository';
@@ -411,17 +410,8 @@ router.get('/admin/workers', requireDataStore, async (req, res, next) => {
 });
 
 router.post('/admin/workers/enrollment', requireDataStore, async (req, res) => {
-  // Enrollment and installer download are one signed-release onboarding flow.
-  // Do not issue a usable token before independently approved distribution.
-  if (!workerSignedReleaseReadiness().productionDistributionApproved) {
-    return res
-      .status(503)
-      .set('Cache-Control', 'no-store')
-      .type('html')
-      .send(
-        errorPage(503, 'Signed Worker release approval is pending; enrollment is unavailable.'),
-      );
-  }
+  // Authenticated Admin may enroll a locally built development Worker.
+  // This does NOT approve unsigned public installer/binary distribution.
   try {
     const ttlSeconds = Math.max(
       60,

@@ -20,11 +20,16 @@ Worker using an unsigned installer.
 
 ## Install
 
-**Signed Worker distribution and new enrollment are not currently approved.**
-The commands below document the future owner-approved release process; do not
-execute them against the current server. Existing Workers remain manageable.
-After a signed release has been independently approved, generate a one-time
-enrollment token from **Workers**, then use the installer for the target OS.
+**Public signed Worker installers are not yet approved.** Admin users can use
+**Workers → Install / Connect Worker** to generate a short-lived, one-use
+development enrollment token and see manual Go build commands for the target
+machine. Build from reviewed source (Go 1.24+) and run `worker_mcp login`
+against a secure HTTPS endpoint; login creates the first Worker Profile
+without a separate Create Profile step. Account-user enrollment remains gated.
+
+The commands below document the **future owner-approved signed installer**
+process; do not execute them against the current server. Existing Workers
+remain manageable.
 
 Linux:
 
@@ -84,7 +89,8 @@ macOS/Windows use manual mode; OS-native lifecycle tests remain a release gate.
 The normative owner-operated RC checklist, key custody and root-rotation
 policy are in [Signed Worker release and trust policy](../docs/WORKER_SIGNED_RELEASE_POLICY.md).
 
-**Current state: no production Worker release is approved.** All server
+**Current state: no production Worker release is approved.** Admin-only manual
+source-build enrollment is separate from public artifact distribution. All server
 environments return `503 WORKER_SIGNED_RELEASE_PENDING` for installer and
 binary distribution endpoints, including missing/misspelled `MCP_PLATFORM`.
 The installer templates also fail closed without an independently approved

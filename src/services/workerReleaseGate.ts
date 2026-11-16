@@ -1,14 +1,12 @@
 /**
- * Single source of truth for Worker distribution and onboarding.
+ * Single source of truth for public signed Worker *binary distribution*.
  *
- * A signed Worker release has NOT been approved. Until owner-controlled
- * verification of a pinned release, public trust key and signed artifacts is
- * implemented and reviewed, Worker downloads must fail closed. The onboarding
- * UI must use the same gate as the HTTP routes rather than guessing from a
- * connected Worker or an HTTP HEAD response.
+ * Until an owner-approved signed release exists, all public installer/binary
+ * routes return HTTP 503. Authenticated Admin development enrollment may
+ * independently issue short-lived one-use tokens for Workers manually built
+ * from reviewed source; this never authorizes unsigned public downloads.
  *
- * Do not replace this with an environment variable toggle: an untrusted
- * runtime setting cannot authorize installation or public distribution.
+ * Do not replace distribution approval with an environment variable toggle.
  */
 export function workerDistributionBlocked(): boolean {
   // Release trust is a source-reviewed decision, never a runtime platform flag.
