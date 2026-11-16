@@ -14,6 +14,8 @@ name="${MCP_WORKER_CONTAINER:-mcp_worker-server}"
 volume="${MCP_WORKER_VOLUME:-mcp_worker_quick_app-data}"
 image="${MCP_WORKER_IMAGE:-mathew15604/mcp-worker:dev-main}"
 port="${MCP_WORKER_SETUP_PORT:-3333}"
+tls_mode="${MCP_WORKER_TLS_MODE:-auto}"
+case "$tls_mode" in auto|external) ;; *) fail 'MCP_WORKER_TLS_MODE must be auto or external.' ;; esac
 case "$name" in ''|*[!a-zA-Z0-9_.-]* ) fail 'Invalid container name.' ;; esac
 case "$volume" in ''|*[!a-zA-Z0-9_.-]* ) fail 'Invalid volume name.' ;; esac
 case "$port" in ''|*[!0-9]*) fail 'Invalid port.' ;; esac
@@ -136,6 +138,29 @@ case "$origin_authority" in
     fail 'Public URL must be a bare IP/hostname HTTPS origin and optional port.' ;;
 esac
 
+# Keep the public installer one-file: fetch only the owner-reviewed TLS helper.
+# SHA-256 pins the executed bytes even if the remote branch subsequently moves.
+provision_host_tls() {
+  [ "$tls_mode" = auto ] || return 0
+  command -v curl >/dev/null 2>&1 && command -v sha256sum >/dev/null 2>&1 ||
+    fail 'Automatic HTTPS requires curl and sha256sum.'
+  helper="$(mktemp "${TMPDIR:-/tmp}/mcpw-host-tls.XXXXXXXX")" || fail 'Cannot create HTTPS helper staging file.'
+  if ! curl -fsS --proto '=https' --max-redirs 0 --max-time 30 \
+    'https://raw.githubusercontent.com/mathew15064/mcp_worker/main/scripts/provision-host-https.sh' -o "$helper"; then
+    rm -f "$helper"
+    fail 'Cannot download trusted TLS provisioning helper.'
+  fi
+  if [ "$(sha256sum "$helper" | awk '{print $1}')" != '56671b77fa177a24fece8afb53a2375c187a7b9c83a78500915abca2f4bf814b' ]; then
+    rm -f "$helper"
+    fail 'TLS helper SHA-256 mismatch; refusing remote code execution.'
+  fi
+  if ! sh "$helper" "$public_origin" "$port"; then
+    rm -f "$helper"
+    fail 'HTTPS provisioning failed. Check DNS/port 80 or choose MCP_WORKER_TLS_MODE=external.'
+  fi
+  rm -f "$helper"
+}
+
 # HTTPS is terminated by a trusted local proxy; keep its backend loopback-only.
 # Legacy HTTP servers retain their binding until a deliberate HTTPS migration.
 start_server() {
@@ -168,6 +193,10 @@ if [ "$mode" = --https ]; then
   [ "$(docker inspect "$name" --format '{{.State.Running}}')" = true ] || fail 'Existing container must be running.'
   [ "$(docker inspect "$name" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Name}}{{end}}{{end}}')" = "$volume" ] || fail 'Unexpected SQLite mount.'
   command -v curl >/dev/null 2>&1 || fail 'curl is required to verify external HTTPS.'
+  if [ "$tls_mode" = auto ] && ! curl -fsS --proto '=https' --max-redirs 0 --max-time 8 "$public_origin/healthz" 2>/dev/null |
+    grep -q '"service":"mcp_worker"'; then
+    provision_host_tls
+  fi
   curl -fsS --proto '=https' --max-redirs 0 --max-time 15 "$public_origin/healthz" |
     grep -q '"service":"mcp_worker"' || fail 'Trusted HTTPS healthcheck failed; refusing cutover.'
   current_bind="$(docker port "$name" 80/tcp)"
@@ -298,6 +327,11 @@ if container_exists; then
     docker start "$name" >/dev/null
   fi
 else
+  if [ "$mode" = --init ]; then
+    [ ! -e "$envfile" ] && ! volume_exists ||
+      fail 'Existing setup or SQLite volume detected; --init may only create fresh instances.'
+    provision_host_tls
+  fi
   if [ ! -e "$envfile" ]; then
     # Avoid requiring Node/npm/openssl on the host. Container writes the secret file.
     docker run --rm --network none --user "$(id -u):$(id -g)" \
@@ -332,10 +366,14 @@ until docker exec "$name" node -e "fetch('http://127.0.0.1:80/readyz').then(r=>p
   [ "$tries" -lt 40 ] || fail "Readiness failed. Check docker logs $name; data retained."
   sleep 1
 done
+if [ "$mode" = --init ] && [ "$tls_mode" = auto ]; then
+  curl -fsS --proto '=https' --max-redirs 0 --max-time 15 "$public_origin/readyz" >/dev/null ||
+    fail 'Backend is ready, but public HTTPS is unreachable or untrusted.'
+fi
 case "$public_origin" in
   https://*)
     echo "Ready: backend on 127.0.0.1:$port; HTTPS origin $public_origin (Admin password in $envfile)"
-    echo "HTTPS needs a valid certificate and reverse proxy at this origin; verify externally before enrolling Workers." ;;
+    echo "HTTPS origin: $public_origin (verify certificate and renewal before enrolling Workers)." ;;
   *)
     echo "Ready: legacy HTTP on 0.0.0.0:$port; public URL $public_origin (Admin password in $envfile)" ;;
 esac
