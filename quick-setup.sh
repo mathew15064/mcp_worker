@@ -57,6 +57,26 @@ if [ "$mode" = --down ]; then
   exit 0
 fi
 
+# Optional owner-provided signed distribution is separate from the server image.
+# This mount supplies bytes only; it never approves a signer or opens HTTP 503 routes.
+signed_dist_dir="${MCP_WORKER_SIGNED_DIST_DIR:-}"
+if [ -n "$signed_dist_dir" ]; then
+  case "$signed_dist_dir" in /*) ;; *) fail 'Signed distribution directory must be an absolute path.' ;; esac
+  [ -d "$signed_dist_dir" ] && [ ! -L "$signed_dist_dir" ] || fail 'Signed distribution directory missing or symlinked.'
+  [ "$(cd "$signed_dist_dir" && pwd -P)" = "$signed_dist_dir" ] || fail 'Signed distribution directory must use its canonical path.'
+  command -v sha256sum >/dev/null 2>&1 && command -v cmp >/dev/null 2>&1 || fail 'Signed distribution checks require sha256sum and cmp.'
+  for file in worker_mcp-linux-amd64 worker_mcp-linux-arm64 worker_mcp-linux-386 worker_mcp-linux-armv7 worker_mcp-darwin-amd64 worker_mcp-darwin-arm64 worker_mcp-windows-amd64.exe worker_mcp-windows-arm64.exe WORKER_RELEASE SHA256SUMS SHA256SUMS.sig; do
+    [ -f "$signed_dist_dir/$file" ] && [ ! -L "$signed_dist_dir/$file" ] && [ -s "$signed_dist_dir/$file" ] || fail "Signed distribution file missing, empty or symlinked: $file"
+  done
+  [ "$(find "$signed_dist_dir" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = 11 ] || fail 'Signed distribution directory must contain exactly eleven release files.'
+  (cd "$signed_dist_dir" && sha256sum worker_mcp-* WORKER_RELEASE | cmp -s - SHA256SUMS) || fail 'Signed distribution checksum inventory mismatch.'
+fi
+
+verify_signed_dist_mount() {
+  actual="$(docker inspect "$name" --format '{{range .Mounts}}{{if eq .Destination "/app/dist/worker/bin"}}{{.Source}}{{end}}{{end}}')"
+  [ "$actual" = "$signed_dist_dir" ] || fail 'Existing signed distribution mount differs; do not silently replace or remove it.'
+}
+
 # Preserve the original secrets and data if any part of a previous install exists.
 if [ ! -e "$envfile" ] && { volume_exists || container_exists; }; then
   fail 'Existing data/container but .env.setup is missing; restore credentials rather than regenerate.'
@@ -87,18 +107,23 @@ fi
 start_server() {
   run_image="$1"
   bind_host="${2:-0.0.0.0}"
-  docker run -d --name "$name" --init --restart unless-stopped \
+  set -- docker run -d --name "$name" --init --restart unless-stopped \
     --label mcp_worker.install=quick \
     --env-file "$envfile" -e NODE_ENV=production -e PORT=80 -e HOST=0.0.0.0 \
     -e TRUST_PROXY=false -e COOKIE_SECURE=false \
     -e "MCP_PUBLIC_BASE_URL=$public_origin" \
     --publish "$bind_host:$port:80" \
-    --mount "type=volume,src=$volume,dst=/app/data" "$run_image" >/dev/null
+    --mount "type=volume,src=$volume,dst=/app/data"
+  if [ -n "$signed_dist_dir" ]; then
+    set -- "$@" --mount "type=bind,src=$signed_dist_dir,dst=/app/dist/worker/bin,readonly"
+  fi
+  "$@" "$run_image" >/dev/null
 }
 
 if [ "$mode" = --rebind ]; then
   container_exists || fail 'No installed Quick Setup container to rebind.'
   verify_ownership
+  verify_signed_dist_mount
   attached_volume="$(docker inspect "$name" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Name}}{{end}}{{end}}')"
   [ "$attached_volume" = "$volume" ] || fail 'Unexpected SQLite volume; refusing to recreate container.'
   published="$(docker port "$name" 80/tcp)"
@@ -124,6 +149,7 @@ elif container_exists; then
   # An installed instance may restart even after the public dev-main tag moves.
   # Never pull a replacement automatically over an existing SQLite database.
   verify_ownership
+  verify_signed_dist_mount
 else
   case "${MCP_WORKER_PULL:-always}" in
     always) docker pull "$image" >/dev/null ;;
