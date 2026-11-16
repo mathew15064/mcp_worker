@@ -22,9 +22,15 @@ flowchart TD
 
 ## Quick Setup — image first, no source checkout
 
-Requires only Linux, Docker Engine and a small downloaded installer script. The server
-image is already compiled on Docker Hub: **no Git, Go, Node.js, npm or Compose build**
-required on the host.
+Requires a Debian/Ubuntu Linux VPS, Docker Engine and root permission for
+**automatic HTTPS**. Quick Setup installs Nginx (if needed), isolated Certbot
+5.4, a trusted IP/hostname certificate and a renewal timer. It never replaces
+an existing Nginx virtual host; use `MCP_WORKER_TLS_MODE=external` if an
+operator already manages TLS or runs another reverse proxy.
+The server image is precompiled on Docker Hub: no host Git, Go, Node.js,
+npm or Compose build is needed. Port **80** must be publicly reachable for
+Let's Encrypt HTTP-01, and HTTPS **443** or the chosen alternative TLS port
+must be open to clients.
 
 ```sh
 mkdir mcp_worker && cd mcp_worker
@@ -42,13 +48,26 @@ or the port explicitly selected via `MCP_WORKER_HTTPS_PORT`). With a hostname, s
 `MCP_WORKER_PUBLIC_IP`. The public origin is saved and **does not change
 automatically** on restart.
 
-**Important:** The Docker app listens only on `127.0.0.1:3333` when configured
-for HTTPS; the host still needs a trusted certificate and an HTTPS reverse
-proxy pointing at this backend. An HTTPS URL in `.env.setup` is **not proof
-that TLS is installed**. Set up the IP/hostname certificate and proxy before
-using public Admin, OAuth, or Worker WSS. IP certificates require a supported
-ACME client (Certbot 5.4+ for webroot) and automated renewal because they
-are short-lived. See [remote HTTPS guide](docs/REMOTE_MCP.md).
+**Automatic HTTPS (default):** After choosing the public IP or configured
+hostname, Quick Setup downloads a second, SHA-256-pinned helper over HTTPS,
+configures an exact Nginx virtual host, proves ACME control via staging,
+obtains a production certificate, and enables a four-hour renewal timer.
+The Docker backend binds only `127.0.0.1:3333`; the completed setup verifies
+`https://YOUR_IP_OR_HOST/readyz` with certificate checking enabled. IP
+certificates are short-lived (~160 hours). If DNS, firewall, certificate or
+Nginx validation fails, the setup refuses to report success or fall back to
+HTTP. Other Nginx sites are not replaced.
+
+If TLS is already handled elsewhere, choose external mode explicitly:
+
+```sh
+MCP_WORKER_PUBLIC_URL=https://mcp.example.com \
+  MCP_WORKER_TLS_MODE=external sh quick-setup.sh --init
+```
+
+In external mode, the operator must independently configure and verify the
+trusted certificate, reverse proxy, and renewals. Do not enroll a Worker
+until external HTTPS is working. See [remote HTTPS guide](docs/REMOTE_MCP.md).
 
 For an **existing HTTP Quick Setup installation** with a working trusted HTTPS
 reverse proxy, run a deliberate, recoverable cutover from its original setup
@@ -58,9 +77,11 @@ directory:
 MCP_WORKER_PUBLIC_URL=https://YOUR_IP:3443 sh quick-setup.sh --https
 ```
 
-This checks public TLS first, makes a consistent SQLite backup, updates the
+This auto-provisions TLS if the target is not yet reachable (or uses
+`MCP_WORKER_TLS_MODE=external` to leave proxy management to the owner),
+then validates public TLS, makes a consistent SQLite backup, updates the
 saved URL and database, and recreates only the container with loopback
-backend, secure cookies and trusted proxy hop. Do **not** use `--init` on an
+backend, secure cookies and a trusted proxy hop. Do **not** use `--init` on an
 existing SQLite volume; it refuses to reinitialize an orphaned volume.
 
 ```sh
