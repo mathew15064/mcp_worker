@@ -83,7 +83,7 @@ The server exposes exactly **15** authenticated tools:
 | Tests | `check_run` |
 | Managed processes | `process_start`, `process_status`, `process_logs`, `process_stop` |
 
-The legacy `bot_report.*` OAuth scopes, `BOT_REPORT_*` settings and `systemtd` Worker CLI names are retained for compatibility; the interactive SSH tools have been retired.
+The legacy `bot_report.*` OAuth scopes, `BOT_REPORT_*` settings are retained for compatibility; the Go Worker CLI is `worker_mcp`; the interactive SSH tools have been retired.
 
 ## Documentation and contributions
 

@@ -68,7 +68,7 @@ build_one windows arm64 arm64 .exe
 
 if [ "$(uname -s)" = Linux ] && [ "$(uname -m)" = x86_64 ]; then
   OUTPUT="$("$TEMP_DIR/bot-report-worker-linux-amd64" version)"
-  case "$OUTPUT" in "systemtd $TEST_VERSION commit=$SOURCE_COMMIT runtime="*) ;;
+  case "$OUTPUT" in "worker_mcp $TEST_VERSION commit=$SOURCE_COMMIT runtime="*) ;;
     *) echo "[T2] locally built Go binary returned unexpected version/commit" >&2; exit 1;;
   esac
   echo "[T2] PASS: PC Linux/amd64 executable embeds exact full source SHA"

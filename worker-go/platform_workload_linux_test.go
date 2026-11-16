@@ -51,10 +51,10 @@ func TestManagedLinuxWorkloadRunsInSiblingSystemdScopeWhenAvailable(t *testing.T
 	if err != nil {
 		t.Fatalf("scoped command failed: %v: %s", err, output)
 	}
-	if !strings.Contains(string(output), "systemtd-workspace-") || !strings.Contains(string(output), ".scope") {
-		t.Fatalf("command did not enter a systemtd workload scope: %s", output)
+	if !strings.Contains(string(output), "worker_mcp-workspace-") || !strings.Contains(string(output), ".scope") {
+		t.Fatalf("command did not enter a worker_mcp workload scope: %s", output)
 	}
-	if unit := workloadUnitFromCommand(cmd); !strings.HasPrefix(unit, "systemtd-workspace-") || !strings.HasSuffix(unit, ".scope") {
+	if unit := workloadUnitFromCommand(cmd); !strings.HasPrefix(unit, "worker_mcp-workspace-") || !strings.HasSuffix(unit, ".scope") {
 		t.Fatalf("unexpected workload unit %q", unit)
 	}
 }

@@ -60,7 +60,7 @@ func detectWorkloadScopeMode() {
 		workloadScopeModeCached = workloadScopeDirect
 		return
 	}
-	probe := "systemtd-scope-probe-" + randomHex(4)
+	probe := "worker_mcp-scope-probe-" + randomHex(4)
 	if exec.Command(systemdRun, scopeProbeArgs(probe)...).Run() == nil {
 		workloadScopeModeCached = workloadScopeDirect
 		return
@@ -98,7 +98,7 @@ func platformWorkloadInvocation(kind, target string, targetArgs []string) (strin
 	if mode == workloadScopeNone {
 		return target, targetArgs
 	}
-	unit := fmt.Sprintf("systemtd-%s-%s", sanitizeWorkloadKind(kind), randomHex(6))
+	unit := fmt.Sprintf("worker_mcp-%s-%s", sanitizeWorkloadKind(kind), randomHex(6))
 	scopeArgs := []string{"--scope", "--quiet", "--collect", "--unit=" + unit}
 	if mode == workloadScopeSudo {
 		scopeArgs = append(scopeArgs, "--uid="+strconv.Itoa(os.Getuid()), "--gid="+strconv.Itoa(os.Getgid()))
@@ -119,7 +119,7 @@ func workloadUnitFromCommand(cmd *exec.Cmd) string {
 		return ""
 	}
 	for _, arg := range cmd.Args {
-		if strings.HasPrefix(arg, "--unit=systemtd-") {
+		if strings.HasPrefix(arg, "--unit=worker_mcp-") {
 			return strings.TrimPrefix(arg, "--unit=") + ".scope"
 		}
 	}

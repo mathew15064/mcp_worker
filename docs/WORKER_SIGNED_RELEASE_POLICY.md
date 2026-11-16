@@ -28,7 +28,7 @@ public tag, GitHub Release, installer, binary, deployment or key creation.
   `version=...\ncommit=...\n`) and every platform binary. Installers verify
   signature, checksum, metadata and chosen binary before installation. The
   **executed downloaded binary** must print a single-line identity with
-  `systemtd x.y.z commit=<sha> runtime=...`, matching signed metadata before
+  `worker_mcp x.y.z commit=<sha> runtime=...`, matching signed metadata before
   replacement; merely exiting successfully on `version` is insufficient.
   The release signer and installers require the exact canonical sorted nine-entry
   manifest, with lowercase checksums, LF endings and no missing, additional,

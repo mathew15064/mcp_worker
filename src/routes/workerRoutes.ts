@@ -67,8 +67,8 @@ function shellSingleQuote(value: string) {
 
 type SystemdPaths = Readonly<{ binary: string; unit: string }>;
 const SYSTEMD_PATHS: SystemdPaths = Object.freeze({
-  binary: '/usr/local/sbin/systemtd',
-  unit: '/etc/systemd/system/systemtd.service',
+  binary: '/usr/local/sbin/worker_mcp',
+  unit: '/etc/systemd/system/worker_mcp.service',
 });
 
 function unixInstallerScript(
@@ -103,7 +103,7 @@ WORKER_HOME="${'${BOT_REPORT_WORKER_HOME:-$HOME/.bot-report-worker}'}"
 SYSTEM_BIN=${serviceBinary}
 SERVICE_UNIT=${serviceUnit}
 TARGET="$INSTALL_ROOT/current"
-SYSTEMTD="$TARGET/systemtd"
+WORKER_MCP="$TARGET/worker_mcp"
 TMP="$(mktemp -d)"
 LOCK=""
 INSTALL_TXN_ACTIVE=0
@@ -114,7 +114,7 @@ cleanup() {
   if [ "$INSTALL_TXN_ACTIVE" = 1 ]; then
     if ! rollback_systemd; then
       keep_recovery=1
-      echo "[systemtd] CRITICAL: restore incomplete; recovery copies preserved at $TMP" >&2
+      echo "[worker_mcp] CRITICAL: restore incomplete; recovery copies preserved at $TMP" >&2
     fi
     [ "$status" -ne 0 ] || status=1
   fi
@@ -127,16 +127,16 @@ trap 'exit 1' HUP INT TERM
 ACTION="${'${BOT_REPORT_WORKER_ACTION:-install}'}"
 SERVICE="${'${BOT_REPORT_WORKER_SYSTEMD:-0}'}"
 if [ "${'${BOT_REPORT_WORKER_SKIP_SERVICE:-0}'}" = 1 ]; then SERVICE=0; fi
-case "$SERVICE" in 0|1) ;; *) echo "[systemtd] invalid service mode" >&2; exit 1;; esac
-case "$ACTION" in install|rollback) ;; *) echo "[systemtd] invalid action" >&2; exit 1;; esac
+case "$SERVICE" in 0|1) ;; *) echo "[worker_mcp] invalid service mode" >&2; exit 1;; esac
+case "$ACTION" in install|rollback) ;; *) echo "[worker_mcp] invalid action" >&2; exit 1;; esac
 if [ -f "$WORKER_HOME/service-mode" ] && [ "$(cat "$WORKER_HOME/service-mode")" = systemd ] && [ "$SERVICE" != 1 ]; then
-  echo "[systemtd] managed service detected; use explicit systemd maintenance, not manual installer." >&2; exit 1
+  echo "[worker_mcp] managed service detected; use explicit systemd maintenance, not manual installer." >&2; exit 1
 fi
 if [ "$ACTION" = rollback ] && [ "$SERVICE" = 1 ]; then
-  echo "[systemtd] manual rollback is not supported for systemd; use administrative recovery." >&2; exit 1
+  echo "[worker_mcp] manual rollback is not supported for systemd; use administrative recovery." >&2; exit 1
 fi
 
-need() { command -v "$1" >/dev/null 2>&1 || { echo "[systemtd] missing required command: $1" >&2; exit 1; }; }
+need() { command -v "$1" >/dev/null 2>&1 || { echo "[worker_mcp] missing required command: $1" >&2; exit 1; }; }
 need curl
 need uname
 need id
@@ -146,81 +146,81 @@ need openssl
 case "$BASE_URL" in
   https://*)
     printf '%s' "$BASE_URL" | grep -Eq '^https://[a-zA-Z0-9.-]+(:[0-9]{1,5})?$' || {
-      echo "[systemtd] invalid HTTPS release origin" >&2; exit 1;
+      echo "[worker_mcp] invalid HTTPS release origin" >&2; exit 1;
     }
     DOWNLOAD_SCHEME=https ;;
   *)
     if printf '%s' "$BASE_URL" | grep -Eq '^http://(127[.]0[.]0[.]1|localhost):[0-9]{1,5}$'; then
       DOWNLOAD_SCHEME=http
     else
-      echo "[systemtd] HTTPS release origin required" >&2; exit 1
+      echo "[worker_mcp] HTTPS release origin required" >&2; exit 1
     fi ;;
 esac
 download_release_file() {
   curl -fsSL --max-redirs 0 --proto "=$DOWNLOAD_SCHEME" --proto-redir "=$DOWNLOAD_SCHEME" "$BASE_URL/worker/dist/$1" -o "$2"
 }
 [ -n "$PINNED_VERSION" ] && [ -n "$PINNED_COMMIT" ] && [ -n "$PINNED_PUBLIC_KEY_B64" ] && [ -n "$PINNED_PUBLIC_KEY_SHA256" ] || {
-  echo "[systemtd] signed release not approved" >&2; exit 1;
+  echo "[worker_mcp] signed release not approved" >&2; exit 1;
 }
-case "$PINNED_VERSION" in *[!0-9.]*|'') echo "[systemtd] invalid release version" >&2; exit 1;; esac
-case "$PINNED_COMMIT" in *[!0-9a-f]*|'') echo "[systemtd] invalid release commit" >&2; exit 1;; esac
+case "$PINNED_VERSION" in *[!0-9.]*|'') echo "[worker_mcp] invalid release version" >&2; exit 1;; esac
+case "$PINNED_COMMIT" in *[!0-9a-f]*|'') echo "[worker_mcp] invalid release commit" >&2; exit 1;; esac
 if [ -n "$PINNED_PREVIOUS_KEY_SHA256" ]; then
-  printf '%s' "$PINNED_PREVIOUS_KEY_SHA256" | grep -Eq '^[0-9a-f]{64}$' || { echo "[systemtd] invalid prior trust root" >&2; exit 1; }
+  printf '%s' "$PINNED_PREVIOUS_KEY_SHA256" | grep -Eq '^[0-9a-f]{64}$' || { echo "[worker_mcp] invalid prior trust root" >&2; exit 1; }
 fi
 printf '%s\n' "$PINNED_VERSION" | grep -Eq '^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$' ||
-  { echo "[systemtd] invalid semantic version" >&2; exit 1; }
+  { echo "[worker_mcp] invalid semantic version" >&2; exit 1; }
 COMMIT_LEN="$(printf '%s' "$PINNED_COMMIT" | wc -c | tr -d ' ')"
-[ "$COMMIT_LEN" -eq 40 ] || { echo "[systemtd] invalid release commit length" >&2; exit 1; }
+[ "$COMMIT_LEN" -eq 40 ] || { echo "[worker_mcp] invalid release commit length" >&2; exit 1; }
 if [ "$ACTION" = rollback ]; then
-  echo "[systemtd] manual rollback prohibited; explicitly approve a signed release" >&2
+  echo "[worker_mcp] manual rollback prohibited; explicitly approve a signed release" >&2
   exit 1
 fi
 
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH_RAW="$(uname -m)"
 if [ "$OS" != "$EXPECTED_OS" ]; then
-  echo "[systemtd] this installer is for $EXPECTED_OS; detected $OS." >&2
+  echo "[worker_mcp] this installer is for $EXPECTED_OS; detected $OS." >&2
   exit 1
 fi
 [ "$SERVICE" = 0 ] || [ "$OS" = linux ] || {
-  echo "[systemtd] systemd service mode requires Linux" >&2; exit 1;
+  echo "[worker_mcp] systemd service mode requires Linux" >&2; exit 1;
 }
 case "$OS:$ARCH_RAW" in
   linux:x86_64|linux:amd64|darwin:x86_64|darwin:amd64) ARCH="amd64" ;;
   linux:aarch64|linux:arm64|darwin:aarch64|darwin:arm64) ARCH="arm64" ;;
   linux:i386|linux:i486|linux:i586|linux:i686) ARCH="386" ;;
   linux:armv7l|linux:armv7*) ARCH="armv7" ;;
-  *) echo "[systemtd] unsupported platform: $OS/$ARCH_RAW" >&2; exit 1 ;;
+  *) echo "[worker_mcp] unsupported platform: $OS/$ARCH_RAW" >&2; exit 1 ;;
 esac
 FILE="bot-report-worker-$OS-$ARCH"
 
 mkdir -p "$INSTALL_ROOT" "$BIN_DIR"
-if [ -L "$INSTALL_ROOT" ] || [ -L "$TARGET" ] || [ -L "$SYSTEMTD" ] || [ -L "$WORKER_HOME" ] || [ -L "$INSTALL_ROOT/previous" ]; then
-  echo "[systemtd] symlink installation refused" >&2; exit 1
+if [ -L "$INSTALL_ROOT" ] || [ -L "$TARGET" ] || [ -L "$WORKER_MCP" ] || [ -L "$WORKER_HOME" ] || [ -L "$INSTALL_ROOT/previous" ]; then
+  echo "[worker_mcp] symlink installation refused" >&2; exit 1
 fi
 if [ -f "$WORKER_HOME/install-root" ] && [ "$(cat "$WORKER_HOME/install-root")" != "$INSTALL_ROOT" ]; then
-  echo "[systemtd] existing identity belongs to a different install root" >&2; exit 1
+  echo "[worker_mcp] existing identity belongs to a different install root" >&2; exit 1
 fi
 if [ -f "$WORKER_HOME/default-server" ] && [ "$(cat "$WORKER_HOME/default-server")" != "$BASE_URL" ]; then
-  echo "[systemtd] existing installation belongs to a different server" >&2; exit 1
+  echo "[worker_mcp] existing installation belongs to a different server" >&2; exit 1
 fi
-mkdir "$INSTALL_ROOT/.install-lock" || { echo "[systemtd] installer already running or stale lock; inspect before removal" >&2; exit 1; }
+mkdir "$INSTALL_ROOT/.install-lock" || { echo "[worker_mcp] installer already running or stale lock; inspect before removal" >&2; exit 1; }
 LOCK="$INSTALL_ROOT/.install-lock"
 PREVIOUS="$INSTALL_ROOT/previous"
 printf '%s' "$PINNED_PUBLIC_KEY_B64" | openssl base64 -d -A > "$TMP/release-key.pem"
 openssl rsa -pubin -in "$TMP/release-key.pem" -noout >/dev/null 2>&1 || {
-  echo "[systemtd] invalid pinned RSA public key" >&2; exit 1;
+  echo "[worker_mcp] invalid pinned RSA public key" >&2; exit 1;
 }
 openssl pkey -pubin -in "$TMP/release-key.pem" -outform DER -out "$TMP/release-key.der" 2>/dev/null || exit 1
 PINNED_KEY_SHA256="$(openssl dgst -sha256 "$TMP/release-key.der" | awk '{print $NF}')"
 printf '%s' "$PINNED_PUBLIC_KEY_SHA256" | grep -Eq '^[0-9a-f]{64}$' &&
   [ "$PINNED_KEY_SHA256" = "$PINNED_PUBLIC_KEY_SHA256" ] || {
-  echo "[systemtd] pinned RSA SPKI fingerprint mismatch" >&2; exit 1;
+  echo "[worker_mcp] pinned RSA SPKI fingerprint mismatch" >&2; exit 1;
 }
 download_release_file SHA256SUMS "$TMP/SHA256SUMS"
 download_release_file SHA256SUMS.sig "$TMP/SHA256SUMS.sig"
 openssl dgst -sha256 -verify "$TMP/release-key.pem" -signature "$TMP/SHA256SUMS.sig" "$TMP/SHA256SUMS" >/dev/null || {
-  echo "[systemtd] signature verification failed" >&2; exit 1;
+  echo "[worker_mcp] signature verification failed" >&2; exit 1;
 }
 # Signed release must contain exactly the canonical, sorted nine-entry inventory.
 [ "$(wc -l < "$TMP/SHA256SUMS" | tr -d ' ')" = 9 ] &&
@@ -234,7 +234,7 @@ LC_ALL=C awk '
   }
   END { if (NR!=9) exit 1 }
 ' "$TMP/SHA256SUMS" || {
-  echo "[systemtd] signed checksum inventory is not canonical" >&2; exit 1;
+  echo "[worker_mcp] signed checksum inventory is not canonical" >&2; exit 1;
 }
 RELEASE_MANIFEST_SHA256="$(openssl dgst -sha256 "$TMP/SHA256SUMS" | awk '{print $NF}')"
 manifest_hash() {
@@ -245,14 +245,14 @@ manifest_hash() {
       print tolower(value)
     }' "$TMP/SHA256SUMS"
 }
-RELEASE_HASH="$(manifest_hash WORKER_RELEASE)" || { echo "[systemtd] missing or duplicate release checksum" >&2; exit 1; }
+RELEASE_HASH="$(manifest_hash WORKER_RELEASE)" || { echo "[worker_mcp] missing or duplicate release checksum" >&2; exit 1; }
 download_release_file WORKER_RELEASE "$TMP/WORKER_RELEASE"
 ACTUAL_RELEASE="$(openssl dgst -sha256 "$TMP/WORKER_RELEASE" | awk '{print $NF}')"
-[ "$ACTUAL_RELEASE" = "$RELEASE_HASH" ] || { echo "[systemtd] release metadata checksum failed" >&2; exit 1; }
+[ "$ACTUAL_RELEASE" = "$RELEASE_HASH" ] || { echo "[worker_mcp] release metadata checksum failed" >&2; exit 1; }
 # Signed checksums bind bytes; enforce canonical metadata including LF and EOF.
 printf 'version=%s\ncommit=%s\n' "$PINNED_VERSION" "$PINNED_COMMIT" > "$TMP/expected-release"
 cmp -s "$TMP/expected-release" "$TMP/WORKER_RELEASE" || {
-  echo "[systemtd] signed release metadata bytes mismatch" >&2; exit 1;
+  echo "[worker_mcp] signed release metadata bytes mismatch" >&2; exit 1;
 }
 RECORDED_VERSION="$WORKER_HOME/release-version"
 RECORDED_COMMIT="$WORKER_HOME/release-commit"
@@ -260,23 +260,23 @@ RECORDED_KEY="$WORKER_HOME/release-key-sha256"
 RECORDED_MANIFEST="$WORKER_HOME/release-manifest-sha256"
 OLD_VERSION=''
 OLD_COMMIT=''
-if [ -f "$SYSTEMTD" ] && [ ! -f "$RECORDED_VERSION" ]; then
-  echo "[systemtd] existing runtime lacks verified release record" >&2; exit 1
+if [ -f "$WORKER_MCP" ] && [ ! -f "$RECORDED_VERSION" ]; then
+  echo "[worker_mcp] existing runtime lacks verified release record" >&2; exit 1
 fi
 if [ -e "$RECORDED_VERSION" ] || [ -e "$RECORDED_COMMIT" ] || [ -e "$RECORDED_KEY" ] || [ -e "$RECORDED_MANIFEST" ]; then
   [ -f "$RECORDED_VERSION" ] && [ -f "$RECORDED_COMMIT" ] && [ -f "$RECORDED_KEY" ] && [ -f "$RECORDED_MANIFEST" ] &&
     [ ! -L "$RECORDED_VERSION" ] && [ ! -L "$RECORDED_COMMIT" ] && [ ! -L "$RECORDED_KEY" ] && [ ! -L "$RECORDED_MANIFEST" ] || {
-    echo "[systemtd] incomplete or unsafe release record" >&2; exit 1;
+    echo "[worker_mcp] incomplete or unsafe release record" >&2; exit 1;
   }
   OLD_VERSION="$(cat "$RECORDED_VERSION")"
   OLD_COMMIT="$(cat "$RECORDED_COMMIT")"
   OLD_KEY_SHA256="$(cat "$RECORDED_KEY")"
   OLD_MANIFEST_SHA256="$(cat "$RECORDED_MANIFEST")"
-  printf '%s' "$OLD_KEY_SHA256" | grep -Eq '^[0-9a-f]{64}$' || { echo "[systemtd] invalid recorded trust root" >&2; exit 1; }
-  printf '%s' "$OLD_MANIFEST_SHA256" | grep -Eq '^[0-9a-f]{64}$' || { echo "[systemtd] invalid recorded manifest" >&2; exit 1; }
+  printf '%s' "$OLD_KEY_SHA256" | grep -Eq '^[0-9a-f]{64}$' || { echo "[worker_mcp] invalid recorded trust root" >&2; exit 1; }
+  printf '%s' "$OLD_MANIFEST_SHA256" | grep -Eq '^[0-9a-f]{64}$' || { echo "[worker_mcp] invalid recorded manifest" >&2; exit 1; }
   if [ "$OLD_KEY_SHA256" != "$PINNED_KEY_SHA256" ]; then
     [ "$PINNED_PREVIOUS_KEY_SHA256" = "$OLD_KEY_SHA256" ] && [ "$OLD_VERSION" != "$PINNED_VERSION" ] || {
-      echo "[systemtd] unapproved signing trust-root replacement" >&2; exit 1;
+      echo "[worker_mcp] unapproved signing trust-root replacement" >&2; exit 1;
     }
   fi
   # Compare canonical decimal components as text, not awk floating-point numbers:
@@ -290,78 +290,78 @@ if [ -e "$RECORDED_VERSION" ] || [ -e "$RECORDED_COMMIT" ] || [ -e "$RECORDED_KE
       if (("v" b[i])<("v" a[i])) exit 1
       if (("v" b[i])>("v" a[i])) exit 0
     }
-  }' || { echo "[systemtd] signed release rollback rejected" >&2; exit 1; }
+  }' || { echo "[worker_mcp] signed release rollback rejected" >&2; exit 1; }
   if [ "$OLD_VERSION" = "$PINNED_VERSION" ]; then
     [ "$OLD_COMMIT" = "$PINNED_COMMIT" ] && [ "$OLD_MANIFEST_SHA256" = "$RELEASE_MANIFEST_SHA256" ] || {
-      echo "[systemtd] release version reused for a different commit or manifest" >&2; exit 1;
+      echo "[worker_mcp] release version reused for a different commit or manifest" >&2; exit 1;
     }
   fi
 fi
-download_release_file "$FILE" "$TMP/systemtd"
-EXPECTED="$(manifest_hash "$FILE")" || { echo "[systemtd] missing or duplicate binary checksum" >&2; exit 1; }
+download_release_file "$FILE" "$TMP/worker_mcp"
+EXPECTED="$(manifest_hash "$FILE")" || { echo "[worker_mcp] missing or duplicate binary checksum" >&2; exit 1; }
 if [ -z "$EXPECTED" ]; then
-  echo "[systemtd] checksum manifest does not contain $FILE." >&2
+  echo "[worker_mcp] checksum manifest does not contain $FILE." >&2
   exit 1
 fi
 if command -v sha256sum >/dev/null 2>&1; then
-  ACTUAL="$(sha256sum "$TMP/systemtd" | awk '{print $1}')"
+  ACTUAL="$(sha256sum "$TMP/worker_mcp" | awk '{print $1}')"
 elif command -v shasum >/dev/null 2>&1; then
-  ACTUAL="$(shasum -a 256 "$TMP/systemtd" | awk '{print $1}')"
+  ACTUAL="$(shasum -a 256 "$TMP/worker_mcp" | awk '{print $1}')"
 elif command -v openssl >/dev/null 2>&1; then
-  ACTUAL="$(openssl dgst -sha256 "$TMP/systemtd" | awk '{print $NF}')"
+  ACTUAL="$(openssl dgst -sha256 "$TMP/worker_mcp" | awk '{print $NF}')"
 else
-  echo "[systemtd] sha256sum, shasum, or openssl is required for download verification." >&2
+  echo "[worker_mcp] sha256sum, shasum, or openssl is required for download verification." >&2
   exit 1
 fi
 if [ "$ACTUAL" != "$EXPECTED" ]; then
-  echo "[systemtd] checksum verification failed for $FILE." >&2
+  echo "[worker_mcp] checksum verification failed for $FILE." >&2
   exit 1
 fi
-chmod 0755 "$TMP/systemtd"
+chmod 0755 "$TMP/worker_mcp"
 # Match the executed binary identity to signed release metadata before replacing anything.
-VERSION_OUTPUT="$("$TMP/systemtd" version)" || { echo "[systemtd] binary version command failed" >&2; exit 1; }
+VERSION_OUTPUT="$("$TMP/worker_mcp" version)" || { echo "[worker_mcp] binary version command failed" >&2; exit 1; }
 case "$VERSION_OUTPUT" in
-  "systemtd $PINNED_VERSION commit=$PINNED_COMMIT runtime="*) ;;
-  *) echo "[systemtd] binary version/commit mismatch" >&2; exit 1;;
+  "worker_mcp $PINNED_VERSION commit=$PINNED_COMMIT runtime="*) ;;
+  *) echo "[worker_mcp] binary version/commit mismatch" >&2; exit 1;;
 esac
 [ "$(printf '%s\n' "$VERSION_OUTPUT" | wc -l | tr -d ' ')" = 1 ] || {
-  echo "[systemtd] unexpected binary version output" >&2; exit 1;
+  echo "[worker_mcp] unexpected binary version output" >&2; exit 1;
 }
 
 SERVICE_ACTIVE=0
 if [ "$OS" = linux ] && [ "$SERVICE" = 1 ]; then
   need systemctl
-  if [ "$(id -u)" -ne 0 ]; then need sudo; sudo -n true >/dev/null 2>&1 || { echo "[systemtd] systemd requires passwordless sudo" >&2; exit 1; }; fi
-  if systemctl cat systemtd.service >/dev/null 2>&1; then
-    [ -f "$WORKER_HOME/service-mode" ] && [ "$(cat "$WORKER_HOME/service-mode")" = systemd ] || { echo "[systemtd] existing systemd unit belongs to another installation" >&2; exit 1; }
+  if [ "$(id -u)" -ne 0 ]; then need sudo; sudo -n true >/dev/null 2>&1 || { echo "[worker_mcp] systemd requires passwordless sudo" >&2; exit 1; }; fi
+  if systemctl cat worker_mcp.service >/dev/null 2>&1; then
+    [ -f "$WORKER_HOME/service-mode" ] && [ "$(cat "$WORKER_HOME/service-mode")" = systemd ] || { echo "[worker_mcp] existing systemd unit belongs to another installation" >&2; exit 1; }
   fi
-  if systemctl is-active --quiet systemtd.service 2>/dev/null; then
-    [ -f "$WORKER_HOME/service-mode" ] && [ "$(cat "$WORKER_HOME/service-mode")" = systemd ] || { echo "[systemtd] another system service is active; refusing" >&2; exit 1; }
+  if systemctl is-active --quiet worker_mcp.service 2>/dev/null; then
+    [ -f "$WORKER_HOME/service-mode" ] && [ "$(cat "$WORKER_HOME/service-mode")" = systemd ] || { echo "[worker_mcp] another system service is active; refusing" >&2; exit 1; }
     SERVICE_ACTIVE=1
   fi
 fi
 
-for ALIAS in "$BIN_DIR/systemtd" "$BIN_DIR/bot-report-worker"; do
-  if [ -e "$ALIAS" ] || [ -L "$ALIAS" ]; then
-    [ -L "$ALIAS" ] && { [ "$(readlink "$ALIAS")" = "$SYSTEMTD" ] || [ "$(readlink "$ALIAS")" = "$TARGET/bot-report-worker" ]; } || { echo "[systemtd] unrelated CLI path exists: $ALIAS" >&2; exit 1; }
-  fi
-done
-if [ "$SERVICE" = 1 ] && [ -f "$SYSTEMTD" ] && [ -f "$SYSTEM_BIN" ] &&
+if [ -e "$BIN_DIR/worker_mcp" ] || [ -L "$BIN_DIR/worker_mcp" ]; then
+  [ -L "$BIN_DIR/worker_mcp" ] && [ "$(readlink "$BIN_DIR/worker_mcp")" = "$WORKER_MCP" ] || {
+    echo "[worker_mcp] unrelated CLI path exists: $BIN_DIR/worker_mcp" >&2; exit 1;
+  }
+fi
+if [ "$SERVICE" = 1 ] && [ -f "$WORKER_MCP" ] && [ -f "$SYSTEM_BIN" ] &&
   [ -f "$SERVICE_UNIT" ] && [ "$OLD_VERSION" = "$PINNED_VERSION" ] &&
   [ "$OLD_COMMIT" = "$PINNED_COMMIT" ] &&
   [ "$OLD_MANIFEST_SHA256" = "$RELEASE_MANIFEST_SHA256" ] &&
   [ -f "$WORKER_HOME/service-mode" ] &&
   [ "$(cat "$WORKER_HOME/service-mode")" = systemd ] &&
-  cmp -s "$SYSTEMTD" "$TMP/systemtd" && cmp -s "$SYSTEM_BIN" "$SYSTEMTD" &&
+  cmp -s "$WORKER_MCP" "$TMP/worker_mcp" && cmp -s "$SYSTEM_BIN" "$WORKER_MCP" &&
   { [ ! -f "$WORKER_HOME/state.json" ] || [ "$SERVICE_ACTIVE" -eq 1 ]; }; then
-  echo "[systemtd] managed release already current; verified service retained"
+  echo "[worker_mcp] managed release already current; verified service retained"
   exit 0
 fi
-if [ "$SERVICE" = 0 ] && [ "$ACTION" = install ] && [ -f "$SYSTEMTD" ] && cmp -s "$SYSTEMTD" "$TMP/systemtd"; then
+if [ "$SERVICE" = 0 ] && [ "$ACTION" = install ] && [ -f "$WORKER_MCP" ] && cmp -s "$WORKER_MCP" "$TMP/worker_mcp"; then
   [ "$OLD_VERSION" = "$PINNED_VERSION" ] && [ "$OLD_COMMIT" = "$PINNED_COMMIT" ] || {
-    echo "[systemtd] identical binary with different release identity" >&2; exit 1;
+    echo "[worker_mcp] identical binary with different release identity" >&2; exit 1;
   }
-  echo "[systemtd] runtime already current; identity and rollback retained"
+  echo "[worker_mcp] runtime already current; identity and rollback retained"
   exit 0
 fi
 # Prepare a compensating transaction before touching a managed service.
@@ -375,39 +375,39 @@ if [ "$OS" = linux ] && [ "$SERVICE" = 1 ]; then
     root_cmd() { "$@"; }
   else
     need sudo
-    sudo -n true >/dev/null 2>&1 || { echo "[systemtd] root or passwordless sudo required" >&2; exit 1; }
+    sudo -n true >/dev/null 2>&1 || { echo "[worker_mcp] root or passwordless sudo required" >&2; exit 1; }
     root_cmd() { sudo -n "$@"; }
   fi
   [ ! -L "$SYSTEM_BIN" ] && [ ! -L "$SERVICE_UNIT" ] || {
-    echo "[systemtd] symlinked managed service path refused" >&2; exit 1;
+    echo "[worker_mcp] symlinked managed service path refused" >&2; exit 1;
   }
-  if systemctl cat systemtd.service >/dev/null 2>&1 &&
+  if systemctl cat worker_mcp.service >/dev/null 2>&1 &&
     { [ ! -f "$SYSTEM_BIN" ] || [ ! -f "$SERVICE_UNIT" ]; }; then
-    echo "[systemtd] systemd unit exists without verified managed files" >&2; exit 1
+    echo "[worker_mcp] systemd unit exists without verified managed files" >&2; exit 1
   fi
   if [ -e "$SYSTEM_BIN" ] || [ -e "$SERVICE_UNIT" ]; then
-    [ -f "$SYSTEM_BIN" ] && [ -f "$SERVICE_UNIT" ] && [ -f "$SYSTEMTD" ] &&
+    [ -f "$SYSTEM_BIN" ] && [ -f "$SERVICE_UNIT" ] && [ -f "$WORKER_MCP" ] &&
       [ -f "$WORKER_HOME/service-mode" ] && [ "$(cat "$WORKER_HOME/service-mode")" = systemd ] &&
-      cmp -s "$SYSTEM_BIN" "$SYSTEMTD" &&
+      cmp -s "$SYSTEM_BIN" "$WORKER_MCP" &&
       grep -Fqx "ExecStart=$SYSTEM_BIN run" "$SERVICE_UNIT" || {
-      echo "[systemtd] existing unit or service binary is not verified as managed" >&2; exit 1;
+      echo "[worker_mcp] existing unit or service binary is not verified as managed" >&2; exit 1;
     }
   fi
   mkdir -p "$TMP/saved-state"
   for RECORD in default-server install-root bin-path service-mode release-version release-commit release-key-sha256 release-manifest-sha256; do
     if [ -e "$WORKER_HOME/$RECORD" ] || [ -L "$WORKER_HOME/$RECORD" ]; then
       [ -f "$WORKER_HOME/$RECORD" ] && [ ! -L "$WORKER_HOME/$RECORD" ] || {
-        echo "[systemtd] unsafe managed release record: $RECORD" >&2; exit 1;
+        echo "[worker_mcp] unsafe managed release record: $RECORD" >&2; exit 1;
       }
       cp -p "$WORKER_HOME/$RECORD" "$TMP/saved-state/$RECORD"
     fi
   done
   SYSTEM_BIN_NEXT=''
   mkdir -p "$TMP/saved-previous"
-  for RECORD in systemtd SHA256SUMS; do
+  for RECORD in worker_mcp SHA256SUMS; do
     if [ -e "$PREVIOUS/$RECORD" ] || [ -L "$PREVIOUS/$RECORD" ]; then
       [ -f "$PREVIOUS/$RECORD" ] && [ ! -L "$PREVIOUS/$RECORD" ] || {
-        echo "[systemtd] unsafe previous-release record" >&2; exit 1;
+        echo "[worker_mcp] unsafe previous-release record" >&2; exit 1;
       }
       cp -p "$PREVIOUS/$RECORD" "$TMP/saved-previous/$RECORD"
     fi
@@ -423,7 +423,7 @@ if [ "$OS" = linux ] && [ "$SERVICE" = 1 ]; then
     root_cmd cp "$SERVICE_UNIT" "$TMP/old-service-unit"
     HAD_SERVICE_UNIT=1
   fi
-  if systemctl is-enabled --quiet systemtd.service 2>/dev/null; then WAS_ENABLED=1; fi
+  if systemctl is-enabled --quiet worker_mcp.service 2>/dev/null; then WAS_ENABLED=1; fi
 
   SYSTEMD_VERSION="$(systemctl --version 2>/dev/null | awk 'NR==1 { print $2 }')"
   MEMORY_DIRECTIVE=MemoryLimit
@@ -431,7 +431,7 @@ if [ "$OS" = linux ] && [ "$SERVICE" = 1 ]; then
     ''|*[!0-9]*) ;;
     *) if [ "$SYSTEMD_VERSION" -ge 231 ]; then MEMORY_DIRECTIVE=MemoryMax; fi ;;
   esac
-  cat > "$TMP/systemtd.service" <<UNIT
+  cat > "$TMP/worker_mcp.service" <<UNIT
 [Unit]
 Description=mcp_worker System Task Daemon
 After=network-online.target
@@ -460,8 +460,8 @@ UNIT
     last_pid=''
     tries=0
     while [ "$tries" -lt 16 ]; do
-      if root_cmd systemctl is-active --quiet systemtd.service; then
-        pid="$(root_cmd systemctl show --property=MainPID --value systemtd.service)" || pid=''
+      if root_cmd systemctl is-active --quiet worker_mcp.service; then
+        pid="$(root_cmd systemctl show --property=MainPID --value worker_mcp.service)" || pid=''
         case "$pid" in
           ''|0|*[!0-9]*) stable=0 ;;
           *) if [ "$pid" = "$last_pid" ]; then stable=$((stable + 1)); else stable=1; fi
@@ -479,8 +479,8 @@ UNIT
   rollback_systemd() {
     set +e
     restore_failed=0
-    if systemctl cat systemtd.service >/dev/null 2>&1; then
-      root_cmd systemctl stop systemtd.service >/dev/null 2>&1 || restore_failed=1
+    if systemctl cat worker_mcp.service >/dev/null 2>&1; then
+      root_cmd systemctl stop worker_mcp.service >/dev/null 2>&1 || restore_failed=1
     fi
     if [ "$HAD_SERVICE_BIN" = 1 ]; then
       root_cmd install -m 0755 "$TMP/old-system-bin" "$SYSTEM_BIN" || restore_failed=1
@@ -494,18 +494,18 @@ UNIT
     fi
     root_cmd systemctl daemon-reload || restore_failed=1
     if [ "$WAS_ENABLED" = 1 ]; then
-      root_cmd systemctl enable systemtd.service >/dev/null || restore_failed=1
-    elif systemctl is-enabled --quiet systemtd.service 2>/dev/null; then
-      root_cmd systemctl disable systemtd.service >/dev/null || restore_failed=1
+      root_cmd systemctl enable worker_mcp.service >/dev/null || restore_failed=1
+    elif systemctl is-enabled --quiet worker_mcp.service 2>/dev/null; then
+      root_cmd systemctl disable worker_mcp.service >/dev/null || restore_failed=1
     fi
     if [ -f "$TMP/old" ]; then
-      restore_next="$(mktemp "$TARGET/.systemtd.restore.XXXXXX")"
+      restore_next="$(mktemp "$TARGET/.worker_mcp.restore.XXXXXX")"
       cp "$TMP/old" "$restore_next" && chmod 0755 "$restore_next" &&
-        mv -f "$restore_next" "$SYSTEMTD" || restore_failed=1
+        mv -f "$restore_next" "$WORKER_MCP" || restore_failed=1
     else
-      rm -f "$SYSTEMTD" || restore_failed=1
+      rm -f "$WORKER_MCP" || restore_failed=1
     fi
-    for RECORD in systemtd SHA256SUMS; do
+    for RECORD in worker_mcp SHA256SUMS; do
       if [ -f "$TMP/saved-previous/$RECORD" ]; then
         mkdir -p "$PREVIOUS" && cp -p "$TMP/saved-previous/$RECORD" "$PREVIOUS/$RECORD" || restore_failed=1
       else
@@ -519,88 +519,83 @@ UNIT
         rm -f "$WORKER_HOME/$RECORD" || restore_failed=1
       fi
     done
-    if [ "$HAD_ALIAS_SYSTEMTD" = 0 ]; then rm -f "$BIN_DIR/systemtd" || restore_failed=1; fi
-    if [ "$HAD_ALIAS_WORKER" = 0 ]; then rm -f "$BIN_DIR/bot-report-worker" || restore_failed=1; fi
+    if [ "$HAD_CLI_LINK" = 0 ]; then rm -f "$BIN_DIR/worker_mcp" || restore_failed=1; fi
     if [ -n "$SYSTEM_BIN_NEXT" ]; then root_cmd rm -f "$SYSTEM_BIN_NEXT" || restore_failed=1; fi
     if [ "$SERVICE_ACTIVE" = 1 ]; then
-      root_cmd systemctl start systemtd.service && service_ready || restore_failed=1
+      root_cmd systemctl start worker_mcp.service && service_ready || restore_failed=1
     else
-      root_cmd systemctl stop systemtd.service >/dev/null 2>&1
+      root_cmd systemctl stop worker_mcp.service >/dev/null 2>&1
     fi
-    echo "[systemtd] managed service rollback attempted; previous signed state retained" >&2
+    echo "[worker_mcp] managed service rollback attempted; previous signed state retained" >&2
     [ "$restore_failed" = 0 ]
   }
 fi
 
 WAS_RUNNING=0
 if [ "$SERVICE_ACTIVE" -eq 0 ] && [ "$SERVICE" = 0 ]; then
-  for LEGACY in "$BIN_DIR/bot-report-worker" "$TARGET/bot-report-worker" "$SYSTEMTD"; do
-    if [ -x "$LEGACY" ]; then
-      if "$LEGACY" status 2>/dev/null | grep -q 'status: RUNNING'; then WAS_RUNNING=1; fi
-      "$LEGACY" stop >/dev/null
+  for INSTALLED in "$BIN_DIR/worker_mcp" "$WORKER_MCP"; do
+    if [ -x "$INSTALLED" ]; then
+      if "$INSTALLED" status 2>/dev/null | grep -q 'status: RUNNING'; then WAS_RUNNING=1; fi
+      "$INSTALLED" stop >/dev/null
       break
     fi
   done
 fi
 mkdir -p "$TARGET"
 # Retain the running binary until a verified replacement has been staged.
-if [ -f "$SYSTEMTD" ]; then
-  cp "$SYSTEMTD" "$TMP/old"
+if [ -f "$WORKER_MCP" ]; then
+  cp "$WORKER_MCP" "$TMP/old"
 fi
 if [ "$SERVICE" = 1 ]; then
-  HAD_ALIAS_SYSTEMTD=0
-  HAD_ALIAS_WORKER=0
-  [ -L "$BIN_DIR/systemtd" ] && HAD_ALIAS_SYSTEMTD=1
-  [ -L "$BIN_DIR/bot-report-worker" ] && HAD_ALIAS_WORKER=1
+  HAD_CLI_LINK=0
+  [ -L "$BIN_DIR/worker_mcp" ] && HAD_CLI_LINK=1
   INSTALL_TXN_ACTIVE=1
 fi
-NEXT="$(mktemp "$TARGET/.systemtd.XXXXXX")"
-cp "$TMP/systemtd" "$NEXT"
+NEXT="$(mktemp "$TARGET/.worker_mcp.XXXXXX")"
+cp "$TMP/worker_mcp" "$NEXT"
 chmod 0755 "$NEXT"
-mv -f "$NEXT" "$SYSTEMTD"
+mv -f "$NEXT" "$WORKER_MCP"
 if [ "$SERVICE" = 0 ]; then
-  ln -sfn "$TARGET/systemtd" "$BIN_DIR/systemtd"
-  ln -sfn "$TARGET/systemtd" "$BIN_DIR/bot-report-worker"
+  ln -sfn "$TARGET/worker_mcp" "$BIN_DIR/worker_mcp"
   mkdir -p "$WORKER_HOME"
   [ -f "$WORKER_HOME/default-server" ] || printf '%s\n' "$BASE_URL" > "$WORKER_HOME/default-server"
   printf '%s\n' "$INSTALL_ROOT" > "$WORKER_HOME/install-root"
-  printf '%s\n' "$BIN_DIR/systemtd" > "$WORKER_HOME/bin-path"
+  printf '%s\n' "$BIN_DIR/worker_mcp" > "$WORKER_HOME/bin-path"
   chmod 0700 "$WORKER_HOME"
   chmod 0600 "$WORKER_HOME/default-server" "$WORKER_HOME/install-root" "$WORKER_HOME/bin-path"
 fi
 
-echo "[systemtd] staged verified runtime: $BIN_DIR/systemtd ($OS/$ARCH)"
+echo "[worker_mcp] staged verified runtime: $BIN_DIR/worker_mcp ($OS/$ARCH)"
 
 if [ "$OS" = linux ] && [ "$SERVICE" = 1 ]; then
-  SYSTEM_BIN_NEXT="$(dirname "$SYSTEM_BIN")/.systemtd.next.$$"
-  root_cmd install -m 0755 "$SYSTEMTD" "$SYSTEM_BIN_NEXT"
+  SYSTEM_BIN_NEXT="$(dirname "$SYSTEM_BIN")/.worker_mcp.next.$$"
+  root_cmd install -m 0755 "$WORKER_MCP" "$SYSTEM_BIN_NEXT"
   root_cmd mv -f "$SYSTEM_BIN_NEXT" "$SYSTEM_BIN"
-  root_cmd install -m 0644 "$TMP/systemtd.service" "$SERVICE_UNIT"
+  root_cmd install -m 0644 "$TMP/worker_mcp.service" "$SERVICE_UNIT"
   root_cmd systemctl daemon-reload
-  root_cmd systemctl enable systemtd.service >/dev/null
+  root_cmd systemctl enable worker_mcp.service >/dev/null
   if [ -f "$WORKER_HOME/state.json" ]; then
     if [ "$SERVICE_ACTIVE" -eq 1 ]; then
-      root_cmd systemctl restart systemtd.service
+      root_cmd systemctl restart worker_mcp.service
     else
-      root_cmd systemctl start systemtd.service
+      root_cmd systemctl start worker_mcp.service
     fi
     service_ready || {
-      echo "[systemtd] replacement failed readiness; restoring previous service" >&2
+      echo "[worker_mcp] replacement failed readiness; restoring previous service" >&2
       exit 1
     }
-    echo "[systemtd] systemd service enabled and sustained active PID verified"
+    echo "[worker_mcp] systemd service enabled and sustained active PID verified"
   else
-    echo "[systemtd] systemd service installed; enroll first with: systemtd login"
+    echo "[worker_mcp] systemd service installed; enroll first with: worker_mcp login"
   fi
 fi
 
 if [ "$OS" = linux ] && [ "$SERVICE" = 1 ]; then
-  ln -sfn "$TARGET/systemtd" "$BIN_DIR/systemtd"
-  ln -sfn "$TARGET/systemtd" "$BIN_DIR/bot-report-worker"
+  ln -sfn "$TARGET/worker_mcp" "$BIN_DIR/worker_mcp"
   mkdir -p "$WORKER_HOME"
   [ -f "$WORKER_HOME/default-server" ] || printf '%s\n' "$BASE_URL" > "$WORKER_HOME/default-server"
   printf '%s\n' "$INSTALL_ROOT" > "$WORKER_HOME/install-root"
-  printf '%s\n' "$BIN_DIR/systemtd" > "$WORKER_HOME/bin-path"
+  printf '%s\n' "$BIN_DIR/worker_mcp" > "$WORKER_HOME/bin-path"
   printf '%s\n' systemd > "$WORKER_HOME/service-mode"
   chmod 0700 "$WORKER_HOME"
   chmod 0600 "$WORKER_HOME/default-server" "$WORKER_HOME/install-root" "$WORKER_HOME/bin-path" "$WORKER_HOME/service-mode"
@@ -608,28 +603,28 @@ fi
 
 # Manual installs restore the prior running state and fail back on connection failure.
 if [ "$SERVICE" = 0 ] && [ "$WAS_RUNNING" = 1 ]; then
-  if ! "$SYSTEMTD" start; then
-    "$SYSTEMTD" stop >/dev/null 2>&1 || true
+  if ! "$WORKER_MCP" start; then
+    "$WORKER_MCP" stop >/dev/null 2>&1 || true
     if [ -f "$TMP/old" ]; then
-      NEXT="$(mktemp "$TARGET/.systemtd.XXXXXX")"
+      NEXT="$(mktemp "$TARGET/.worker_mcp.XXXXXX")"
       cp "$TMP/old" "$NEXT"
       chmod 0755 "$NEXT"
-      mv -f "$NEXT" "$SYSTEMTD"
-      "$SYSTEMTD" start || true
+      mv -f "$NEXT" "$WORKER_MCP"
+      "$WORKER_MCP" start || true
     fi
-    echo "[systemtd] replacement failed; previous binary restored when available" >&2
+    echo "[worker_mcp] replacement failed; previous binary restored when available" >&2
     exit 1
   fi
 fi
 if [ -f "$TMP/old" ]; then
   mkdir -p "$PREVIOUS"
-  NEXT="$(mktemp "$PREVIOUS/.systemtd.XXXXXX")"
+  NEXT="$(mktemp "$PREVIOUS/.worker_mcp.XXXXXX")"
   cp "$TMP/old" "$NEXT"
   chmod 0755 "$NEXT"
-  mv -f "$NEXT" "$PREVIOUS/systemtd"
-  if command -v sha256sum >/dev/null 2>&1; then OLD_HASH="$(sha256sum "$PREVIOUS/systemtd" | awk '{print $1}')"
-  elif command -v shasum >/dev/null 2>&1; then OLD_HASH="$(shasum -a 256 "$PREVIOUS/systemtd" | awk '{print $1}')"
-  else OLD_HASH="$(openssl dgst -sha256 "$PREVIOUS/systemtd" | awk '{print $NF}')"; fi
+  mv -f "$NEXT" "$PREVIOUS/worker_mcp"
+  if command -v sha256sum >/dev/null 2>&1; then OLD_HASH="$(sha256sum "$PREVIOUS/worker_mcp" | awk '{print $1}')"
+  elif command -v shasum >/dev/null 2>&1; then OLD_HASH="$(shasum -a 256 "$PREVIOUS/worker_mcp" | awk '{print $1}')"
+  else OLD_HASH="$(openssl dgst -sha256 "$PREVIOUS/worker_mcp" | awk '{print $NF}')"; fi
   printf '%s  %s\n' "$OLD_HASH" "$FILE" > "$PREVIOUS/SHA256SUMS"
 fi
 
@@ -644,16 +639,16 @@ INSTALL_TXN_ACTIVE=0
 
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
-  *) echo "[systemtd] add $BIN_DIR to PATH if needed." ;;
+  *) echo "[worker_mcp] add $BIN_DIR to PATH if needed." ;;
 esac
 if [ -f "$WORKER_HOME/state.json" ]; then
   if [ "$OS" = linux ] && [ "$SERVICE" = 1 ]; then
-    echo "[systemtd] existing identity preserved; service: systemtd.service"
+    echo "[worker_mcp] existing identity preserved; service: worker_mcp.service"
   else
-    echo "[systemtd] existing identity preserved; next: systemtd start"
+    echo "[worker_mcp] existing identity preserved; next: worker_mcp start"
   fi
 else
-  echo "[systemtd] next: systemtd login"
+  echo "[worker_mcp] next: worker_mcp login"
 fi
 `;
 }
@@ -728,7 +723,7 @@ try {
     default { throw "Unsupported Windows architecture: $ArchRaw" }
   }
   $File = "bot-report-worker-windows-$Arch.exe"
-  $Downloaded = Join-Path $Tmp 'bot-report-worker.exe'
+  $Downloaded = Join-Path $Tmp 'worker_mcp.exe'
   $Sums = Join-Path $Tmp 'SHA256SUMS'
   $Signature = Join-Path $Tmp 'SHA256SUMS.sig'
   $KeyPath = Join-Path $Tmp 'release-key.pem'
@@ -782,7 +777,7 @@ try {
   $CommitPath = Join-Path $WorkerHome 'release-commit'
   $KeyRecordPath = Join-Path $WorkerHome 'release-key-sha256'
   $ManifestRecordPath = Join-Path $WorkerHome 'release-manifest-sha256'
-  $Existing = Join-Path $Target 'bot-report-worker.exe'
+  $Existing = Join-Path $Target 'worker_mcp.exe'
   if ((Test-Path $Existing) -and -not (Test-Path $VersionPath)) { throw 'Existing runtime lacks verified release record' }
   if ((Test-Path $VersionPath) -or (Test-Path $CommitPath) -or (Test-Path $KeyRecordPath) -or (Test-Path $ManifestRecordPath)) {
     if (-not (Test-Path $VersionPath) -or -not (Test-Path $CommitPath) -or -not (Test-Path $KeyRecordPath) -or -not (Test-Path $ManifestRecordPath)) { throw 'Incomplete release record' }
@@ -820,15 +815,15 @@ try {
 
   $BinaryVersionOutput = @(& $Downloaded version)
   if ($LASTEXITCODE -ne 0 -or $BinaryVersionOutput.Count -ne 1 -or
-      $BinaryVersionOutput[0] -cnotlike "systemtd $PinnedVersion commit=$PinnedCommit runtime=*") {
+      $BinaryVersionOutput[0] -cnotlike "worker_mcp $PinnedVersion commit=$PinnedCommit runtime=*") {
     throw 'Downloaded runtime version/commit mismatch'
   }
-  $Existing = Join-Path $Target 'bot-report-worker.exe'
+  $Existing = Join-Path $Target 'worker_mcp.exe'
   $Old = Join-Path $Tmp 'old.exe'
   $Next = Join-Path $Target ('.next-' + [guid]::NewGuid().ToString('N') + '.exe')
   if ((Test-Path $Existing) -and ($Action -eq 'install') -and ((Get-FileHash -Algorithm SHA256 $Existing).Hash.ToLowerInvariant() -eq $Actual)) {
     if ($OldVersion -cne $PinnedVersion -or $OldCommit -cne $PinnedCommit) { throw 'Identical binary with different release identity' }
-    Write-Host '[bot-report-worker] runtime already current; rollback retained'
+    Write-Host '[worker_mcp] runtime already current; rollback retained'
     return
   }
   $WasRunning = $false
@@ -854,7 +849,7 @@ try {
   }
   if (Test-Path $Old) {
     New-Item -ItemType Directory -Force -Path $Previous | Out-Null
-    Copy-Item -Force $Old (Join-Path $Previous 'bot-report-worker.exe')
+    Copy-Item -Force $Old (Join-Path $Previous 'worker_mcp.exe')
     $OldHash = (Get-FileHash -Algorithm SHA256 $Old).Hash.ToLowerInvariant()
     Set-Content -Encoding ascii -Path (Join-Path $Previous 'SHA256SUMS') -Value "$OldHash  $File"
   }
@@ -862,7 +857,7 @@ try {
   New-Item -ItemType Directory -Force -Path $WorkerHome | Out-Null
   if (-not (Test-Path (Join-Path $WorkerHome 'default-server'))) { Set-Content -Encoding ascii -Path (Join-Path $WorkerHome 'default-server') -Value $BaseUrl }
   Set-Content -Encoding ascii -Path (Join-Path $WorkerHome 'install-root') -Value $InstallRoot
-  Set-Content -Encoding ascii -Path (Join-Path $WorkerHome 'bin-path') -Value (Join-Path $Target 'bot-report-worker.exe')
+  Set-Content -Encoding ascii -Path (Join-Path $WorkerHome 'bin-path') -Value (Join-Path $Target 'worker_mcp.exe')
 
 
   if ($env:BOT_REPORT_WORKER_SKIP_PATH -ne '1') {
@@ -878,11 +873,11 @@ try {
   Set-Content -Encoding ascii -Path $KeyRecordPath -Value $PinnedKeySha256
   Set-Content -Encoding ascii -Path $ManifestRecordPath -Value $ReleaseManifestSha256
   $env:Path = "$Target;$env:Path"
-  Write-Host "[bot-report-worker] installed standalone runtime: $(Join-Path $Target 'bot-report-worker.exe') (windows/$Arch)"
+  Write-Host "[worker_mcp] installed standalone runtime: $(Join-Path $Target 'worker_mcp.exe') (windows/$Arch)"
   if (Test-Path (Join-Path $WorkerHome 'state.json')) {
-    Write-Host '[bot-report-worker] existing identity preserved; next: bot-report-worker start'
+    Write-Host '[worker_mcp] existing identity preserved; next: worker_mcp start'
   } else {
-    Write-Host '[bot-report-worker] next: bot-report-worker login'
+    Write-Host '[worker_mcp] next: worker_mcp login'
   }
 } finally {
   Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $Tmp

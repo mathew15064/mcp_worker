@@ -1,4 +1,4 @@
-# System Task Daemon (systemtd) — mcp_worker Worker runtime
+# System Task Daemon (worker_mcp) — mcp_worker Worker runtime
 
 mcp_worker Worker now ships as a statically linked Go executable. The target machine does **not** need Node.js, npm, nvm, Python, Docker, or another language runtime. The Worker still initiates the outbound WebSocket connection to mcp_worker, so no inbound SSH port and no server-side SSH password are required.
 
@@ -44,7 +44,7 @@ Windows PowerShell:
 irm https://bot-report.example.com/worker/install.ps1 | iex
 ```
 
-Once an approved release is pinned, all installers download the matching binary from `/worker/dist/`, verify a mandatory signature and `SHA256SUMS`, preserve an existing Worker identity during upgrades, and print the next `login` or `start` command. Windows adds the managed `current` directory to the user PATH; Linux installs the OS-facing CLI as `systemtd` and keeps `bot-report-worker` as a compatibility symlink. The default is user-mode, without systemd or sudo. macOS keeps the standalone CLI flow for now.
+Once an approved release is pinned, all installers download the matching binary from `/worker/dist/`, verify a mandatory signature and `SHA256SUMS`, preserve an existing Worker identity during upgrades, and print the next `login` or `start` command. Windows adds the managed `current` directory to the user PATH; Linux installs the OS-facing CLI as `worker_mcp`; there is no legacy CLI alias. The default is user-mode, without systemd or sudo. macOS keeps the standalone CLI flow for now.
 
 ## Upgrade and rollback
 
@@ -157,7 +157,7 @@ so verify it via a trusted independent channel before execution.
 Run:
 
 ```bash
-systemtd login
+worker_mcp login
 ```
 
 Interactive login asks for the one-time enrollment token and allowed workspace roots. The token input is hidden. It then:
@@ -187,7 +187,7 @@ revalidation rather than instantaneously.
 Non-interactive example:
 
 ```bash
-systemtd login \
+worker_mcp login \
   --token 'br_enroll_...' \
   --name 'Dev Laptop' \
   --profile 'Dev Laptop'
@@ -196,13 +196,13 @@ systemtd login \
 ## Runtime commands
 
 ```bash
-systemtd version
-systemtd status
-systemtd logs
-systemtd stop
-systemtd start
-systemtd run
-systemtd uninstall
+worker_mcp version
+worker_mcp status
+worker_mcp logs
+worker_mcp stop
+worker_mcp start
+worker_mcp run
+worker_mcp uninstall
 ```
 
 Terminal operations use persistent local PTYs managed directly by the Worker. MCP terminal send/read/interrupt and browser **Attach Shell** share the same profile shell session without requiring tmux.
@@ -211,9 +211,9 @@ Terminal operations use persistent local PTYs managed directly by the Worker. MC
 
 ## Diagnose connectivity
 
-Run `systemtd status` and `systemtd version` to identify the local profile,
+Run `worker_mcp status` and `worker_mcp version` to identify the local profile,
 runtime and process status; check Workers in Admin for actual server-side
-online state. Use `systemtd logs` locally for TLS, authentication and
+online state. Use `worker_mcp logs` locally for TLS, authentication and
 reconnection errors. Review logs before sharing them; do not share tokens,
 private keys, configuration or workspace output. Verify the configured
 server URL, DNS/TLS and outbound HTTPS/WSS connectivity. A running local
@@ -227,7 +227,7 @@ The Go runtime intentionally uses the same JSON state/config schema and the same
 
 ```bash
 curl -fsSL https://bot-report.example.com/worker/install.sh | sh
-systemtd start
+worker_mcp start
 ```
 
 No new enrollment token is required.

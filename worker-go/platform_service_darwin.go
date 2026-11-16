@@ -3,7 +3,7 @@
 package main
 
 func platformStartManagedService() error {
-	return fail("WORKER_SERVICE_UNSUPPORTED", "Managed system service startup is not enabled for this macOS build yet; run systemtd start after login.")
+	return fail("WORKER_SERVICE_UNSUPPORTED", "Managed system service startup is not enabled for this macOS build yet; run worker_mcp start after login.")
 }
 
 func platformRestartManagedService() error {

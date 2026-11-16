@@ -237,12 +237,7 @@ void test(
     const arch = process.arch === 'arm64' ? 'arm64' : 'amd64';
     const file =
       'bot-report-worker-' + (win ? 'windows-' + arch + '.exe' : process.platform + '-' + arch);
-    const installed = path.join(
-      root,
-      'install',
-      'current',
-      win ? 'bot-report-worker.exe' : 'systemtd',
-    );
+    const installed = path.join(root, 'install', 'current', win ? 'worker_mcp.exe' : 'worker_mcp');
     const stateRoot = path.join(root, 'state');
     const tempHome = path.join(root, 'home');
     fs.mkdirSync(tempHome);
@@ -259,7 +254,7 @@ void test(
           'func main() {',
           ' if len(os.Args) < 2 { return }',
           ' switch os.Args[1] {',
-          ' case "version": fmt.Printf("systemtd %s commit=%s runtime=stub windows/amd64\\n", version, commit)',
+          ' case "version": fmt.Printf("worker_mcp %s commit=%s runtime=stub windows/amd64\\n", version, commit)',
           ' case "status": if os.Getenv("SIGNED_TEST_RUNNING") == "1" { fmt.Println("status: RUNNING") } else { fmt.Println("status: STOPPED") }',
           ' case "start": if os.Getenv("SIGNED_TEST_FAIL_START") == "1" { os.Exit(1) }',
           ' }',
@@ -290,7 +285,7 @@ void test(
         [
           '#!/bin/sh',
           'case "$1" in',
-          ' version) printf "systemtd ' +
+          ' version) printf "worker_mcp ' +
             version +
             ' commit=' +
             commit +
@@ -983,7 +978,7 @@ void test(
 );
 
 void test(
-  'disposable systemd upgrade restores binary, unit, aliases and signed records on failure',
+  'disposable systemd upgrade restores worker_mcp binary, unit and signed records on failure',
   {
     skip: process.platform !== 'linux' ? 'systemd shell simulation requires Linux' : false,
     timeout: 180000,
@@ -992,9 +987,9 @@ void test(
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-systemd-transaction-'));
     const key = signer();
     const file = 'bot-report-worker-linux-' + (process.arch === 'arm64' ? 'arm64' : 'amd64');
-    const target = path.join(root, 'install', 'current', 'systemtd');
-    const serviceBinary = path.join(root, 'fake-systemd', 'sbin', 'systemtd');
-    const serviceUnit = path.join(root, 'fake-systemd', 'units', 'systemtd.service');
+    const target = path.join(root, 'install', 'current', 'worker_mcp');
+    const serviceBinary = path.join(root, 'fake-systemd', 'sbin', 'worker_mcp');
+    const serviceUnit = path.join(root, 'fake-systemd', 'units', 'worker_mcp.service');
     const workerHome = path.join(root, 'identity');
     const mockState = path.join(root, 'mock-state');
     const mockBin = path.join(root, 'mock-bin');
@@ -1023,7 +1018,7 @@ void test(
         [
           '#!/bin/sh',
           'case "$1" in',
-          ' version) echo "systemtd ' +
+          ' version) echo "worker_mcp ' +
             version +
             ' commit=' +
             commit +
@@ -1056,12 +1051,12 @@ void test(
       ' stop) rm -f "$STATE/active";;',
       ' start|restart)',
       '   echo "$1" >> "$STATE/starts"',
-      '   if [ -f "$STATE/fail-start" ] && grep -Fq "systemtd 2.3.5 commit=" "$MOCK_SERVICE_BINARY"; then',
+      '   if [ -f "$STATE/fail-start" ] && grep -Fq "worker_mcp 2.3.5 commit=" "$MOCK_SERVICE_BINARY"; then',
       '     rm -f "$STATE/active"; exit 9',
       '   fi',
       '   touch "$STATE/active";;',
       ' show)',
-      '   if [ -f "$STATE/fail-ready" ] && grep -Fq "systemtd 2.3.6 commit=" "$MOCK_SERVICE_BINARY"; then',
+      '   if [ -f "$STATE/fail-ready" ] && grep -Fq "worker_mcp 2.3.6 commit=" "$MOCK_SERVICE_BINARY"; then',
       '     echo 0',
       '   else',
       '     echo 4321',
@@ -1151,7 +1146,7 @@ void test(
           hash(expected.sums) + '\n',
         );
         assert.equal(fs.existsSync(path.join(mockState, 'active')), isActive);
-        assert.equal(fs.readlinkSync(path.join(aliasBin, 'systemtd')), target);
+        assert.equal(fs.readlinkSync(path.join(aliasBin, 'worker_mcp')), target);
       }
       const first = await install(VERSION_A, COMMIT_A);
       assert.equal(first.code, 0, 'fresh managed installation: ' + first.output);
@@ -1198,7 +1193,7 @@ void test(
           const priorRecords = metadataPaths.map((name) =>
             fs.readFileSync(path.join(workerHome, name)),
           );
-          const previous = fs.readFileSync(path.join(root, 'install', 'previous', 'systemtd'));
+          const previous = fs.readFileSync(path.join(root, 'install', 'previous', 'worker_mcp'));
           active = packageC;
           fs.writeFileSync(path.join(mockState, 'fail-ready'), '');
           const failed = await install('2.3.6', commitC);
@@ -1208,7 +1203,7 @@ void test(
           signedState(packageB, VERSION_B, COMMIT_B, true);
           assert.deepEqual(fs.readFileSync(serviceUnit), priorUnit, 'original systemd unit');
           assert.deepEqual(
-            fs.readFileSync(path.join(root, 'install', 'previous', 'systemtd')),
+            fs.readFileSync(path.join(root, 'install', 'previous', 'worker_mcp')),
             previous,
             'previous rollback slot retained',
           );

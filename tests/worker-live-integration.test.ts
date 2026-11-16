@@ -101,7 +101,7 @@ void test(
     fs.mkdirSync(userHome, { recursive: true });
     const workerHome = path.join(userHome, '.bot-report-worker');
     const statePath = path.join(workerHome, 'state.json');
-    const cliPath = path.join(userHome, '.local', 'bin', 'bot-report-worker');
+    const cliPath = path.join(userHome, '.local', 'bin', 'worker_mcp');
     const cliEnv = {
       ...process.env,
       HOME: userHome,
@@ -189,7 +189,7 @@ void test(
     // verifies the cryptographic installer on each native runner.
     const installRoot = cliEnv.BOT_REPORT_WORKER_INSTALL_ROOT;
     const currentDir = path.join(installRoot, 'current');
-    const currentBinary = path.join(currentDir, 'systemtd');
+    const currentBinary = path.join(currentDir, 'worker_mcp');
     fs.mkdirSync(currentDir, { recursive: true });
     fs.mkdirSync(path.dirname(cliPath), { recursive: true });
     fs.mkdirSync(workerHome, { recursive: true });
@@ -199,12 +199,11 @@ void test(
     );
     fs.chmodSync(currentBinary, 0o755);
     fs.symlinkSync(currentBinary, cliPath);
-    fs.symlinkSync(currentBinary, path.join(path.dirname(cliPath), 'systemtd'));
     fs.writeFileSync(path.join(workerHome, 'default-server'), baseUrl + '\n');
     fs.writeFileSync(path.join(workerHome, 'install-root'), installRoot + '\n');
     fs.writeFileSync(
       path.join(workerHome, 'bin-path'),
-      path.join(path.dirname(cliPath), 'systemtd') + '\n',
+      path.join(path.dirname(cliPath), 'worker_mcp') + '\n',
     );
     assert.equal(fs.existsSync(cliPath), true, 'isolated test runtime must be executable');
 

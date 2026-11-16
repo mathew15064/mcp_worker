@@ -180,7 +180,7 @@ func parseArgs(args []string) (string, cliOptions, error) {
 	}
 	command := args[0]
 	if strings.HasPrefix(command, "-") {
-		return "", nil, fail("CLI_COMMAND_UNKNOWN", fmt.Sprintf("Unknown command '%s'. Run systemtd help.", command))
+		return "", nil, fail("CLI_COMMAND_UNKNOWN", fmt.Sprintf("Unknown command '%s'. Run worker_mcp help.", command))
 	}
 	options := cliOptions{}
 	flags := map[string]bool{"allow-shell": true, "no-start": true, "insecure-http": true}
@@ -452,7 +452,7 @@ func startDetached(wait bool) (int, error) {
 		return 0, err
 	}
 	if !ok1 || !ok2 || state.WorkerID == "" {
-		return 0, fail("WORKER_NOT_LOGGED_IN", "Run systemtd login first.")
+		return 0, fail("WORKER_NOT_LOGGED_IN", "Run worker_mcp login first.")
 	}
 	if pid := clearStalePID(); pid != 0 {
 		fmt.Printf("[bot-report-worker] already running pid=%d profile=%s\n", pid, cfg.ProfileName)
@@ -631,7 +631,7 @@ func login(options cliOptions) error {
 	fmt.Printf("[bot-report-worker] execution profile=%s roots=%s\n", cfg.ProfileName, strings.Join(roots, ","))
 	fmt.Printf("[bot-report-worker] shell execution=%s\n", map[bool]string{true: "ENABLED", false: "disabled"}[allowShell])
 	if options["no-start"] == "true" {
-		fmt.Println("[systemtd] enrollment complete; run systemtd start to connect.")
+		fmt.Println("[worker_mcp] enrollment complete; run worker_mcp start to connect.")
 		return nil
 	}
 	if serviceManaged() {
@@ -679,7 +679,7 @@ func printStatus() error {
 	fmt.Printf("runtime: go %s (%s/%s)\n", runtime.Version(), runtime.GOOS, runtime.GOARCH)
 	fmt.Printf("worker_version: %s commit=%s\n", version, commit)
 	if serviceManaged() {
-		fmt.Println("service: systemtd.service")
+		fmt.Println("service: worker_mcp.service")
 	}
 	fmt.Println("workload_isolation:", platformWorkloadIsolationStatus())
 	return nil
@@ -689,15 +689,15 @@ func printHelp() {
 	fmt.Printf(`mcp_worker System Task Daemon %s (standalone Go runtime)
 
 Usage:
-  systemtd login [options]
-  systemtd start
-  systemtd stop
-  systemtd restart
-  systemtd status
-  systemtd logs
-  systemtd run
-  systemtd uninstall
-  systemtd version
+  worker_mcp login [options]
+  worker_mcp start
+  worker_mcp stop
+  worker_mcp restart
+  worker_mcp status
+  worker_mcp logs
+  worker_mcp run
+  worker_mcp uninstall
+  worker_mcp version
 
 Login options:
   --server <url>       mcp_worker base URL (installer provides a default)
@@ -1350,7 +1350,7 @@ func buildCleanupPlanFor(runtimeDir, home string) (cleanupPlan, error) {
 	userHome, _ := os.UserHomeDir()
 	binPath := recordedBin
 	if binPath == "" {
-		binPath = filepath.Join(userHome, ".local", "bin", "bot-report-worker")
+		binPath = filepath.Join(userHome, ".local", "bin", "worker_mcp")
 	}
 	removeBin := false
 	if info, err := os.Lstat(binPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
@@ -1371,20 +1371,6 @@ func applyCleanupPlan(plan cleanupPlan) (map[string]any, error) {
 		_, _ = runFile("tmux", []string{"kill-session", "-t", "=" + plan.tmuxSession}, nil, 5*time.Second, 1024*1024)
 	}
 	if plan.removeBin {
-		// Remove only verified compatibility aliases pointing into this installation.
-		for _, name := range []string{"systemtd", "bot-report-worker"} {
-			alias := filepath.Join(filepath.Dir(plan.binPath), name)
-			if alias == plan.binPath {
-				continue
-			}
-			if info, err := os.Lstat(alias); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				if target, err := filepath.EvalSymlinks(alias); err == nil && isWithinRoot(target, plan.installRoot) {
-					if err := os.Remove(alias); err != nil {
-						return nil, err
-					}
-				}
-			}
-		}
 		if err := os.Remove(plan.binPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, err
 		}
@@ -1435,7 +1421,7 @@ func newAgent() (*Agent, error) {
 		return nil, err
 	}
 	if !ok1 || !ok2 || state.WorkerID == "" {
-		return nil, fail("WORKER_NOT_LOGGED_IN", "Run systemtd login first.")
+		return nil, fail("WORKER_NOT_LOGGED_IN", "Run worker_mcp login first.")
 	}
 	if cfg.ServerURL == "" {
 		return nil, fail("WORKER_CONFIG_INVALID", "Worker config is incomplete.")
@@ -1621,7 +1607,7 @@ func (a *Agent) executeOperationContext(ctx context.Context, operation string, p
 		return a.processStopContext(ctx, p)
 	case "worker.self_uninstall":
 		if serviceManaged() {
-			return nil, fail("WORKER_SERVICE_MANAGED", "Remote uninstall is refused while systemtd.service manages this Worker.")
+			return nil, fail("WORKER_SERVICE_MANAGED", "Remote uninstall is refused while worker_mcp.service manages this Worker.")
 		}
 		if payloadString(p, "confirm") != "REMOVE_THIS_WORKER" {
 			return nil, fail("WORKER_UNINSTALL_CONFIRMATION_REQUIRED", "Remote uninstall requires the fixed REMOVE_THIS_WORKER confirmation.")
@@ -2252,7 +2238,7 @@ func (a *Agent) shutdown() {
 
 func uninstallLocal() error {
 	if serviceManaged() {
-		return fail("WORKER_SERVICE_MANAGED", "systemtd is managed by systemtd.service; service-managed uninstall requires an explicit administrative service removal flow.")
+		return fail("WORKER_SERVICE_MANAGED", "worker_mcp is managed by worker_mcp.service; service-managed uninstall requires an explicit administrative service removal flow.")
 	}
 	if err := stopWorker(); err != nil {
 		return err
@@ -2338,7 +2324,7 @@ func main() {
 		printHelp()
 		return
 	case "version":
-		fmt.Printf("systemtd %s commit=%s runtime=%s %s/%s\n", version, commit, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+		fmt.Printf("worker_mcp %s commit=%s runtime=%s %s/%s\n", version, commit, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		return
 	case "login":
 		err = login(options)
@@ -2350,7 +2336,7 @@ func main() {
 		}
 	case "stop":
 		if serviceManaged() {
-			err = fail("WORKER_SERVICE_MANAGED", "systemtd is managed by systemtd.service; manual stop is refused to prevent accidental shutdown.")
+			err = fail("WORKER_SERVICE_MANAGED", "worker_mcp is managed by worker_mcp.service; manual stop is refused to prevent accidental shutdown.")
 		} else {
 			err = stopWorker()
 		}
@@ -2374,7 +2360,7 @@ func main() {
 	case "uninstall":
 		err = uninstallLocal()
 	default:
-		err = fail("CLI_COMMAND_UNKNOWN", fmt.Sprintf("Unknown command '%s'. Run systemtd help.", command))
+		err = fail("CLI_COMMAND_UNKNOWN", fmt.Sprintf("Unknown command '%s'. Run worker_mcp help.", command))
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[bot-report-worker] %s: %s\n", errorCode(err), err.Error())

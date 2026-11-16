@@ -14,7 +14,7 @@ for an isolated/custom installation.
 | DEGRADED | Check SQLite file integrity, local disk/volume permissions and schema version; preserve APP_ENCRYPTION_KEY. |
 | Login fails | Use the original installer env privately; check cookies, HTTPS/proxy settings and rate limits. |
 | MCP 401 / 403 | Check token expiry, client enabled state, consent owner, scopes and profile ownership. Reauthorize; do not bypass auth. |
-| Worker offline | Check systemtd status, systemtd logs, Admin online state, DNS/TLS and outbound WSS. Use explicit loopback HTTP only for local testing. |
+| Worker offline | Check worker_mcp status, worker_mcp logs, Admin online state, DNS/TLS and outbound WSS. Use explicit loopback HTTP only for local testing. |
 | Install checksum/signature failure | Stop; obtain matching artifacts and trusted key from an approved source. Never bypass integrity checks. |
 | Worker upgrade failure | Preserve identity/config; check previous runtime and connection. Follow Worker rollback instructions. |
 | Lost installer env | Restore the matching env and volumes from backup; do not regenerate secrets. |
@@ -25,8 +25,8 @@ Useful local diagnostics (review/redact output before sharing):
     docker compose --env-file .env.setup -p mcp_worker logs --tail=100 bot-report
     curl -fsS http://127.0.0.1:3333/healthz
     curl -fsS http://127.0.0.1:3333/readyz
-    systemtd version
-    systemtd status
+    worker_mcp version
+    worker_mcp status
 
 A process-health success is not database readiness or Worker authentication.
 Audit Log and runtime_info provide evidence for authenticated calls. If a

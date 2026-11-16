@@ -31,7 +31,7 @@ label() { docker image inspect --format "{{index .Config.Labels \"$1\"}}" "$imag
 runtime="$(docker run --rm --pull=never --network=none --read-only --entrypoint node "$image" --version)" || deny 'Node executable probe failed'
 [[ "$runtime" == v22.* ]] || deny 'runtime Node is not v22'
 worker="$(docker run --rm --pull=never --network=none --read-only --entrypoint /app/dist/worker/bin/bot-report-worker-linux-amd64 "$image" version)" || deny 'Worker executable probe failed'
-[[ "$worker" == "systemtd 2.3.4 commit=$sha runtime="* ]] || deny 'Worker binary embeds wrong source commit/version'
+[[ "$worker" == "worker_mcp 2.3.4 commit=$sha runtime="* ]] || deny 'Worker binary embeds wrong source commit/version'
 image_id="$(docker image inspect --format '{{.Id}}' "$image")"
 [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || deny 'invalid local image config ID'
 printf 'OCI_LOCAL_PASS flavor=%s revision=%s tree=%s node=%s go_builder=%s image_id=%s\n' "$flavor" "$sha" "$tree" "$runtime" "$go_base" "$image_id"

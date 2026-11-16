@@ -121,7 +121,7 @@ void test('unapproved curl installer fails closed without installing a Worker bi
     );
     assert.notEqual(result.code, 0, 'unapproved public install unexpectedly succeeded');
     assert.match(result.stderr, /(?:503|signed release not approved)/i);
-    assert.equal(fs.existsSync(path.join(installRoot, 'current', 'systemtd')), false);
+    assert.equal(fs.existsSync(path.join(installRoot, 'current', 'worker_mcp')), false);
     assert.equal(fs.existsSync(path.join(binDir, 'bot-report-worker')), false);
     assert.equal(fs.existsSync(path.join(env.BOT_REPORT_WORKER_HOME, 'state.json')), false);
   } finally {

@@ -179,8 +179,8 @@ async function main() {
       BOT_REPORT_WORKER_SKIP_SERVICE: '1',
     };
     const opts = { env, cwd: testRoot, uid, gid };
-    const current = path.join(install, 'current', 'systemtd');
-    const previous = path.join(install, 'previous', 'systemtd');
+    const current = path.join(install, 'current', 'worker_mcp');
+    const previous = path.join(install, 'previous', 'worker_mcp');
     async function run(args, extraEnv) {
       const result = await execute(args[0], args.slice(1), { ...opts, env: { ...env, ...extraEnv } });
       return result;
@@ -192,8 +192,8 @@ async function main() {
 
     requireSuccess(await run(['sh', installer]), 'signed user-mode fresh install');
     assert.equal(fingerprint(fs.readFileSync(current)), fingerprint(binaryA));
-    assert.equal(fs.readlinkSync(path.join(bin, 'systemtd')), current);
-    assert.equal(fs.readlinkSync(path.join(bin, 'bot-report-worker')), current);
+    assert.equal(fs.readlinkSync(path.join(bin, 'worker_mcp')), current);
+    assert.equal(fs.existsSync(path.join(bin, 'bot-report-worker')), false);
     const identityMarker = fs.readFileSync(path.join(state, 'install-root'), 'utf8');
     assert.equal(identityMarker.trim(), install);
     requireSuccess(await run([current, 'version']), 'installed native Go binary executes');
@@ -295,8 +295,8 @@ async function main() {
     requireSuccess(await run([current, 'uninstall']), 'native worker uninstall');
     assert.ok(!fs.existsSync(install), 'Installer-managed binaries not removed');
     assert.ok(!fs.existsSync(state), 'Worker state not removed');
-    assert.ok(!fs.existsSync(path.join(bin, 'systemtd')), 'CLI symlink not removed');
-    assert.ok(!fs.existsSync(path.join(bin, 'bot-report-worker')), 'Legacy CLI symlink not removed');
+    assert.ok(!fs.existsSync(path.join(bin, 'worker_mcp')), 'CLI symlink not removed');
+    assert.ok(!fs.existsSync(path.join(bin, 'bot-report-worker')), 'Legacy CLI symlink must never be created');
     console.log('PASS native Linux test-only signed lifecycle with nine-entry manifest; no production signer or server used');
   } finally {
     if (server) await new Promise(resolve => server.close(resolve));

@@ -539,7 +539,7 @@ func TestStandaloneCleanupPlanRemovesOnlyInstallerManagedPaths(t *testing.T) {
 	runtimeDir := filepath.Join(installRoot, "current")
 	workerStateHome := filepath.Join(userHome, ".bot-report-worker")
 	binDir := filepath.Join(userHome, ".local", "bin")
-	binPath := filepath.Join(binDir, "bot-report-worker")
+	binPath := filepath.Join(binDir, "worker_mcp")
 	if err := os.MkdirAll(runtimeDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -549,7 +549,7 @@ func TestStandaloneCleanupPlanRemovesOnlyInstallerManagedPaths(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	binaryPath := filepath.Join(runtimeDir, "bot-report-worker")
+	binaryPath := filepath.Join(runtimeDir, "worker_mcp")
 	if err := os.WriteFile(binaryPath, []byte("fixture"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -557,12 +557,6 @@ func TestStandaloneCleanupPlanRemovesOnlyInstallerManagedPaths(t *testing.T) {
 		binPath = binaryPath
 	} else if err := os.Symlink(binaryPath, binPath); err != nil {
 		t.Fatal(err)
-	}
-	aliasPath := filepath.Join(binDir, "systemtd")
-	if runtime.GOOS != "windows" {
-		if err := os.Symlink(binaryPath, aliasPath); err != nil {
-			t.Fatal(err)
-		}
 	}
 	if err := os.WriteFile(filepath.Join(workerStateHome, "install-root"), []byte(installRoot+"\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -589,7 +583,7 @@ func TestStandaloneCleanupPlanRemovesOnlyInstallerManagedPaths(t *testing.T) {
 		t.Fatalf("unexpected cleanup result: %#v", result)
 	}
 	deadline := time.Now().Add(6 * time.Second)
-	for _, target := range []string{workerStateHome, installRoot, binPath, aliasPath} {
+	for _, target := range []string{workerStateHome, installRoot, binPath} {
 		for {
 			_, statErr := os.Lstat(target)
 			if os.IsNotExist(statErr) {
