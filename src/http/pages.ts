@@ -705,7 +705,11 @@ function telegramPage({
 function trustedWorkerHttpsOrigin(origin: string): boolean {
   try {
     const parsed = new URL(origin);
-    return parsed.protocol === 'https:' && parsed.origin === origin;
+    return (
+      parsed.protocol === 'https:' &&
+      parsed.origin === origin &&
+      /^https:\/\/[A-Za-z0-9.-]+(?::[0-9]{1,5})?$/.test(origin)
+    );
   } catch {
     return false;
   }
