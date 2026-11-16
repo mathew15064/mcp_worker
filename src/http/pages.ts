@@ -702,6 +702,24 @@ function telegramPage({
   });
 }
 
+function trustedWorkerHttpsOrigin(origin: string): boolean {
+  try {
+    const parsed = new URL(origin);
+    return parsed.protocol === 'https:' && parsed.origin === origin;
+  } catch {
+    return false;
+  }
+}
+
+// Keep installer download failure observable: "curl | sh" can exit 0 on a failed curl.
+export function workerInstallCommand(origin: string, platform: 'linux' | 'macos' | 'windows') {
+  if (!trustedWorkerHttpsOrigin(origin)) throw new Error('Trusted HTTPS Worker origin required.');
+  const url = `${origin}/worker/install${platform === 'windows' ? '.ps1' : `-${platform}.sh`}`;
+  if (platform === 'windows')
+    return `& { $ErrorActionPreference = 'Stop'; $script = Invoke-RestMethod -Uri '${url}' -MaximumRedirection 0; if ([string]::IsNullOrWhiteSpace($script)) { throw 'Empty Worker installer' }; Invoke-Expression $script }`;
+  return String.raw`sh -c 'f=$(mktemp) || exit 1; trap "rm -f \\"$f\\"" EXIT; curl -fsSL --max-redirs 0 --proto "=https" "${url}" -o "$f" && test -s "$f" && sh "$f"'`;
+}
+
 function workersPage({
   workers = [],
   profiles = [],
@@ -790,11 +808,11 @@ function workersPage({
   const profileModal = `<div id="worker-profile-modal" class="modal-backdrop" aria-hidden="true"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="worker-profile-title" aria-describedby="worker-profile-description"><div class="modal-header"><h2 id="worker-profile-title">New Worker Profile</h2><p id="worker-profile-description">Bind a stable MCP profile alias to an enrolled Worker shell.</p></div><form method="post" action="${escapeHtml(routeBase)}/profiles" data-disable-on-submit><div class="modal-body"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><div class="form-grid"><div class="field"><label for="worker-profile-name">Name</label><input id="worker-profile-name" name="name" required maxlength="100" placeholder="Dev Laptop"></div>${workerField}<div class="field full"><label for="worker-profile-description-input">Description</label><input id="worker-profile-description-input" name="description" maxlength="500" placeholder="Local development worker"></div><div class="field full"><span class="field-label">Status</span><label class="switch-row" for="worker-profile-enabled"><span><strong>Enabled</strong><span class="hint">Allow MCP tools and MCP calls to run through this Worker.</span></span><input id="worker-profile-enabled" name="enabled" type="checkbox" value="true" checked><span class="switch-control" aria-hidden="true"></span></label></div></div></div><div class="modal-footer"><button class="btn" type="button" data-modal-close>Cancel</button><button class="btn btn-primary" type="submit">Create Profile</button></div></form></div></div>`;
   const workerEditModal = `<div id="worker-edit-modal" class="modal-backdrop" aria-hidden="true"><div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="worker-edit-title" aria-describedby="worker-edit-description"><div class="modal-header"><h2 id="worker-edit-title">Edit Worker name</h2><p id="worker-edit-description">Change the display name used in mcp_worker. Worker identity and profiles are not recreated.</p></div><form id="worker-edit-form" method="post" action="" data-disable-on-submit><div class="modal-body"><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><div class="field"><label for="worker-edit-name">Worker name</label><input id="worker-edit-name" name="name" required maxlength="100" autocomplete="off"></div></div><div class="modal-footer"><button class="btn" type="button" data-modal-close>Cancel</button><button class="btn btn-primary" type="submit">Save name</button></div></form></div></div>`;
   const workerBaseUrl = workerInstallUrl.replace(/\/worker\/install\.sh$/, '');
-  const linuxInstallCommand = `curl -fsSL ${workerBaseUrl}/worker/install-linux.sh | sh`;
-  const macInstallCommand = `curl -fsSL ${workerBaseUrl}/worker/install-macos.sh | sh`;
-  const windowsInstallCommand = `irm ${workerBaseUrl}/worker/install.ps1 | iex`;
-  const workerBaseIsHttps = workerBaseUrl.startsWith('https://');
+  const workerBaseIsHttps = trustedWorkerHttpsOrigin(workerBaseUrl);
   const directInstallAvailable = signedReleaseApproved && workerBaseIsHttps;
+  const linuxInstallCommand = directInstallAvailable ? workerInstallCommand(workerBaseUrl, 'linux') : '';
+  const macInstallCommand = directInstallAvailable ? workerInstallCommand(workerBaseUrl, 'macos') : '';
+  const windowsInstallCommand = directInstallAvailable ? workerInstallCommand(workerBaseUrl, 'windows') : '';
   const canEnroll = !accountUser || directInstallAvailable;
   const loginServer = workerBaseIsHttps ? workerBaseUrl : 'https://YOUR_MCP_DOMAIN';
   const devClone = 'git clone https://github.com/mathew15064/mcp_worker.git';
