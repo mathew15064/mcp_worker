@@ -81,8 +81,16 @@ if [ ! -x "$cb" ]; then
   /opt/mcp-worker-certbot/venv/bin/pip install --quiet --no-input --retries 2 --timeout 20 'certbot==5.4.0' ||
     deny 'Could not install isolated Certbot.'
 fi
-"$cb" --version | grep -Eq '^certbot (5[.][4-9][.]|[6-9][.])' ||
-  deny 'Certbot 5.4 or newer required.'
+cb_version="$("$cb" --version | awk '{print $2}')"
+case "$cb_version" in
+  5.*)
+    cb_minor="${cb_version#5.}"
+    cb_minor="${cb_minor%%.*}"
+    case "$cb_minor" in ''|*[!0-9]*) deny 'Cannot parse Certbot version.' ;; esac
+    [ "$cb_minor" -ge 4 ] || deny 'Certbot 5.4 or newer required.' ;;
+  [6-9].*|[1-9][0-9].*) ;;
+  *) deny 'Certbot 5.4 or newer required.' ;;
+esac
 for dir in "$cfg" "$work" "$logs"; do mkdir -p -m 0700 "$dir"; done
 # ACME challenge directories must be traversable by unprivileged Nginx workers.
 for dir in /var/www/certbot /var/www/certbot/.well-known /var/www/certbot/.well-known/acme-challenge; do
