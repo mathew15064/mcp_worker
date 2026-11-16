@@ -35,6 +35,7 @@ exit 88
           PATH: bin + path.delimiter + process.env.PATH,
           QUICK_ORIGIN_LOG: log,
           MCP_WORKER_IMAGE: 'fixture-not-pulled',
+          MCP_WORKER_TLS_MODE: 'external',
           MCP_WORKER_PUBLIC_URL: '',
           MCP_WORKER_PUBLIC_IP: '',
           MCP_WORKER_HTTPS_PORT: '',
@@ -56,6 +57,7 @@ exit 88
     assert.match(fs.readFileSync(log, 'utf8'), /MCP_PUBLIC_BASE_URL=https:\/\/mcp\.example\.com/);
 
     for (const [env, expected] of [
+      [{ MCP_WORKER_TLS_MODE: 'off' }, /MCP_WORKER_TLS_MODE must be auto or external/],
       [{ MCP_WORKER_PUBLIC_URL: 'http://mcp.example.com' }, /Explicit public URL must use HTTPS/],
       [{ MCP_WORKER_PUBLIC_URL: 'https://mcp.example.com/path' }, /bare IP\/hostname/],
       [{ MCP_WORKER_PUBLIC_IP: '192.168.1.20' }, /Private\/unusable host IP/],
