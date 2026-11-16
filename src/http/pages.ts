@@ -712,12 +712,12 @@ function trustedWorkerHttpsOrigin(origin: string): boolean {
 }
 
 // Keep installer download failure observable: "curl | sh" can exit 0 on a failed curl.
-export function workerInstallCommand(origin: string, platform: 'linux' | 'macos' | 'windows') {
+function workerInstallCommand(origin: string, platform: 'linux' | 'macos' | 'windows') {
   if (!trustedWorkerHttpsOrigin(origin)) throw new Error('Trusted HTTPS Worker origin required.');
   const url = `${origin}/worker/install${platform === 'windows' ? '.ps1' : `-${platform}.sh`}`;
   if (platform === 'windows')
     return `& { $ErrorActionPreference = 'Stop'; $script = Invoke-RestMethod -Uri '${url}' -MaximumRedirection 0; if ([string]::IsNullOrWhiteSpace($script)) { throw 'Empty Worker installer' }; Invoke-Expression $script }`;
-  return String.raw`sh -c 'f=$(mktemp) || exit 1; trap "rm -f \\"$f\\"" EXIT; curl -fsSL --max-redirs 0 --proto "=https" "${url}" -o "$f" && test -s "$f" && sh "$f"'`;
+  return String.raw`sh -c 'f=$(mktemp) || exit 1; trap "rm -f \"$f\"" EXIT; curl -fsSL --max-redirs 0 --proto "=https" "${url}" -o "$f" && test -s "$f" && sh "$f"'`;
 }
 
 function workersPage({
@@ -1039,6 +1039,7 @@ function errorPage(status: number, message: string) {
 }
 
 export = {
+  workerInstallCommand,
   onboardingPage,
   escapeHtml,
   loginPage,
