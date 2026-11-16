@@ -54,73 +54,30 @@ The project source is licensed under [MIT](LICENSE). Third-party components reta
 - [Release engineering](docs/RELEASE_ENGINEERING.md), [release checklist](docs/RELEASE_CHECKLIST.md) and [changelog](CHANGELOG.md)
 - [Administration and development reference](docs/ADMIN_REFERENCE.md), [contributing](CONTRIBUTING.md) and [security reporting](SECURITY.md)
 
-## Install from source with Docker (local only)
+## Install from source (local Docker)
 
-On a Linux host with Docker Engine, Compose v2, Git, OpenSSL and `flock`
-(plus `curl` for the optional health checks), with network access to fetch
-pinned base images and build dependencies:
+On Linux with Docker Engine, Compose v2, Git, OpenSSL, `flock` and Internet
+access for the pinned build dependencies:
 
 ```sh
 git clone https://github.com/mathew15064/mcp_worker.git
 cd mcp_worker
 ./setup.sh --init
-curl -fsS http://127.0.0.1:3333/healthz
-curl -fsS http://127.0.0.1:3333/readyz
 ```
 
-`./setup.sh --init` builds the app and bundled MySQL image from this source
-checkout, then explicitly initializes only an empty dedicated database.
-Open http://127.0.0.1:3333/admin and sign in as `admin`. Read the generated
-password privately from `.env.setup` (mode 0600). **Do not create a separate
-`.env` for Docker**, publish secrets, or expose this local HTTP port remotely.
-Back up `.env.setup` and both Docker data volumes together.
+Open http://127.0.0.1:3333/admin as `admin`. The installer generates the
+password and other persistent secrets in private `.env.setup`. **Do not
+create a separate `.env` for Docker, expose the local HTTP port, or delete
+data volumes.** Back up `.env.setup` and both named volumes together.
 
-Use `./setup.sh` to start an existing installation without initializing a
-database, and `./setup.sh --down` to stop without deleting secrets or volumes.
-Never use `docker compose down -v` to troubleshoot. For a fresh, isolated
-installation use separate `BOT_REPORT_SETUP_ENV`, `BOT_REPORT_SETUP_PROJECT`
-and `BOT_REPORT_SETUP_PORT` values; keep them consistent on subsequent runs.
+**Worker installer unavailable:** signed Go Worker distribution is not yet
+approved; `/worker/install*` and `/worker/dist/*` return HTTP 503.
+Do not bypass the signature gate.
 
-The Admin/MySQL setup works now, but **signed Go Worker downloads are not yet
-approved**: `/worker/install*` and `/worker/dist/*` return HTTP 503.
-Do not attempt a Worker installer or bypass the signing gate.
-See [source installation steps](docs/QUICKSTART.md),
-[manual Node development setup](docs/ADMIN_REFERENCE.md#developer-setup),
-and [backup/restore](docs/BACKUP_RESTORE.md).
-
-## Getting Started — first authenticated call
-
-After signing in, open **Getting Started** in Admin (or
-`/admin/onboarding`). The six-step checklist reads current MySQL readiness,
-MCP configuration, live global Worker profiles, active OAuth clients and
-successful runtime_info audit evidence. Refresh after each step. It does
-not change database configuration or issue credentials automatically.
-
-For a local-only first call, create an Admin OAuth client with the exact
-redirect URI `http://127.0.0.1:43871/callback` and only the
-`bot_report.read` scope. Save the one-time secret privately. On the same
-machine as the browser and standalone service, with Node.js 22 installed,
-install and build the optional local client helper (the Docker build does not
-create `dist/` on the host):
-
-```sh
-npm ci
-npm run build
-node dist/scripts/first-mcp-call.js http://127.0.0.1:3333
-```
-
-Enter the client ID and secret at the prompts (secret is hidden), open
-the printed authorization URL in your browser, sign in and approve Read
-access. The helper listens only on loopback for the PKCE callback, calls
-runtime_info and revokes its short-lived access token. It does not write
-credentials to disk. Refresh Getting Started or Audit Log to see evidence.
-If the callback port is in use, stop the conflicting local process or
-use a separate OAuth-capable MCP client; do not expose the callback port.
-
-A remote ChatGPT connector cannot reach your loopback URL. Configure HTTPS,
-a trusted reverse proxy, secure cookies and the public MCP base URL before
-using a remote connector. Register its exact callback URI (not the local
-helper URI). Add terminal scope only after reviewing Worker permissions.
+For prerequisites, health checks, stopping/restarting, recovery and the
+optional local OAuth call, follow the **[source installation quickstart](docs/QUICKSTART.md)**.
+Manual Node development: [Admin reference](docs/ADMIN_REFERENCE.md#developer-setup).
+Remote connections: [HTTPS and MCP](docs/REMOTE_MCP.md).
 
 ## Core MCP tools
 
