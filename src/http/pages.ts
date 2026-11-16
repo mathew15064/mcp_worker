@@ -814,7 +814,7 @@ function workersPage({
     : '';
   const enrollmentAction = canEnroll
     ? `<button class="btn btn-primary" type="button" data-modal-open="worker-enrollment-modal">${icon('plus')} Install / Connect Worker</button>`
-    : '<span role="status" class="badge badge-off">Signed Worker release approval pending — enrollment unavailable</span>';
+    : `<span role="status" class="badge badge-off">${signedReleaseApproved ? 'Trusted HTTPS Worker endpoint required — enrollment unavailable' : 'Signed Worker release approval pending — enrollment unavailable'}</span>`;
   const actions = `<div style="display:flex;gap:8px;flex-wrap:wrap"><a class="btn" href="${escapeHtml(routeBase)}" aria-label="Refresh workers">${icon('refresh')} Refresh</a>${enrollmentAction}${profileAction}</div>`;
   const workerToolbar = `<div class="toolbar"><div class="search">${icon('search')}<input class="input" type="search" aria-label="Search workers" data-table-search="workers-table" placeholder="Search workers, status, capabilities..."></div><div style="display:flex;gap:6px;flex-wrap:wrap"><span class="badge badge-off">${workers.length} total</span><span class="badge badge-ok" data-worker-count="online">${onlineCount} online</span><span class="badge badge-off" data-worker-count="offline">${offlineCount} offline</span><span class="badge badge-off" data-worker-count="disabled">${disabledCount} disabled</span></div></div>`;
   const profileToolbar = `<div class="toolbar"><div class="search">${icon('search')}<input class="input" type="search" aria-label="Search worker profiles" data-table-search="worker-profiles-table" placeholder="Search profiles and workers..."></div><span class="badge badge-off">${profiles.length} profiles</span></div>`;
