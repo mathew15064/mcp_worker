@@ -1,61 +1,67 @@
-// Only invoked by the standalone installer after explicit --init consent.
-// Never run migrations on a nonempty database or replace an existing bootstrap.
+// Explicit, non-destructive SQLite initialization for ./setup.sh --init.
 import fs from 'node:fs';
-import store from '../src/db/bootstrapConfigStore';
+import path from 'node:path';
+import config from '../src/config/env';
 import manager from '../src/db/databaseManager';
-import { MysqlAdapter } from '../src/db/adapters/mysqlAdapter';
-import { MigrationRunner } from '../src/db/migrationRunner';
-import settings from '../src/services/runtimeSettingsService';
+import { getDb, closeDb } from '../src/db/connection';
+import { runMigrations } from '../src/db/migrations';
+import { seedInitialAdmin } from '../src/db/seed';
+import { assertRailwaySqliteSchema } from '../src/db/sqliteSchemaValidation';
 
 async function main() {
-  if (process.argv[2] !== '--init-fresh')
-    throw new Error('Explicit fresh initialization consent required');
-  if (store.exists()) {
+  if (process.argv[2] !== '--init-fresh') {
+    throw new Error('Explicit initialization requires --init-fresh');
+  }
+  const oldBootstrap = path.resolve(
+    process.cwd(),
+    process.env.BOOTSTRAP_CONFIG_PATH || 'data/bootstrap-config.json',
+  );
+  if (fs.existsSync(oldBootstrap)) {
+    throw new Error('Obsolete database bootstrap detected; use a clean SQLite data directory.');
+  }
+  const target = config.DATABASE_PATH;
+  if (fs.existsSync(target)) {
     await manager.initialize();
-    if (!manager.isMysqlReady())
-      throw new Error('Existing bootstrap is not ready; use Admin database recovery.');
-    console.log('Existing ready bootstrap preserved.');
+    if (!manager.isSqlReady()) throw new Error('Existing SQLite is not ready; data preserved.');
+    console.log('Existing ready SQLite database preserved.');
     return;
   }
-  if (fs.existsSync(store.path) || manager.legacyAvailable())
-    throw new Error('Existing local database state; use Admin database workflow.');
-  const password = process.env.BUNDLED_MYSQL_PASSWORD;
-  if (!password) throw new Error('Bundled database credentials missing');
-  const input = {
-    host: 'mysql',
-    port: 3306,
-    database: 'bot_report',
-    username: 'bot_report',
-    password,
-  };
-  const adapter = MysqlAdapter.create(input);
-  try {
-    await adapter.ping();
-    const row = await adapter.queryOne<{ count: number }>(
-      'SELECT COUNT(*) AS count FROM information_schema.tables WHERE table_schema = DATABASE()',
+  const parent = path.dirname(target);
+  if (fs.realpathSync(parent) !== parent) throw new Error('SQLite directory symlink refused.');
+  // The container entrypoint also sets umask 077. Never publish a readable DB.
+  process.umask(0o077);
+  const db = getDb();
+  db.transaction(() => {
+    runMigrations(db);
+    seedInitialAdmin(db);
+    assertRailwaySqliteSchema(db);
+    db.exec(
+      'CREATE TABLE IF NOT EXISTS railway_schema_versions (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)',
     );
-    if (Number(row?.count || 0) !== 0)
-      throw new Error('Nonempty database refused; use Admin database workflow.');
-    await new MigrationRunner(adapter).migrate();
-    await settings.seedDefaults(adapter);
-    store.save(input);
-    console.log('Fresh bundled MySQL initialized.');
-  } finally {
-    await adapter.close();
+    db.prepare('INSERT INTO railway_schema_versions(version, applied_at) VALUES (?, ?)').run(
+      '2026-11-12-initial',
+      new Date().toISOString(),
+    );
+  })();
+  if (
+    db.pragma('integrity_check', { simple: true }) !== 'ok' ||
+    (db.pragma('foreign_key_check') as unknown[]).length
+  ) {
+    throw new Error('SQLite integrity validation failed; database preserved for inspection.');
   }
+  fs.chmodSync(target, 0o600);
+  console.log('Fresh SQLite initialized.');
 }
+
 main()
   .catch((error: unknown) => {
-    const detail =
-      error && typeof error === 'object' ? (error as { code?: string; message?: string }) : {};
-    // Never print a connection string or arbitrary driver diagnostics.
     console.error(
-      'Bundled initialization failed: ' +
-        (detail.code ||
-          (detail.message?.startsWith('Existing') || detail.message?.startsWith('Nonempty')
-            ? detail.message
-            : 'check database connectivity and state')),
+      'SQLite initialization refused: ' +
+        (error instanceof Error ? error.message : 'unknown error'),
     );
     process.exitCode = 1;
   })
-  .finally(() => manager.close());
+  .finally(async () => {
+    await manager.close();
+    closeDb();
+  });

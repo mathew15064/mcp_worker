@@ -24,7 +24,7 @@ case "$envfile" in */*) fail "Invalid env file path." ;; esac
 exec 9>"$envfile.lock"
 flock -n 9 || fail "Another setup is running."
 # Compose shell variables take precedence over env-file; refuse implicit secret overrides.
-unset ADMIN_PASSWORD SESSION_SECRET APP_ENCRYPTION_KEY MYSQL_PASSWORD MYSQL_ROOT_PASSWORD COMPOSE_PROJECT_NAME
+unset ADMIN_PASSWORD SESSION_SECRET APP_ENCRYPTION_KEY COMPOSE_PROJECT_NAME
 project="${BOT_REPORT_SETUP_PROJECT:-mcp_worker}"
 port="${BOT_REPORT_SETUP_PORT:-3333}"
 case "$project" in ''|*[!a-z0-9_-]*|[-_]*) fail "Invalid Compose project name." ;; esac
@@ -52,14 +52,16 @@ if [ ! -e "$envfile" ]; then
     printf 'ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 24)"
     printf 'SESSION_SECRET=%s\n' "$(openssl rand -hex 32)"
     printf 'APP_ENCRYPTION_KEY=%s\n' "$(openssl rand -base64 32)"
-    printf 'MYSQL_PASSWORD=%s\n' "$(openssl rand -hex 32)"
-    printf 'MYSQL_ROOT_PASSWORD=%s\n' "$(openssl rand -hex 32)"
   } > "$tmp"
   chmod 600 "$tmp"
   mv "$tmp" "$envfile"
   trap - EXIT HUP INT TERM
 fi
 [ -f "$envfile" ] || fail "Installer env is not a regular file."
+# Never relaunch an old two-volume deployment as an empty SQLite instance.
+if grep -Eq '^MYSQL_(PASSWORD|ROOT_PASSWORD)=' "$envfile"; then
+  fail "Legacy MySQL installer config detected. Preserve this file; migrate and verify a copy before switching."
+fi
 chmod 600 "$envfile"
 # Read only non-secret values; never source the file as shell code.
 project=$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' "$envfile")
@@ -67,6 +69,9 @@ port=$(sed -n 's/^BOT_REPORT_PORT=//p' "$envfile")
 case "$project" in ''|*[!a-z0-9_-]*|[-_]*) fail "Invalid saved project." ;; esac
 case "$port" in ''|*[!0-9]*) fail "Invalid saved port." ;; esac
 [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || fail "Invalid saved port."
+if docker volume inspect "${project}_mysql-data" >/dev/null 2>&1; then
+  fail "Legacy MySQL volume detected. Preserve it and follow the offline migration runbook; no automatic cutover."
+fi
 export BOT_REPORT_GIT_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 export BOT_REPORT_TREE_SHA="$(git rev-parse 'HEAD^{tree}' 2>/dev/null || echo unknown)"
 export BOT_REPORT_BUILD_TIME="$(git show -s --format=%cI HEAD 2>/dev/null || echo unknown)"

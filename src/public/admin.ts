@@ -13,11 +13,6 @@ interface WorkerStatusResponse {
   workers: WorkerStatus[];
   probe?: WorkerProbe | null;
 }
-interface ApiError {
-  message?: string;
-  duration_ms?: number;
-  version?: string;
-}
 (() => {
   'use strict';
 
@@ -608,50 +603,6 @@ interface ApiError {
       setSidebar(false);
       mobileMenu?.focus();
     }
-  });
-
-  $$<HTMLButtonElement>('[data-test-database]').forEach((button) => {
-    const testDatabase = async () => {
-      const form = button.form;
-      if (!form) return;
-      const original = button.innerHTML;
-      button.disabled = true;
-      button.textContent = 'Testing…';
-      try {
-        const response = await fetch(button.formAction, {
-          method: 'POST',
-          headers: { Accept: 'application/json' },
-          body: new URLSearchParams(
-            [...new FormData(form).entries()].map(([key, value]) => [
-              key,
-              typeof value === 'string' ? value : value.name,
-            ]),
-          ),
-        });
-        const payload = (await response.json().catch(() => ({}))) as ApiError;
-        if (!response.ok) throw new Error(payload.message || 'MySQL connection failed.');
-        toast(
-          'success',
-          'MySQL connection successful',
-          `${payload.version || 'MySQL'} · ${payload.duration_ms ?? '—'} ms`,
-        );
-      } catch (error) {
-        toast(
-          'error',
-          'MySQL connection failed',
-          error instanceof Error ? error.message : 'Unable to connect to MySQL.',
-        );
-      } finally {
-        button.disabled = false;
-        button.innerHTML = original || '';
-      }
-    };
-    button.addEventListener('click', (event) => {
-      event.preventDefault();
-      void testDatabase().catch(() =>
-        toast('error', 'MySQL connection failed', 'Unable to verify the database connection.'),
-      );
-    });
   });
 
   // Read-only checks: no installer body is downloaded or executed, and no

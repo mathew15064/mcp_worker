@@ -51,6 +51,36 @@ function validateDatabase(db: Database.Database): string {
   if (versions.length !== 1 || versions[0].version !== SCHEMA) {
     throw new Error('Unsupported Railway SQLite schema version');
   }
+  if (process.env.BACKUP_STANDALONE_SQLITE === '1' && process.env.MCP_PLATFORM !== 'railway') {
+    // Standalone administrators authenticate through the retained ENV secret,
+    // not Railway's database-backed owner claim. Validate full schema instead.
+    const tableNames = new Set(
+      (
+        db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
+      ).map((row) => row.name),
+    );
+    for (const name of [
+      'users',
+      'sessions',
+      'system_settings',
+      'workers',
+      'worker_profiles',
+      'worker_enrollment_tokens',
+      'mcp_oauth_clients',
+      'mcp_oauth_authorization_codes',
+      'mcp_oauth_access_tokens',
+      'mcp_oauth_refresh_tokens',
+      'mcp_request_audit',
+      'terminal_profiles',
+      'terminal_connection_audit',
+    ]) {
+      if (!tableNames.has(name)) throw new Error('Standalone SQLite schema missing required table');
+    }
+    if ((db.pragma('foreign_key_check') as unknown[]).length) {
+      throw new Error('SQLite foreign key check failed');
+    }
+    return versions[0].version;
+  }
   const owner = db
     .prepare("SELECT value FROM system_settings WHERE key='bootstrap.admin_password_hash'")
     .get() as { value?: string } | undefined;

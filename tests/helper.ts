@@ -55,7 +55,7 @@ function initDb() {
   const { getDb } = deferredRequire('../src/db/connection') as typeof DbConnection;
   const databaseManager = deferredRequire('../src/db/databaseManager') as typeof DatabaseManager;
   runMigrations();
-  databaseManager.useLegacyForTests(getDb());
+  databaseManager.useSqliteForTests(getDb());
 }
 
 function pkce(verifier: string) {

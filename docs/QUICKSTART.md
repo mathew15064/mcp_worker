@@ -1,7 +1,7 @@
 # Install from source — local Docker
 
 This is the recommended **local-only** setup of the mcp_worker server and
-bundled MySQL. No public domain, inbound SSH port, Railway deployment or
+persistent SQLite. No public domain, inbound SSH port, Railway deployment or
 ChatGPT subscription is needed. Worker installation is a separate gated
 release step described below.
 
@@ -25,31 +25,30 @@ curl -fsS http://127.0.0.1:3333/healthz
 curl -fsS http://127.0.0.1:3333/readyz
 ```
 
-This builds the app and MySQL images from the checked-out source, initializes
-only an empty dedicated database, and binds the application to loopback.
-MySQL is not published. A cold build needs network access and its duration
-depends on the host/cache. If an existing database is not ready, do not reset
-it; use the Admin recovery workflow.
+This builds one application image from the checked-out source, initializes
+a new SQLite database on the persistent app-data volume, and binds the service to loopback.
+There is no database server or exposed database port. A cold build needs network access and its duration
+depends on the host/cache. This SQLite-only development release expects a fresh data volume; it does not import earlier database formats.
 
 Open http://127.0.0.1:3333/admin, sign in as `admin`, and read the generated
 `ADMIN_PASSWORD` privately from `.env.setup`. The installer creates this
-file (mode 0600) with persistent database and encryption secrets; **do not
+file (mode 0600) with three generated secrets (ADMIN_PASSWORD, SESSION_SECRET, APP_ENCRYPTION_KEY); **do not
 create `.env`, share the installer file, regenerate secrets over existing
 volumes, or expose the HTTP port to the Internet**.
 
 `/healthz` checks that the server is alive; `/readyz` checks that the
-database is operational. In **Admin → Getting Started**, MySQL should be
+database is operational. In **Admin → Getting Started**, SQLite should be
 `READY` and the local MCP endpoint is http://127.0.0.1:3333/mcp.
 
 ## Go Worker installation is not available in this release candidate
 
-The public `2.0.0-rc.2` source/image does **not** include an approved
+This development source/image does **not** include an approved
 production-signed Worker installer. All `/worker/install*` and
 `/worker/dist/*` endpoints return **HTTP 503**
 (`WORKER_SIGNED_RELEASE_PENDING`), including local installations.
 
 Do not download/execute example installer commands, bypass signature checks
-or replace an enrolled Worker identity. Admin/MySQL and the read-only
+or replace an enrolled Worker identity. Admin/SQLite and the read-only
 `runtime_info` OAuth test below can be checked without a running Worker;
 file, Git, process and shell execution requires an approved, enrolled Worker.
 See [Worker lifecycle](../worker/README.md) for future signed-installation
@@ -82,7 +81,7 @@ This check does **not** enroll a Worker or validate remote ChatGPT HTTPS.
 ./setup.sh
 ```
 
-`--down` preserves `.env.setup` and both named data volumes; `./setup.sh`
+`--down` preserves `.env.setup` and the app-data named volume; `./setup.sh`
 restarts without requesting database initialization. Use `./setup.sh --init`
 only for explicit initialization of a **fresh** database. Do not use
 `down -v` or delete volumes as a troubleshooting step. Read the

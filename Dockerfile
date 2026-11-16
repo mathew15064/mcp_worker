@@ -65,9 +65,7 @@ LABEL org.opencontainers.image.revision="${BOT_REPORT_GIT_SHA}" \
       org.bot-report.go-base="golang:1.26.10-alpine@sha256:87c65a688975c0b1d4585d204874c45ca78354670e3a5f11368c5a492303d696" \
       org.bot-report.node-base="${BOT_REPORT_NODE_IMAGE}"
 
-# Set production bootstrap defaults. MySQL connection details are configured from
-# the Admin UI and persisted encrypted under /app/data. DATABASE_PATH remains only
-# as the optional legacy SQLite import source for existing installations.
+# Persistent SQLite lives under /app/data; no external database service.
 ENV NODE_ENV=production \
     PORT=80 \
     HOST=0.0.0.0 \

@@ -66,16 +66,8 @@ interface PageRuntime {
 }
 interface PageStorage {
   state: string;
+  engine?: string | null;
   operational?: boolean;
-  mysql?: {
-    version?: unknown;
-    host?: string;
-    port?: number;
-    database?: string;
-    username?: string;
-    hasPassword?: boolean;
-    ssl?: boolean;
-  } | null;
   source?: { initialized?: boolean; pending?: unknown[] } | null;
   lastError?: { message?: string } | null;
 }
@@ -304,32 +296,13 @@ function adminOverviewPage({
   const onlineWorkers = workers.filter((w) => w.enabled && w.status === 'online').length;
   const startedAt = runtime.startedAt || 'unknown';
   const storageState = storage.state || 'UNCONFIGURED';
-  const storageLabel =
-    storageState === 'READY'
-      ? 'MySQL'
-      : storageState === 'CONFIGURED'
-        ? 'Source init required'
-        : storageState === 'MIGRATION_REQUIRED'
-          ? 'MySQL required'
-          : storageState === 'DEGRADED'
-            ? 'MySQL unavailable'
-            : 'Setup required';
+  const storageLabel = storageState === 'READY' ? 'SQLite' : 'Setup required';
   const storageFoot =
-    storageState === 'READY'
-      ? storage.mysql?.database || 'connected'
-      : storageState === 'CONFIGURED'
-        ? 'connection saved; source not initialized'
-        : storageState === 'MIGRATION_REQUIRED'
-          ? 'legacy data waiting for MySQL setup'
-          : 'configure in Settings';
+    storageState === 'READY' ? 'persistent local database' : 'initialize with ./setup.sh --init';
   const setupNotice =
-    storageState === 'UNCONFIGURED' || storageState === 'DEGRADED'
-      ? `<div class="setup-banner danger"><div>${icon('database')}<div><strong>${storageState === 'DEGRADED' ? 'MySQL connection is unavailable' : 'MySQL connection is required'}</strong><p>${escapeHtml(storage.lastError?.message || 'Configure and test MySQL before application data features can be used.')}</p></div></div><a class="btn btn-primary" href="/admin/settings/database">Configure Database</a></div>`
-      : storageState === 'CONFIGURED'
-        ? `<div class="setup-banner warning"><div>${icon('database')}<div><strong>mcp_worker source is not initialized</strong><p>The MySQL connection is saved. Initialize Source from Database Settings when you are ready to create or upgrade the application schema.</p></div></div><a class="btn btn-primary" href="/admin/settings/database">Open Database Settings</a></div>`
-        : storageState === 'MIGRATION_REQUIRED'
-          ? `<div class="setup-banner warning"><div>${icon('database')}<div><strong>MySQL setup required</strong><p>Legacy SQLite data was detected and is preserved for import only. Save a MySQL connection, then explicitly initialize the mcp_worker source.</p></div></div><a class="btn btn-primary" href="/admin/settings/database">Configure Database</a></div>`
-          : '';
+    storageState === 'READY'
+      ? ''
+      : `<div class="setup-banner warning"><div>${icon('database')}<div><strong>SQLite database is unavailable</strong><p>${escapeHtml(storage.lastError?.message || 'Run ./setup.sh --init to initialize a fresh SQLite installation.')}</p></div></div></div>`;
   const body = `${flashData(success, error)}${pageHeader('Overview', 'Monitor the mcp_worker runtime and its configuration.', '<a class="btn" href="/admin/onboarding">Getting Started</a>')}${setupNotice}
   <div class="stats-grid">${statCard('Data Store', storageLabel, storageFoot, 'database')}${statCard('MCP Tools', runtime.toolCount, 'available primitives', 'shield')}${statCard('OAuth Clients', clients.length, `${activeClients} active`, 'key')}${statCard('Workers', workers.length, `${onlineWorkers} online`, 'server')}</div>
   <div class="grid-2"><section class="section"><div class="section-header"><div><h2 class="section-title">Runtime Information</h2><p class="section-subtitle">Identity of the currently deployed MCP service.</p></div></div><div class="section-body"><div class="definition-grid"><div class="definition"><div class="definition-label">Application</div><div class="definition-value">mcp_worker</div></div><div class="definition"><div class="definition-label">Version</div><div class="definition-value">v${escapeHtml(runtime.version)}</div></div><div class="definition"><div class="definition-label">Git SHA</div><div class="copy-row"><code id="runtime-sha">${escapeHtml(runtime.gitSha || 'unknown')}</code><button class="btn btn-sm btn-ghost" type="button" data-copy-target="runtime-sha">${icon('copy')} Copy</button></div></div><div class="definition"><div class="definition-label">Build Time</div><div class="definition-value">${escapeHtml(runtime.buildTime || 'unknown')}</div></div><div class="definition"><div class="definition-label">Started At</div><div class="definition-value">${escapeHtml(startedAt)}</div></div><div class="definition"><div class="definition-label">Environment</div><div class="definition-value">${escapeHtml(runtime.nodeEnv || 'production')}</div></div></div></div></section>
@@ -403,12 +376,10 @@ function onboardingPage({
       'Database readiness',
       ready,
       ready
-        ? signedReleasePending
-          ? 'Persistent Railway SQLite is ready.'
-          : 'MySQL source is ready.'
+        ? 'SQLite database is ready.'
         : 'Current state: ' +
           storage.state +
-          '. Test and save the connection in Database Settings; initialize explicitly only when intended. Do not reset existing data.',
+          '. For a new local installation, run ./setup.sh --init. Never overwrite an existing database.',
       '/admin/settings/database',
       'Database settings',
     ],
@@ -938,7 +909,6 @@ function accountTelegramPage({
 function settingsPage({
   activeSection = 'database',
   storage,
-  legacy,
   mcp,
   telegram,
   runtime,
@@ -948,7 +918,6 @@ function settingsPage({
 }: {
   activeSection?: string;
   storage: PageStorage;
-  legacy: { counts?: Record<string, number> };
   mcp: PageMcp;
   telegram: PageTelegram;
   runtime: PageRuntime;
@@ -958,51 +927,21 @@ function settingsPage({
 }) {
   const sections = ['database', 'mcp', 'telegram', 'runtime'];
   const active = sections.includes(activeSection) ? activeSection : 'database';
-  const db = storage.mysql || {};
-  const stateClass =
-    storage.state === 'READY'
-      ? 'badge-ok'
-      : storage.state === 'DEGRADED'
-        ? 'badge-danger'
-        : 'badge-off';
+  const stateClass = storage.state === 'READY' ? 'badge-ok' : 'badge-danger';
   const operational = Boolean(storage.operational);
-  const hasSavedConfig = Boolean(storage.mysql);
-  const sourceInitialized = Boolean(storage.source?.initialized);
-  const sourcePending = Number(storage.source?.pending?.length || 0);
-  const legacyTotal = Object.values(legacy?.counts || {}).reduce(
-    (sum, value) => sum + Number(value || 0),
-    0,
-  );
-  const dbDescription =
-    storage.state === 'READY'
-      ? `Connected to MySQL${typeof db.version === 'string' && db.version ? ` ${db.version}` : ''}. mcp_worker source is initialized.`
-      : storage.state === 'CONFIGURED'
-        ? `MySQL connection is saved${typeof db.version === 'string' && db.version ? ` (${db.version})` : ''}. mcp_worker source is not initialized${sourcePending ? ` (${sourcePending} source step${sourcePending === 1 ? '' : 's'} pending)` : ''}.`
-        : storage.state === 'MIGRATION_REQUIRED'
-          ? `Legacy SQLite contains ${legacyTotal} records and is preserved only as an import source. Save a MySQL connection, then initialize the mcp_worker source explicitly.`
-          : storage.state === 'DEGRADED'
-            ? `MySQL configuration is saved but the connection is unavailable: ${storage.lastError?.message || 'connection failed'}`
-            : 'No MySQL connection has been configured yet.';
   const disabled = operational ? '' : ' disabled';
   const labels = { database: 'Database', mcp: 'MCP', telegram: 'Telegram', runtime: 'Runtime' };
   const subtitles = {
-    database: 'Configure and verify the primary MySQL data store.',
+    database: 'Inspect the SQLite database state.',
     mcp: 'Configure OAuth and MCP runtime behavior.',
     telegram: 'Configure the optional Telegram support channel.',
     runtime: 'Inspect read-only bootstrap and runtime information.',
   };
-  const databaseSection = `<section class="section settings-detail"><div class="section-header"><div><h2 class="section-title">Database</h2><p class="section-subtitle">MySQL is the primary data store. Connection credentials are encrypted outside the database.</p></div><span class="badge ${stateClass}">${escapeHtml(storage.state)}</span></div><div class="section-body"><p class="muted">${escapeHtml(dbDescription)}</p>
-    <form method="post" action="/admin/settings/database/save" class="stack settings-form" data-disable-on-submit><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><div class="form-grid">
-      <div class="field"><label for="db-host">Host</label><input id="db-host" name="host" value="${escapeHtml(db.host || '')}" required placeholder="mysql.example.internal"></div>
-      <div class="field"><label for="db-port">Port</label><input id="db-port" name="port" type="number" min="1" max="65535" value="${escapeHtml(db.port || 3306)}" required></div>
-      <div class="field"><label for="db-name">Database</label><input id="db-name" name="database" value="${escapeHtml(db.database || '')}" required placeholder="bot_report"></div>
-      <div class="field"><label for="db-user">Username</label><input id="db-user" name="username" value="${escapeHtml(db.username || '')}" required autocomplete="username"></div>
-      <div class="field"><label for="db-password">Password</label><input id="db-password" name="password" type="password" autocomplete="new-password" placeholder="${db.hasPassword ? 'Stored securely — leave blank to keep current password' : 'MySQL password'}" ${db.hasPassword ? '' : 'required'}><div class="hint">The password is encrypted in the bootstrap config file and is never rendered back.</div></div>
-      <div class="field"><span class="field-label">TLS</span><label class="switch-row" for="db-ssl"><span><strong>Use MySQL TLS</strong><span class="hint">Enable when the MySQL endpoint requires TLS.</span></span><input id="db-ssl" name="ssl" type="checkbox" value="true" ${db.ssl ? 'checked' : ''}><span class="switch-control" aria-hidden="true"></span></label></div>
-    </div><div class="settings-actions"><button class="btn" type="submit" formaction="/admin/settings/database/test" data-test-database>${icon('check')} Test Connection</button><button class="btn btn-primary" type="submit">Save Connection</button></div></form>
-    ${hasSavedConfig && !sourceInitialized ? `<div class="setup-banner warning" style="margin-top:16px"><div>${icon('database')}<div><strong>mcp_worker source is not initialized</strong><p>Saving the connection never changes the MySQL schema. Initialize Source is the explicit action that creates or upgrades mcp_worker tables.${legacyTotal ? ` ${legacyTotal} legacy records will be imported only during the first source initialization.` : ''}</p></div></div>${storage.state === 'DEGRADED' ? `<button class="btn btn-primary" type="button" disabled>Initialize Source</button>` : `<form method="post" action="/admin/settings/database/initialize" data-disable-on-submit><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><button class="btn btn-primary" type="submit">Initialize Source</button></form>`}</div>` : ''}
-    ${!hasSavedConfig && legacyTotal ? `<div class="migration-note"><strong>Legacy data detected</strong><span>${legacyTotal} application records are preserved read-only. Save a MySQL connection first; they are imported only when you explicitly choose Initialize Source.</span></div>` : ''}
-  </div></section>`;
+  const dbDescription = operational
+    ? 'SQLite is ready on persistent local storage (WAL enabled).'
+    : storage.lastError?.message ||
+      'SQLite is unavailable. Run ./setup.sh --init only for a fresh installation.';
+  const databaseSection = `<section class="section settings-detail"><div class="section-header"><div><h2 class="section-title">Database</h2><p class="section-subtitle">SQLite-only; all application data is stored locally.</p></div><span class="badge ${stateClass}">${escapeHtml(storage.state)}</span></div><div class="section-body"><p class="muted">${escapeHtml(dbDescription)}</p><p class="hint">Storage path is configured by DATABASE_PATH. Keep APP_ENCRYPTION_KEY and the SQLite volume across upgrades; backup with a consistent snapshot.</p></div></section>`;
 
   const mcpSection = `<section class="section settings-detail"><div class="section-header"><div><h2 class="section-title">MCP</h2><p class="section-subtitle">OAuth and MCP behavior stored in the active application database.</p></div><span class="badge ${operational ? 'badge-ok' : 'badge-off'}">${operational ? 'Available' : 'Database required'}</span></div><div class="section-body"><form method="post" action="/admin/settings/mcp" class="stack" data-disable-on-submit><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><fieldset class="settings-fieldset"${disabled}><div class="form-grid">
     <div class="field full"><span class="field-label">Status</span><label class="switch-row" for="mcp-enabled"><span><strong>MCP enabled</strong><span class="hint">Accept OAuth and MCP requests when the database is operational.</span></span><input id="mcp-enabled" name="enabled" type="checkbox" value="true" ${mcp.enabled ? 'checked' : ''}><span class="switch-control" aria-hidden="true"></span></label></div>
@@ -1050,10 +989,8 @@ function settingsPage({
 }
 
 function setupRequiredPage({ status, csrfToken }: { status: PageStorage; csrfToken: string }) {
-  const degraded = status.state === 'DEGRADED';
-  const configured = status.state === 'CONFIGURED';
-  const body = `${pageHeader('Database setup required', 'Application data features remain unavailable until the saved MySQL source is initialized.')}
-  <section class="section"><div class="empty setup-required"><div class="empty-icon">${icon('database')}</div><strong>${degraded ? 'MySQL connection unavailable' : configured ? 'mcp_worker source is not initialized' : 'MySQL is not configured'}</strong><div>${escapeHtml(status.lastError?.message || (configured ? 'The connection is saved. Open Database Settings and choose Initialize Source when you are ready.' : 'Sign-in remains available because administrator authentication is bootstrapped from ENV.'))}</div><br><a class="btn btn-primary" href="/admin/settings/database">Open Database Settings</a></div></section>`;
+  const body = `${pageHeader('SQLite setup required', 'Application data features need a verified SQLite database.')}
+  <section class="section"><div class="empty setup-required"><div class="empty-icon">${icon('database')}</div><strong>SQLite database unavailable</strong><div>${escapeHtml(status.lastError?.message || 'For a fresh installation run ./setup.sh --init. Verify volume permissions if initialization is refused.')}</div><br><a class="btn btn-primary" href="/admin/settings/database">Database status</a></div></section>`;
   return shell('Database setup required — mcp_worker', body, {
     admin: true,
     active: 'settings',

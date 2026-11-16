@@ -1,285 +1,51 @@
 # Administration and development reference
 
-For a new installation, start with the [local quickstart](QUICKSTART.md). This reference describes the advanced V2 configuration, storage, ownership, and development interfaces.
+This document describes the **SQLite-only development branch** and its baseline Admin/OAuth/Worker behavior.
 
-## Outbound Worker — signed distribution pending
+## Storage
 
-The current server releases return **HTTP 503** with
-`WORKER_SIGNED_RELEASE_PENDING` for `/worker/install*` and
-`/worker/dist/*`. Do **not** run download-and-install instructions
-against this server or bypass the signature requirement.
+The application uses a local **better-sqlite3** database at `DATABASE_PATH` (Docker default `/app/data/bot_report.sqlite`), with WAL, foreign keys, `busy_timeout=5000`, schema validation and `integrity_check`. Docker uses **one app container and one persistent app-data volume**. Do not run writable replicas against the same SQLite file and do not host the database on a shared network filesystem.
 
-Once an independently approved signed Go Worker release exists,
-the administrator can generate a short-lived enrollment token in
-**Workers**. The Worker runs under an OS account selected by its owner,
-generates its Ed25519 private key locally and connects outbound over
-authenticated WSS. Shell execution has the authority of that OS account;
-allowed roots are not a shell sandbox. Do not replace enrolled identities
-or existing binaries with unsigned builds.
+`./setup.sh --init` is for an entirely new installation. It initializes 13 SQLite application tables and an initial admin identity; `./setup.sh` subsequently starts/restarts without reset. Admin → Settings → Database is **read-only status**; there is no database-connection form or server-side setup action.
 
-See [Worker installation, lifecycle and signing](../worker/README.md)
-for the future installation flow and trust boundaries.
+Storage state:
+- `UNCONFIGURED`: no SQLite database exists yet; Admin login from environment can display setup guidance, but MCP data endpoints are not ready.
+- `READY`: SQLite schema and integrity validated; OAuth, Users, Workers and settings may operate.
+- `DEGRADED`: startup validation failed; do not erase or recreate the database as a workaround.
 
-## Storage architecture
+An obsolete bootstrap file causes a **fail-closed startup refusal**. This development release supports fresh SQLite setup only; use a clean project and empty volume.
 
-MySQL is the primary application database. The MySQL connection is configured from **Admin -> Settings -> Database**, not from normal DB environment variables.
+## Identity and security
 
-The production runtime has five storage states:
+The infrastructure Admin authenticates with `ADMIN_USERNAME` (default `admin`) and `ADMIN_PASSWORD`. Application Users have independent database-backed identities, sessions, OAuth clients and Worker ownership constraints. Encrypted settings and credentials rely on the stable `APP_ENCRYPTION_KEY`. Keep `ADMIN_PASSWORD`, `SESSION_SECRET`, and `APP_ENCRYPTION_KEY` private and persistent, and restore the matching set with a recovery snapshot. Do not create new secrets atop an existing volume.
 
-```text
-UNCONFIGURED        no MySQL configuration and no legacy database
-MIGRATION_REQUIRED  legacy SQLite exists only as a read-only import source
-CONFIGURED          MySQL connection is saved but mcp_worker source is not initialized
-READY               MySQL is connected and the mcp_worker source is active
-DEGRADED            MySQL configuration is saved but currently unavailable
-```
+The installer creates `.env.setup` with the project/port and **three generated secrets** (mode `0600`). It refuses obsolete installer credentials or a conflicting project volume so a fresh setup cannot silently replace an existing installation. There is no MySQL client or importer in the source build.
 
-An app started without explicit bundled initialization or saved database configuration starts in `UNCONFIGURED`. Administrator login and Settings remain available so MySQL can be configured entirely from the UI. Data-dependent pages and MCP/OAuth endpoints return `503` until MySQL is `READY`.
+## Admin application
 
-Database actions are intentionally separated. **Test Connection** is read-only. **Save Connection** only encrypts/stores the MySQL connection and inspects existing source state; it never creates or upgrades tables, and restart does not auto-initialize the source. If the saved database does not contain the current mcp_worker source, the UI exposes **Initialize Source** as the explicit schema-changing action.
+Use `/admin` for the overall runtime status, `/admin/onboarding` for Getting Started, `/admin/settings/database` for SQLite state, and `/admin/settings/mcp`, `/admin/settings/telegram`, `/admin/settings/runtime` for configuration. OAuth clients, Workers, terminal profiles and request audit are protected by the existing Admin and user-scoped authorization checks.
 
-Existing SQLite installations enter `MIGRATION_REQUIRED`. SQLite application data is not served in this state; it is preserved only for the one-time import. On the first **Initialize Source**, mcp_worker:
+OAuth uses authorization code with PKCE and exact redirect URIs; access/refresh tokens have expiry and revocation. Worker enrollment is short-lived, single-use and ownership-aware. The Go Worker uses outbound WSS signed challenge authentication.
 
-1. connects using the already-saved MySQL configuration,
-2. creates or upgrades the mcp_worker MySQL schema,
-3. imports legacy application data transactionally into an empty first-time source when applicable,
-4. verifies imported row counts before commit,
-5. switches the running application to MySQL only after initialization succeeds.
+**Signed Go Worker distribution remains blocked:** `/worker/install*` and `/worker/dist/*` return **HTTP 503** until separately approved release-signing material exists. Do not bypass signature gates.
 
-Legacy SQLite `users` and `sessions` are intentionally not imported. The administrator identity remains ENV-backed and browser sessions remain bounded in-memory state. Version 2 can create new database-backed users after the MySQL source is initialized.
+## Development
 
-## v2 users and client ownership
-
-The ENV administrator is the infrastructure super-admin and remains usable even when MySQL is unavailable. Normal users are stored only in the initialized MySQL source and sign in through the same `/login` endpoint.
-
-Each user receives stable isolated client identity fields:
-
-```text
-principal_id = principal:user:<user_id>
-profile_id   = profile:user:<user_id>
-```
-
-OAuth clients created from the user workspace carry `owner_user_id` and inherit that principal/profile automatically. Users can list, create, rotate, enable/disable, revoke, and delete only their own clients. OAuth authorization also enforces ownership: a user-owned client can only be consented by its owning user, while unowned/global clients remain administrator-consented.
-
-User-owned clients receive `bot_report.read`, `bot_report.terminal`, and optional refresh-token capability (`offline_access`). Worker enrollment tokens created from the user workspace carry `owner_user_id`; the enrolled Worker inherits that owner and every Worker Profile resolves ownership through its Worker. MCP execution is tenant-filtered: a user principal can list and execute only Worker Profiles owned by that user, and never receives Admin SSH profiles or global/unowned Workers. Existing global Workers remain `owner_user_id = NULL` and stay administrator-managed. Disabling a user invalidates web sessions through `session_version` and also blocks OAuth client authentication, authorization, refresh, and access-token use while the user remains disabled.
-
-Admin **Users** provides create, enable/disable, password reset, client counts, and the generated client identity. A normal user's UI exposes **My Clients**, **Workers**, and **Profile**. Users can generate one-time Worker enrollment tokens, enroll machines, create additional Worker Profiles, and enable/disable only their own Workers.
-
-## Bootstrap security configuration
-
-These values remain outside the application database because the application must be able to authenticate an administrator and decrypt the MySQL connection even when MySQL is unavailable:
-
-```text
-ADMIN_USERNAME
-ADMIN_PASSWORD
-SESSION_SECRET
-APP_ENCRYPTION_KEY
-HOST
-PORT
-TRUST_PROXY
-COOKIE_SECURE
-NODE_ENV
-```
-
-Generate the application encryption key with:
-
-```bash
-openssl rand -base64 32
-```
-
-Existing installations may temporarily keep `TERMINAL_CREDENTIAL_KEY`; it is used as a compatibility fallback when `APP_ENCRYPTION_KEY` is absent so existing Terminal and Telegram envelopes remain decryptable. `TELEGRAM_CREDENTIAL_KEY` is only needed to migrate older Telegram `enc:v2` tokens.
-
-The encrypted MySQL bootstrap file defaults to:
-
-```text
-data/bootstrap-config.json
-```
-
-The file contains host/port/database/username/TLS plus an AES-256-GCM password envelope and is written with mode `0600`. Plaintext MySQL passwords are never rendered back to the browser.
-
-## Laravel-style migrations
-
-MySQL schema evolution follows Laravel migration conventions while remaining a small Node.js implementation:
-
-```text
-src/db/migrations/
-  2026_11_01_000001_create_system_settings_table.js
-  2026_11_01_000002_create_terminal_profiles_table.js
-  ...
-  2026_11_01_000010_create_users_table.js
-  2026_11_01_000011_add_user_ownership_to_oauth_clients.js
-```
-
-Each migration exports:
-
-```js
-module.exports = {
-  async up(schema) {
-    // apply schema change
-  },
-  async down(schema) {
-    // reverse schema change
-  }
-};
-```
-
-MySQL tracks migrations in:
-
-```text
-migrations
-  id
-  migration
-  batch
-  executed_at
-```
-
-Commands:
-
-```bash
-npm run migrate
-npm run migrate:status
-npm run migrate:rollback
-npm run migrate:rollback -- --step=2
-npm run migrate:reset -- --force
-npm run migrate:fresh -- --force
-```
-
-`rollback` without `--step` reverses the latest Laravel-style batch. `rollback -- --step=N` reverses the latest N migrations. `reset`/`fresh` are intentionally CLI-only and require explicit destructive flags; they are not exposed in the production Admin UI.
-
-## Admin UI
-
-After ENV-backed administrator login, `/admin` provides:
-
-- **Overview** — runtime and storage readiness.
-- **Audit Log** — MCP request history with client/tool/result filtering, compact pagination, and a viewport-bounded table with a sticky header.
-- **Users** — create/disable users, reset passwords, inspect per-user client counts, and view generated client identities.
-- **OAuth Clients** — create, rotate secret, enable/disable, revoke, delete, and jump to client activity across the installation.
-- **Workers** — review enrolled Workers, execution targets and connection status; new public installer-based enrollment remains gated.
-- **Settings** — dedicated Database, MCP, Telegram, and Runtime pages.
-
-If MySQL is `UNCONFIGURED` or `DEGRADED`, Settings stays available but data pages are blocked server-side. This is not only a UI disable state.
-
-The removed browser SSH/terminal console and legacy SSH Profile pages are not available. Worker execution uses the authenticated outbound WSS channel and requires an approved, enrolled Worker.
-
-## MCP and Telegram settings
-
-Once an application database is operational, these are stored in `system_settings` rather than normal runtime ENV:
-
-```text
-mcp.enabled
-mcp.public_base_url
-mcp.access_token_ttl_seconds
-mcp.refresh_token_ttl_seconds
-mcp.auth_code_ttl_seconds
-mcp.rate_limit_per_minute
-telegram.enabled
-telegram.chat_id
-telegram.bot_token
-```
-
-Telegram Bot Token stays AES-256-GCM encrypted at rest.
-
-## Developer setup
+For an isolated developer checkout:
 
 ```sh
-cp .env.example .env
-chmod 600 .env
-# Fill in all three secrets in .env (see the generation hints in the template).
 npm ci
+npm run typecheck
+npm run lint:typed
+npm run format:check
 npm run build
-HOST=127.0.0.1 npm start
-```
-
-This manual development setup requires Node.js 22.x and is not the Docker
-installation path. For Docker use `./setup.sh --init` instead; it creates its own private
-`.env.setup` with separate persistent secrets. Never reuse example or
-test secrets with real data. For local Node, open
-`http://127.0.0.1:3333/admin`, sign in as `admin` with `ADMIN_PASSWORD`,
-then configure MySQL from Settings. By default the Node server binds
-all interfaces; `HOST=127.0.0.1` limits this example to the local machine.
-
-Playwright UI checks:
-
-```bash
-npx playwright install chromium
-npm run test:e2e
-```
-
-Core tests:
-
-```bash
 npm test
 ```
 
-The optional MySQL integration test is activated by `MYSQL_TEST_HOST` and related `MYSQL_TEST_*` variables. The project test workflow can run it against a disposable MySQL 8 container. The live Worker installer/MCP integration additionally requires `BOT_REPORT_ISOLATED_WORKER_TEST=1` and a disposable Docker container (with curl, git, bash, ripgrep and OpenSSL installed). It uses a separate MySQL test database, installs and uninstalls a temporary Worker, and exercises the current MCP tool catalog via authenticated HTTP. Set `BOT_REPORT_WORKER_UPGRADE_FIXTURE` to a distinct previously built Linux/amd64 Worker binary inside that disposable container to exercise checksum/signature rejection, upgrade, repeated install, failed-start restoration and rollback. Never point integration tests at a production database or mount the host Worker state into the container.
+Tests use disposable SQLite databases; any skipped Docker/native Worker/remote integration checks must be reported explicitly. Never run database tests against a real installer volume. A disposable Docker integration test should validate fresh install, restart and core HTTP/OAuth/Worker contracts. No database-import step is required.
 
-## Worker aliases and execution targets
+## Health and recovery
 
-The current Go Worker-only release does not expose browser SSH terminals,
-interactive Attach Shell, or legacy Admin/User SSH Profile management.
-`terminal_list` is retained as a Worker-alias discovery tool for
-compatibility; execution uses an authenticated outbound Worker connection.
+`/healthz` reports process liveness and storage state. `/readyz` returns HTTP 200 only when SQLite is operational; it may return 503 while explicit initialization is pending or database validation has failed. A healthy process does not imply that an OAuth client or Worker has authenticated.
 
-Until a signed Go Worker installer is independently approved, new Worker
-enrollment through the public installer is unavailable. Do not configure
-an SSH server or store SSH passwords as a workaround. See the
-[security model](SECURITY_MODEL.md) and
-[Worker lifecycle](../worker/README.md).
-
-## OAuth client management
-
-```bash
-npm run mcp-client -- list
-npm run mcp-client -- add \
-  --name ChatGPT \
-  --principal principal:gpt_client \
-  --redirect https://client.example.com/oauth/callback \
-  --scopes "bot_report.read"
-npm run mcp-client -- rotate <CLIENT_ID>
-npm run mcp-client -- disable <CLIENT_ID>
-npm run mcp-client -- enable <CLIENT_ID>
-npm run mcp-client -- revoke <CLIENT_ID>
-npm run mcp-client -- delete <CLIENT_ID>
-```
-
-Replace the example callback with the exact URI supplied by your MCP client. Client secrets are shown only at creation/rotation; only their SHA-256 hash is persisted.
-
-## Administrator password
-
-Administrator credentials are ENV-backed. Update `ADMIN_USERNAME` / `ADMIN_PASSWORD` in the runtime environment and restart mcp_worker. The old database password-rotation behavior has been removed.
-
-A strong candidate can be generated with:
-
-```bash
-npm run rotate-admin-password -- --generate
-```
-
-The command only generates a value; it does not mutate a database or environment file.
-
-## Health and readiness
-
-```text
-GET /healthz
-```
-
-always reports process health and the storage state. The process remains healthy in setup mode so the administrator can configure MySQL.
-
-```text
-GET /readyz
-```
-
-returns `200` only when production application storage is operational (`READY` MySQL), otherwise `503`. `MIGRATION_REQUIRED`, `UNCONFIGURED`, and `DEGRADED` remain recoverable through the Admin Settings UI but are not ready for MCP/data traffic.
-
-## Docker deployment
-
-Use the standalone Docker/Compose installer for a new, isolated installation:
-
-```sh
-./setup.sh --init
-```
-
-The default app binds loopback only. Keep the encrypted bootstrap data and
-MySQL named volumes together for backup and recovery. For remote MCP,
-configure a trusted HTTPS reverse proxy separately; see
-[remote MCP guidance](REMOTE_MCP.md). Preserve WebSocket upgrade support for
-`/worker/v1/connect`. Do not expose the standalone HTTP port directly.
+For consistent WAL snapshots and independent restore drills see [Backup and restore](BACKUP_RESTORE.md). For local installation see [Quickstart](QUICKSTART.md), and for remote HTTPS endpoints see [Remote MCP](REMOTE_MCP.md). A new Docker image, deployment, migration of real data or modification to existing Worker trust roots requires separate owner approval.

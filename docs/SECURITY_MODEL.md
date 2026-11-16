@@ -4,8 +4,8 @@ mcp_worker exposes execution authority, not a general security sandbox.
 Keep the MCP gateway, OAuth client credentials, Admin account and enrolled
 Worker identities within a trust boundary you control.
 
-- The default web listener is loopback-only, with a dedicated MySQL private
-  network and no MySQL host port. External access requires an explicit TLS
+- The default web listener is loopback-only, with SQLite held in a single
+  app-data persistent volume and no database service or exposed SQL port. External access requires an explicit TLS
   proxy configuration, secure cookies and an accurate public origin.
 - Admin is infrastructure authority. Database users own separate OAuth
   clients and Worker profiles. The server checks client ownership, scopes,
@@ -24,8 +24,8 @@ Worker identities within a trust boundary you control.
   and an independently configured OS/container sandbox when needed.
   Do not run untrusted commands as root. No claim of complete isolation.
 - Audit records and logs may include workspace data; restrict access,
-  review retention and redact before sharing. Database bootstrap secrets
-  are encrypted at rest; the separate application key must be protected.
+  review retention and redact before sharing. Database application secrets use encrypted envelopes at rest; the separate
+  application key must be protected along with the SQLite backup.
 - Disable/revoke compromised clients and disable affected Workers; isolate
   the host and rotate affected credentials. Preserve evidence privately.
   Local uninstall removes installer-managed state; server-side force removal

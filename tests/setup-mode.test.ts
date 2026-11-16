@@ -8,7 +8,6 @@ import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import { runMigrations } from '../src/db/migrations';
 import authService from '../src/services/authService';
-import store from '../src/db/bootstrapConfigStore';
 import databaseManager from '../src/db/databaseManager';
 import runtimeSettings from '../src/services/runtimeSettingsService';
 import app from '../src/app';
@@ -59,7 +58,7 @@ test.after(async () => {
   cleanup(env.dir);
 });
 
-void test('fresh install stays administrable without a database and blocks data surfaces until MySQL is configured', async () => {
+void test('fresh SQLite install remains administrable but blocks data until explicit initialization', async () => {
   const health = await fetch(`${baseUrl}/healthz`);
   assert.equal(health.status, 200);
   const healthBody = (await health.json()) as { database: string };
@@ -90,8 +89,8 @@ void test('fresh install stays administrable without a database and blocks data 
   const settings = await fetch(`${baseUrl}/admin/settings`, { headers: { cookie } });
   assert.equal(settings.status, 200);
   const settingsHtml = await settings.text();
-  assert.match(settingsHtml, /No MySQL connection has been configured yet/);
-  assert.match(settingsHtml, /Save Connection/);
+  assert.match(settingsHtml, /SQLite is unavailable/);
+  assert.doesNotMatch(settingsHtml, /Save Connection|Test Connection|MySQL host/);
   assert.doesNotMatch(settingsHtml, />Initialize Source<\/button>/);
   const runtime = await fetch(`${baseUrl}/admin/settings/runtime`, { headers: { cookie } });
   assert.equal(runtime.status, 200);
@@ -109,7 +108,7 @@ void test('fresh install stays administrable without a database and blocks data 
   assert.equal(mcp.status, 503);
 });
 
-void test('existing SQLite data becomes migration-only and keeps a temporary legacy-admin login bridge', async () => {
+void test('existing compatible SQLite data is activated without erasing users or accepting legacy administrator password', async () => {
   const legacy = new Database(process.env.DATABASE_PATH);
   runMigrations(legacy);
   const now = new Date().toISOString();
@@ -123,36 +122,27 @@ void test('existing SQLite data becomes migration-only and keeps a temporary leg
 
   databaseManager.resetForTests();
   const status = await databaseManager.initialize();
-  assert.equal(status.state, 'MIGRATION_REQUIRED');
-  assert.equal(status.legacyAvailable, true);
-  assert.equal(status.operational, false);
-  assert.equal(status.setupOnly, true);
-  assert.equal(databaseManager.getAdapter(), null);
+  assert.equal(status.state, 'READY');
+  assert.equal(status.engine, 'sqlite');
+  assert.equal(status.databaseExists, true);
+  assert.equal(status.operational, true);
+  assert.equal(status.setupOnly, false);
+  assert.equal(databaseManager.getAdapter()?.kind, 'sqlite');
 
   const envAuth = await authService.authenticate('admin', 'TestAdminPassword2026!');
   assert.equal(envAuth.success, true);
   assert.equal(envAuth.user?.auth_source, 'env');
   const legacyAuth = await authService.authenticate('admin', 'LegacyAdminPassword2026!');
-  assert.equal(legacyAuth.success, true);
-  assert.equal(legacyAuth.user?.auth_source, 'legacy');
+  assert.equal(legacyAuth.success, false);
 });
 
-void test('bootstrap MySQL password is encrypted on disk and never returned by public config', () => {
-  const password = 'mysql-super-secret-password';
-  const publicConfig = store.save({
-    host: 'db.internal',
-    port: 3306,
-    database: 'bot_report',
-    username: 'bot_report',
-    password,
-    ssl: true,
-  });
-  const raw = fs.readFileSync(store.path, 'utf8');
-  assert.doesNotMatch(raw, new RegExp(password));
-  assert.match(raw, /password_envelope/);
-  if (!publicConfig) throw new Error('Public bootstrap config missing');
-  assert.equal(publicConfig.hasPassword, true);
-  assert.equal('password' in publicConfig, false);
-  assert.equal(store.load()?.password, password);
-  if (process.platform !== 'win32') assert.equal(fs.statSync(store.path).mode & 0o777, 0o600);
+void test('obsolete bootstrap configuration refuses implicit reuse without touching SQLite data', async () => {
+  const legacy = process.env.BOOTSTRAP_CONFIG_PATH || '';
+  fs.writeFileSync(legacy, 'obsolete development database config', { mode: 0o600 });
+  const before = crypto.createHash('sha256').update(fs.readFileSync(env.dbPath)).digest('hex');
+  databaseManager.resetForTests();
+  await assert.rejects(() => databaseManager.initialize(), /Obsolete database bootstrap detected/);
+  const after = crypto.createHash('sha256').update(fs.readFileSync(env.dbPath)).digest('hex');
+  assert.equal(after, before);
+  fs.unlinkSync(legacy);
 });

@@ -7,24 +7,13 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-const enabled = Boolean(process.env.MYSQL_TEST_HOST);
+const enabled = true;
 
 function extractCsrf(html: string) {
   return html.match(/name="_csrf" value="([^"]+)"/)?.[1] || '';
 }
 function cookieFrom(response: Response) {
   return (response.headers.get('set-cookie') || '').split(';')[0];
-}
-
-async function adminConnection(database: string) {
-  const mysql = await import('mysql2/promise');
-  return mysql.createConnection({
-    host: process.env.MYSQL_TEST_HOST,
-    port: Number(process.env.MYSQL_TEST_PORT || 3306),
-    user: process.env.MYSQL_TEST_USERNAME || 'root',
-    password: process.env.MYSQL_TEST_PASSWORD || '',
-    database,
-  });
 }
 
 async function login(base: string, username: string, password: string, returnTo = '/') {
@@ -50,22 +39,6 @@ void test(
   'existing user identities retain isolated OAuth profiles and sessions without Users management routes',
   { skip: !enabled },
   async (t) => {
-    const database = 'bot_report_user_test';
-    const rootDatabase = process.env.MYSQL_TEST_DATABASE || 'bot_report_test';
-    const root = await adminConnection(rootDatabase);
-    await root.query(`DROP DATABASE IF EXISTS \`${database}\``);
-    await root.query(
-      `CREATE DATABASE \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
-    );
-    await root.end();
-    t.after(async () => {
-      try {
-        const admin = await adminConnection(rootDatabase);
-        await admin.query(`DROP DATABASE IF EXISTS \`${database}\``);
-        await admin.end();
-      } catch {}
-    });
-
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-report-user-integration-'));
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     const appKey = crypto
@@ -88,25 +61,14 @@ void test(
       LOGIN_RATE_LIMIT_MAX: '1000',
     });
 
-    const bootstrapStore = (await import('../src/db/bootstrapConfigStore.js')).default;
-    bootstrapStore.save({
-      host: process.env.MYSQL_TEST_HOST,
-      port: Number(process.env.MYSQL_TEST_PORT || 3306),
-      database,
-      username: process.env.MYSQL_TEST_USERNAME || 'root',
-      password: process.env.MYSQL_TEST_PASSWORD || '',
-      ssl: false,
-    });
-
     const databaseManager = (await import('../src/db/databaseManager.js')).default;
     const runtimeSettings = (await import('../src/services/runtimeSettingsService.js')).default;
     databaseManager.resetForTests();
     runtimeSettings.resetForTests();
+    const { runMigrations } = await import('../src/db/migrations.js');
+    runMigrations();
     await databaseManager.initialize();
-    const prepared = await databaseManager.prepareSourceInitialization();
-    await runtimeSettings.seedDefaults(prepared.adapter);
-    await databaseManager.activatePrepared(prepared);
-    await runtimeSettings.load(databaseManager.getAdapter());
+    await runtimeSettings.seedDefaults(databaseManager.getAdapter());
     assert.equal(databaseManager.status().state, 'READY');
 
     const app = (await import('../src/app.js')).default;

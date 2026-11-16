@@ -1,4 +1,4 @@
-/** SQL bindings accepted by both adapters. Rows are typed by the query caller. */
+/** SQLite SQL bindings. Rows are typed by the query caller. */
 export type SqlValue = string | number | bigint | boolean | null | Buffer | Date;
 export type SqlRow = Record<string, unknown>;
 export interface ExecutionResult {
@@ -7,7 +7,7 @@ export interface ExecutionResult {
   warningStatus?: number;
 }
 export interface DatabaseAdapter {
-  readonly kind: 'mysql' | 'sqlite';
+  readonly kind: 'sqlite';
   queryOne<T extends object = SqlRow>(sql: string, params?: SqlValue[]): Promise<T | null>;
   queryAll<T extends object = SqlRow>(sql: string, params?: SqlValue[]): Promise<T[]>;
   execute(sql: string, params?: SqlValue[]): Promise<ExecutionResult>;

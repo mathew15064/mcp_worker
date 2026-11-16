@@ -11,7 +11,6 @@ import users from '../src/services/userService';
 import userRepo from '../src/repositories/userRepository';
 import workerRepo from '../src/repositories/workerRepository';
 import workerAuth from '../src/services/workerAuthService';
-import store from '../src/db/bootstrapConfigStore';
 const file = '/app/data/.standalone-smoke.json';
 const base = 'http://127.0.0.1';
 interface RpcResult {
@@ -58,7 +57,6 @@ async function request(
 }
 async function main() {
   assert.equal(process.env.BOT_REPORT_STANDALONE_SMOKE, '1');
-  assert.ok(process.env.BUNDLED_MYSQL_PASSWORD);
   assert.match(process.env.MCP_PUBLIC_BASE_URL || '', /^http:\/\/127\.0\.0\.1:\d+$/);
   const mode = process.argv[2];
   assert.ok(['seed', 'verify'].includes(mode));
@@ -66,9 +64,12 @@ async function main() {
   await manager.initialize();
   await settings.load(manager.getAdapter());
   assert.equal(manager.status().state, 'READY');
-  assert.equal(store.readPublic()?.host, 'mysql');
+  assert.equal(manager.status().engine, 'sqlite');
   assert.equal(manager.status().source?.ran, 13);
-  assert.equal(fs.statSync(store.path).mode & 0o777, 0o600);
+  assert.equal(
+    fs.statSync(process.env.DATABASE_PATH || '/app/data/bot_report.sqlite').mode & 0o777,
+    0o600,
+  );
   // Authenticate against the actual running local HTTP app, not a test-mode server.
   const page = await fetch(base + '/login');
   const cookie = (page.headers.get('set-cookie') || '').split(';')[0];
@@ -162,7 +163,7 @@ async function main() {
   console.log(
     'PASS ' +
       mode +
-      ': actual local admin login, MySQL 13 migrations, user/Worker identity, OAuth token, 15 tools, runtime_info, terminal_list, unauthenticated rejection',
+      ': actual local admin login, SQLite 13-table schema, user/Worker identity, OAuth token, 15 tools, runtime_info, terminal_list, unauthenticated rejection',
   );
 }
 main()

@@ -58,7 +58,7 @@ void test('HTTP surface is MCP-only', async () => {
   assert.equal(healthBody.ok, true);
   assert.equal(healthBody.service, 'mcp_worker');
   assert.equal(healthBody.mode, 'mcp-admin');
-  assert.equal(healthBody.database, 'LEGACY_SQLITE');
+  assert.equal(healthBody.database, 'TEST_SQLITE');
 
   const login = await fetch(`${baseUrl}/login`);
   assert.equal(login.status, 200);

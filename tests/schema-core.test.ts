@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import helper from './helper';
 import { getDb } from '../src/db/connection';
 import { runMigrations } from '../src/db/migrations';
-import { MysqlAdapter } from '../src/db/adapters/mysqlAdapter';
 const { setupEnv, cleanup, initDb } = helper;
 
 const env = setupEnv('schema');
@@ -37,83 +36,6 @@ void test('fresh compatibility database contains MCP, admin and worker support t
     db.prepare<[], { count: number }>('SELECT COUNT(*) AS count FROM users').get()?.count,
     0,
   );
-});
-
-void test('MySQL connection pool has a bounded wait queue and validates overrides', async () => {
-  const config = {
-    host: '127.0.0.1',
-    username: 'fixture',
-    password: 'unused',
-    database: 'fixture',
-  };
-  const original = process.env.MYSQL_POOL_QUEUE_LIMIT;
-  try {
-    delete process.env.MYSQL_POOL_QUEUE_LIMIT;
-    for (const [override, expected] of [
-      [{}, 128],
-      [{ queueLimit: 32 }, 32],
-      [{ queueLimit: 0 }, 128],
-      [{ queueLimit: 20_000 }, 128],
-    ] as const) {
-      const adapter = MysqlAdapter.create({ ...config, ...override });
-      try {
-        const pool = (
-          adapter as unknown as {
-            _db: { pool: { config: { queueLimit: number; connectionLimit: number } } };
-          }
-        )._db.pool;
-        assert.equal(pool.config.queueLimit, expected);
-        assert.equal(pool.config.connectionLimit, 10);
-      } finally {
-        await adapter.close();
-      }
-    }
-  } finally {
-    if (original === undefined) delete process.env.MYSQL_POOL_QUEUE_LIMIT;
-    else process.env.MYSQL_POOL_QUEUE_LIMIT = original;
-  }
-});
-
-void test('MySQL queue overload reports a 503 instead of an unbounded wait', async () => {
-  const exhausted = () => {
-    throw new Error('Queue limit reached.');
-  };
-  const connection = {
-    execute() {
-      try {
-        return Promise.resolve(
-          (() => {
-            exhausted();
-          })(),
-        );
-      } catch (error) {
-        return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
-      }
-    },
-    getConnection() {
-      try {
-        return Promise.resolve(
-          (() => {
-            exhausted();
-          })(),
-        );
-      } catch (error) {
-        return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
-      }
-    },
-  };
-  const adapter = new MysqlAdapter(
-    connection as unknown as ConstructorParameters<typeof MysqlAdapter>[0],
-  );
-  const isBusy = (error: unknown) =>
-    error instanceof Error &&
-    'code' in error &&
-    error.code === 'MYSQL_POOL_BUSY' &&
-    'status' in error &&
-    error.status === 503;
-  await assert.rejects(() => adapter.queryOne('SELECT 1'), isBusy);
-  await assert.rejects(() => adapter.ping(), isBusy);
-  await assert.rejects(() => adapter.transaction(async () => {}), isBusy);
 });
 
 void test('migrations do not drop unknown legacy tables', () => {

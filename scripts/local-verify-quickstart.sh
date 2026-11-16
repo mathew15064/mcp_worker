@@ -140,9 +140,9 @@ if [[ "$MODE" == --full ]]; then
     run wss_worker yes "real localhost WSS, Go Worker, OAuth PKCE" env PATH="$(dirname "$GO_BIN"):$PATH" GOPROXY=off GOTOOLCHAIN=local BOT_REPORT_W2_T03_GO_E2E=1 node --test dist/tests/railway-worker-wss-e2e.test.js
     run go_isolation yes "two Go Workers in isolated SQLite local sandboxes" env PATH="$(dirname "$GO_BIN"):$PATH" GOPROXY=off GOTOOLCHAIN=local BOT_REPORT_W3_T04_GO_E2E=1 node --test dist/tests/railway-instance-isolation-go.test.js
   else missing wss_worker yes "requires built Node tests, offline Go1.24 and OpenSSL"; missing go_isolation yes "requires built Node tests, offline Go1.24 and OpenSSL"; fi
-  # Worker-live must run in a disposable Node container, never against a
-  # host-installed Worker. The original PC source and dependencies are read-only.
-  mysql_worker_docker() {
+  # Real outbound Worker runs entirely inside a fresh disposable Docker
+  # container with read-only source; no MySQL or host Worker installation.
+  sqlite_worker_docker() {
     local deps
     deps="$(realpath node_modules)" || return 1
     mkdir -p dist/worker/bin || return 1
@@ -151,26 +151,19 @@ if [[ "$MODE" == --full ]]; then
     if [[ "$deps" != "$ROOT/node_modules" ]]; then
       mounts+=(--mount "type=bind,source=$deps,target=$deps,readonly")
     fi
-    docker run --rm --pull=never --network=host \
+    docker run --rm --pull=never --network=none \
       --cap-drop=ALL --security-opt=no-new-privileges --pids-limit=256 --memory=2g \
       "${mounts[@]}" \
       --mount type=bind,source="$(command -v rg)",target=/usr/local/bin/rg,readonly \
-      --workdir "$ROOT" \
-      -e NODE_ENV=test -e MYSQL_TEST_HOST -e MYSQL_TEST_PORT \
-      -e MYSQL_TEST_DATABASE -e MYSQL_TEST_USERNAME -e MYSQL_TEST_PASSWORD \
-      -e BOT_REPORT_ISOLATED_WORKER_TEST=1 \
+      --workdir "$ROOT" -e NODE_ENV=test -e BOT_REPORT_ISOLATED_WORKER_TEST=1 \
       node:22 node --test --test-concurrency=1 dist/tests/worker-live-integration.test.js
   }
-  if (( NODE_OK )) && [[ "${T5_MYSQL_SANDBOX:-0}" == 1 ]] && [[ "${MYSQL_TEST_HOST:-}" == 127.0.0.1 || "${MYSQL_TEST_HOST:-}" == localhost ]] && [[ "${MYSQL_TEST_DATABASE:-}" == bot_report_test* ]]; then
-    run mysql_integration yes "explicit disposable localhost MySQL schema and credentials" env NODE_ENV=test node --test dist/tests/mysql-integration.test.js
-    run mysql_setup_ui yes "same disposable localhost MySQL" env NODE_ENV=test node --test dist/tests/mysql-setup-ui-integration.test.js
-    if [[ "${T5_MYSQL_WORKER_CONTAINER_TEST:-0}" == 1 ]] && [[ -n "$GO_BIN" ]] && command -v docker >/dev/null && docker info >/dev/null 2>&1 && docker image inspect node:22 >/dev/null 2>&1 && command -v rg >/dev/null; then
-      run mysql_worker_live yes "cached Node22 + git/rg; disposable Docker Worker, read-only source, localhost MySQL" mysql_worker_docker
-    else
-      missing mysql_worker_live yes "requires T5_MYSQL_WORKER_CONTAINER_TEST=1, Go1.24, Docker, cached node:22, ripgrep and disposable localhost MySQL"
-    fi
+  if (( NODE_OK )) && [[ -n "$GO_BIN" ]] && command -v docker >/dev/null && \
+     docker info >/dev/null 2>&1 && docker image inspect node:22 >/dev/null 2>&1 && \
+     command -v rg >/dev/null; then
+    run sqlite_worker_live yes "disposable Docker Worker; read-only source, fresh SQLite, localhost WSS" sqlite_worker_docker
   else
-    for gate in mysql_integration mysql_setup_ui mysql_worker_live; do missing "$gate" yes "requires T5_MYSQL_SANDBOX=1, MYSQL_TEST_HOST=127.0.0.1|localhost, MYSQL_TEST_DATABASE and disposable server; NEVER use production DB"; done
+    missing sqlite_worker_live yes "requires Node22, Go1.24, Docker, cached node:22 and ripgrep"
   fi
   if (( NODE_OK )) && [[ "${T5_BROWSER_SANDBOX:-0}" == 1 ]] && node -e "const fs=require('node:fs'); const {chromium}=require('@playwright/test');process.exit(fs.existsSync(chromium.executablePath())?0:1)" >/dev/null 2>&1; then
     run playwright_browser yes "real cached Chromium; no silent green on absence" ./node_modules/.bin/playwright test --config dist/playwright.config.js
@@ -185,7 +178,7 @@ if [[ "$MODE" == --full ]]; then
     for gate in standalone_build standalone_provenance; do missing "$gate" yes "needs T5_ALLOW_DOCKER_BUILD=1, clean source, cached bases and local Docker; no silent pulls"; done
   fi
 else
-  for gate in linux_installer_lifecycle go_test go_race go_vet wss_worker go_isolation mysql_integration mysql_setup_ui mysql_worker_live playwright_browser standalone_build standalone_provenance; do missing "$gate" yes "targeted mode; use --full with exact disposable prerequisites"; done
+  for gate in linux_installer_lifecycle go_test go_race go_vet wss_worker go_isolation sqlite_worker_live playwright_browser standalone_build standalone_provenance; do missing "$gate" yes "targeted mode; use --full with exact disposable prerequisites"; done
 fi
 # Network audit and Trivy are always separately approved and never implicitly executed.
 missing dependency_audit yes "npm audit requires explicit approved network access and fresh registry evidence"
