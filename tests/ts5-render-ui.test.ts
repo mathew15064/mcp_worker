@@ -1,5 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import pages from '../src/http/pages';
 
 void test('TS5 renderer escapes hostile login input without changing form contract', () => {
@@ -70,6 +74,61 @@ void test('HTTP-only Worker setup stays fail-closed and never advertises an inst
   assert.doesNotMatch(html, /id="worker-install-(linux|macos|windows)-command"/);
   assert.match(html, /HTTPS required for remote Worker connections/);
   assert.match(html, /https:\/\/YOUR_MCP_DOMAIN/);
+});
+
+void test('Worker install commands fail closed on partial or empty downloads', () => {
+  const origin = 'https://127.0.0.1:1';
+  const linux = pages.workerInstallCommand(origin, 'linux');
+  const macos = pages.workerInstallCommand(origin, 'macos');
+  const windows = pages.workerInstallCommand(origin, 'windows');
+
+  assert.match(linux, /install-linux[.]sh/);
+  assert.match(macos, /install-macos[.]sh/);
+  assert.match(linux, /--max-redirs 0/);
+  assert.match(linux, /--proto "=https"/);
+  assert.doesNotMatch(linux, /[|]\s*sh/);
+  assert.match(windows, /ErrorActionPreference = 'Stop'/);
+  assert.match(windows, /MaximumRedirection 0/);
+  assert.match(windows, /IsNullOrWhiteSpace/);
+  assert.doesNotMatch(windows, /[|]\s*iex/);
+  for (const invalid of ['http://example.test', 'https://example.test/other', "https://example.test';whoami"]) {
+    assert.throws(() => pages.workerInstallCommand(invalid, 'linux'), /Trusted HTTPS/);
+  }
+
+  if (process.platform === 'win32') return; // Unix shell only; Windows script is native QA.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-install-command-'));
+  const marker = path.join(dir, 'executed');
+  try {
+    fs.writeFileSync(
+      path.join(dir, 'curl'),
+      '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do\n  if [ "$1" = "-o" ]; then shift; dest="$1"; break; fi\n  shift\ndone\nif [ "$TEST_CURL_MODE" = empty ]; then : > "$dest"; exit 0; fi\nprintf \'printf ok > "$TEST_SENTINEL"\\n\' > "$dest"\nif [ "$TEST_CURL_MODE" = partial-fail ]; then exit 22; fi\n',
+      { mode: 0o700 },
+    );
+    for (const mode of ['partial-fail', 'empty', 'success']) {
+      fs.rmSync(marker, { force: true });
+      const result = spawnSync('sh', ['-c', linux], {
+        encoding: 'utf8',
+        timeout: 5000,
+        env: {
+          ...process.env,
+          PATH: dir + path.delimiter + process.env.PATH,
+          TMPDIR: dir,
+          TEST_CURL_MODE: mode,
+          TEST_SENTINEL: marker,
+        },
+      });
+      assert.equal(result.error, undefined, String(result.error));
+      assert.equal(result.status, mode === 'success' ? 0 : mode === 'partial-fail' ? 22 : 1);
+      assert.equal(fs.existsSync(marker), mode === 'success', mode);
+      assert.deepEqual(
+        fs.readdirSync(dir).filter((name) => name !== 'curl'),
+        mode === 'success' ? ['executed'] : [],
+        'temporary installer file must be removed',
+      );
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 void test('User Worker page cannot bypass signed-release enrollment gating', () => {
