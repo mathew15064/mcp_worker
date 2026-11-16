@@ -17,6 +17,27 @@ esac
 for cmd in docker openssl flock git; do command -v "$cmd" >/dev/null 2>&1 || fail "Missing prerequisite: $cmd"; done
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 required."
 docker info >/dev/null 2>&1 || fail "Docker daemon unavailable."
+# Prefer an explicit public origin for proxies/NAT; otherwise discover the host's
+# outbound IPv4 source address (no network request is sent by `ip route get`).
+find_public_origin() {
+  if [ -n "${MCP_WORKER_PUBLIC_URL:-}" ]; then
+    printf '%s\n' "$MCP_WORKER_PUBLIC_URL"
+    return
+  fi
+  host_ip="${MCP_WORKER_PUBLIC_IP:-}"
+  if [ -z "$host_ip" ] && command -v ip >/dev/null 2>&1; then
+    host_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<NF;i++) if($i=="src"){print $(i+1);exit}}' || true)"
+  fi
+  if [ -z "$host_ip" ] && command -v hostname >/dev/null 2>&1; then
+    host_ip="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+  fi
+  if ! printf '%s\n' "$host_ip" | awk -F. 'NF != 4 {exit 1} {for(i=1;i<=4;i++) if($i !~ /^[0-9]+$/ || $i > 255 || $i < 0) exit 1}'; then
+    fail 'Cannot determine host IPv4; set MCP_WORKER_PUBLIC_IP or MCP_WORKER_PUBLIC_URL.'
+  fi
+  case "$host_ip" in 0.*|127.*|169.254.*|255.*) fail 'Unusable host IP; set MCP_WORKER_PUBLIC_URL.' ;; esac
+  printf 'http://%s:%s\n' "$host_ip" "$port"
+}
+
 envfile="${MCP_WORKER_SETUP_ENV:-.env.setup}"
 case "$envfile" in .env.setup|.env.setup-*) ;; *) fail "Use a local .env.setup or .env.setup-* file." ;; esac
 case "$envfile" in */*) fail "Invalid env file path." ;; esac
@@ -45,10 +66,13 @@ if [ ! -e "$envfile" ]; then
   for suffix in app-data mysql-data; do
     if docker volume inspect "${project}_$suffix" >/dev/null 2>&1; then fail "Existing volume found; restore original installer env."; fi
   done
+  public_origin="$(find_public_origin)"
+  case "$public_origin" in http://*|https://*) ;; *) fail 'Invalid public URL; set MCP_WORKER_PUBLIC_URL.' ;; esac
+  case "$public_origin" in *[[:space:]]*|*'#'*|*'?'*|*'@'*) fail 'Invalid public origin.' ;; esac
   tmp=$(mktemp "./$envfile.XXXXXX")
   trap 'rm -f "$tmp"' EXIT HUP INT TERM
   {
-    printf 'COMPOSE_PROJECT_NAME=%s\nMCP_WORKER_PORT=%s\n' "$project" "$port"
+    printf 'COMPOSE_PROJECT_NAME=%s\nMCP_WORKER_PORT=%s\nMCP_PUBLIC_BASE_URL=%s\nMCP_ENABLED=true\n' "$project" "$port" "$public_origin"
     printf 'ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 24)"
     printf 'SESSION_SECRET=%s\n' "$(openssl rand -hex 32)"
     printf 'APP_ENCRYPTION_KEY=%s\n' "$(openssl rand -base64 32)"

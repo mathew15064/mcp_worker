@@ -18,6 +18,27 @@ case "$name" in ''|*[!a-zA-Z0-9_.-]* ) fail 'Invalid container name.' ;; esac
 case "$volume" in ''|*[!a-zA-Z0-9_.-]* ) fail 'Invalid volume name.' ;; esac
 case "$port" in ''|*[!0-9]*) fail 'Invalid port.' ;; esac
 [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || fail 'Port out of range.'
+# Prefer an explicit public origin for proxies/NAT; otherwise discover the host's
+# outbound IPv4 source address (no network request is sent by `ip route get`).
+find_public_origin() {
+  if [ -n "${MCP_WORKER_PUBLIC_URL:-}" ]; then
+    printf '%s\n' "$MCP_WORKER_PUBLIC_URL"
+    return
+  fi
+  host_ip="${MCP_WORKER_PUBLIC_IP:-}"
+  if [ -z "$host_ip" ] && command -v ip >/dev/null 2>&1; then
+    host_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<NF;i++) if($i=="src"){print $(i+1);exit}}' || true)"
+  fi
+  if [ -z "$host_ip" ] && command -v hostname >/dev/null 2>&1; then
+    host_ip="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+  fi
+  if ! printf '%s\n' "$host_ip" | awk -F. 'NF != 4 {exit 1} {for(i=1;i<=4;i++) if($i !~ /^[0-9]+$/ || $i > 255 || $i < 0) exit 1}'; then
+    fail 'Cannot determine host IPv4; set MCP_WORKER_PUBLIC_IP or MCP_WORKER_PUBLIC_URL.'
+  fi
+  case "$host_ip" in 0.*|127.*|169.254.*|255.*) fail 'Unusable host IP; set MCP_WORKER_PUBLIC_URL.' ;; esac
+  printf 'http://%s:%s\n' "$host_ip" "$port"
+}
+
 envfile="$PWD/.env.setup"
 [ ! -L "$envfile" ] && [ ! -L "$PWD" ] || fail 'Symlinked setup path refused.'
 
@@ -51,6 +72,12 @@ if [ -e "$envfile" ]; then
   [ -n "$saved_port" ] && [ "$saved_port" = "$port" ] || fail 'Saved port differs from requested port.'
 fi
 
+saved_origin=""
+if [ -f "$envfile" ]; then saved_origin="$(sed -n 's/^MCP_PUBLIC_BASE_URL=//p' "$envfile")"; fi
+public_origin="${saved_origin:-$(find_public_origin)}"
+case "$public_origin" in http://*|https://*) ;; *) fail 'Public URL must start with http:// or https://.' ;; esac
+case "$public_origin" in *[[:space:]]*|*'#'*|*'?'*|*'@'*) fail 'Invalid public origin.' ;; esac
+
 if [ "$mode" != --init ] && [ ! -e "$envfile" ]; then
   fail 'No installation found. Use --init for a fresh instance.'
 fi
@@ -64,7 +91,7 @@ start_server() {
     --label mcp_worker.install=quick \
     --env-file "$envfile" -e NODE_ENV=production -e PORT=80 -e HOST=0.0.0.0 \
     -e TRUST_PROXY=false -e COOKIE_SECURE=false \
-    -e "MCP_PUBLIC_BASE_URL=http://127.0.0.1:$port" \
+    -e "MCP_PUBLIC_BASE_URL=$public_origin" \
     --publish "$bind_host:$port:80" \
     --mount "type=volume,src=$volume,dst=/app/data" "$run_image" >/dev/null
 }
@@ -113,7 +140,7 @@ else
   if [ ! -e "$envfile" ]; then
     # Avoid requiring Node/npm/openssl on the host. Container writes the secret file.
     docker run --rm --network none --user "$(id -u):$(id -g)" \
-      --env "MCP_WORKER_SETUP_PORT=$port" \
+      --env "MCP_WORKER_SETUP_PORT=$port" --env "MCP_PUBLIC_BASE_URL=$public_origin" \
       --mount "type=bind,src=$PWD,dst=/setup" --entrypoint node "$image" \
       dist/scripts/quick-setup.cjs /setup/.env.setup
   fi
@@ -140,4 +167,4 @@ until docker exec "$name" node -e "fetch('http://127.0.0.1:80/readyz').then(r=>p
   [ "$tries" -lt 40 ] || fail "Readiness failed. Check docker logs $name; data retained."
   sleep 1
 done
-echo "Ready: listening on 0.0.0.0:$port; open http://YOUR_VPS_IP:$port/admin (username admin; password in $envfile)"
+echo "Ready: listening on 0.0.0.0:$port; public URL $public_origin (Admin password in $envfile)"

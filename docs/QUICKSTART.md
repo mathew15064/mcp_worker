@@ -43,6 +43,16 @@ file (mode 0600) with three generated secrets (ADMIN_PASSWORD, SESSION_SECRET, A
 create `.env`, share the installer file, regenerate secrets over existing
 volumes, or expose the HTTP port to the Internet**.
 
+The initial **Public Base URL** is derived from the host's outbound IPv4
+interface (`ip route get`), not the Docker bridge or `0.0.0.0`. For a VPS
+behind NAT, set `MCP_WORKER_PUBLIC_IP=<public-ip>` before setup. For a
+reverse proxy, set `MCP_WORKER_PUBLIC_URL=https://your-domain.example`.
+The chosen URL is persisted in `.env.setup` and the SQLite settings.
+`MCP_ENABLED=true` is the initial default, but an Admin setting turned off
+later stays off. A Profile automatically selects the only online Worker;
+multiple online Workers require an explicit selection. Without an enrolled
+online Worker, execution-target creation is unavailable.
+
 **Security warning:** The published port is reachable from every network interface
 unless restricted by the host/cloud firewall. Plain HTTP exposes Admin login
 credentials to network observers; allow only trusted IPs or add an HTTPS reverse

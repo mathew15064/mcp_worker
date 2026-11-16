@@ -39,7 +39,12 @@ secrets. The script initializes a new persistent volume (`mcp_worker_quick_app-d
 only when requested and publishes port **3333 on `0.0.0.0`** (all IPv4 interfaces).
 Open **`http://YOUR_VPS_IP:3333/admin`** from another machine, or
 `http://127.0.0.1:3333/admin` on the VPS itself. Read `ADMIN_PASSWORD`
-privately from `.env.setup` and log in as `admin`.
+privately from `.env.setup` and log in as `admin`. On first installation,
+Quick Setup detects the host's primary IPv4 address and saves an origin such as
+`http://YOUR_VPS_IP:3333` in `.env.setup` and the SQLite settings. For NAT or
+an HTTPS reverse proxy, set `MCP_WORKER_PUBLIC_IP` or
+`MCP_WORKER_PUBLIC_URL=https://your-domain.example` before running setup.
+MCP is **enabled by default**; later Admin settings overrides are respected.
 
 **Security:** This exposes the Admin login over plain HTTP wherever the VPS
 firewall allows port 3333. Restrict access to trusted IPs or put the server

@@ -26,5 +26,34 @@ void test('TS5 Worker dashboard has execution targets, not SSH profile forms', (
   const html = pages.workersPage({ workers: [], profiles: [], csrfToken: 'test' });
   assert.match(html, /New Execution Target/);
   assert.match(html, /worker-profile-modal/);
+  assert.match(html, /New Execution Target · connect a Worker first/);
   assert.doesNotMatch(html, /SSH Profiles|account-ssh-modal|Attach Shell/);
+});
+
+void test('Worker Profile automatically selects its only online Worker', () => {
+  const html = pages.workersPage({
+    workers: [{ id: 'worker-1', name: 'Dev & Laptop', enabled: true, status: 'online' }],
+    profiles: [],
+    csrfToken: 'csrf',
+  });
+  assert.match(html, /name="worker_id" value="worker-1"/);
+  assert.match(html, /Automatically using Dev &amp; Laptop/);
+  assert.doesNotMatch(html, /Select online Worker/);
+});
+
+void test('Worker Profile requires a choice when multiple online Workers exist', () => {
+  const html = pages.workersPage({
+    workers: [
+      { id: 'one', name: 'Primary', enabled: true, status: 'online' },
+      { id: 'two', name: 'Secondary', enabled: true, status: 'online' },
+      { id: 'disabled', name: 'Offline', enabled: true, status: 'offline' },
+    ],
+    profiles: [],
+    csrfToken: 'csrf',
+  });
+  assert.match(html, /name="worker_id" required/);
+  assert.match(html, /Select online Worker/);
+  assert.match(html, /option value="one"/);
+  assert.match(html, /option value="two"/);
+  assert.doesNotMatch(html, /option value="disabled"/);
 });

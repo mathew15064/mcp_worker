@@ -36,8 +36,16 @@ function main() {
   if (!/^[0-9]{1,5}$/.test(port) || Number(port) < 1 || Number(port) > 65535) {
     throw new Error('Invalid MCP_WORKER_SETUP_PORT.');
   }
+  const publicOrigin = process.env.MCP_PUBLIC_BASE_URL || '';
+  const url = new URL(publicOrigin);
+  if (!['http:', 'https:'].includes(url.protocol) || url.origin !== publicOrigin ||
+      url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
+    throw new Error('MCP_PUBLIC_BASE_URL must be an HTTP(S) origin without path, query or credentials.');
+  }
   const body = [
     'MCP_WORKER_PORT=' + port,
+    'MCP_PUBLIC_BASE_URL=' + publicOrigin,
+    'MCP_ENABLED=true',
     'ADMIN_USERNAME=admin',
     'ADMIN_PASSWORD=' + crypto.randomBytes(24).toString('hex'),
     'SESSION_SECRET=' + crypto.randomBytes(32).toString('hex'),
