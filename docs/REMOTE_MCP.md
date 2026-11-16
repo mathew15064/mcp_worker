@@ -14,8 +14,11 @@ HTTP-01 challenge must be reachable on port 80. Verify with staging first,
 then a production certificate, and configure automatic renewal and Nginx
 reload; the short-lived IP certificate expires after about six days.
 Certbot's nginx installer does not handle IP certificate provisioning.
-An explicit reverse proxy must be configured by the operator; the standalone
-Quick Setup script does not yet automate certificate issuance.
+Quick Setup can now install Nginx, a dedicated IP/hostname TLS virtual
+host and an isolated automatic renewal timer on Debian/Ubuntu by default.
+It refuses to overwrite existing virtual hosts and requires root for
+automatic provisioning. `MCP_WORKER_TLS_MODE=external` keeps operator-managed
+Nginx/Certbot/other proxies untouched.
 The proxy must forward Host and X-Forwarded-Proto, support WebSocket
 upgrades, and permit MCP streaming responses. Restrict direct backend
 access to the trusted proxy; set TRUST_PROXY to the actual trusted hop
@@ -24,7 +27,11 @@ configure the public base URL in Admin Settings > MCP. The public base URL
 is the HTTPS origin without /mcp; the resource URL includes /mcp. Verify
 external reachability and the certificate from an independent network.
 
-### IP certificate and reverse proxy example (Linux host)
+### Optional manual IP certificate and reverse proxy (advanced)
+
+The steps below are only required for existing, operator-managed proxies
+or unsupported distros; the Debian/Ubuntu standalone Quick Setup script
+automates this process when `MCP_WORKER_TLS_MODE=auto` (the default).
 
 After the host has a dedicated HTTP server block for the exact public IP
 serving `/.well-known/acme-challenge/` from `/var/www/certbot`, request a
