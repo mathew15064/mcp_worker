@@ -39,11 +39,9 @@ void test('Quick Setup signed-distribution mount preflight fails closed without 
   try {
     fs.mkdirSync(bin);
     fs.mkdirSync(dist, { mode: 0o755 });
-    fs.writeFileSync(
-      path.join(bin, 'docker'),
-      '#!/bin/sh\n[ "$1" = info ] && exit 0\nexit 99\n',
-      { mode: 0o755 },
-    );
+    fs.writeFileSync(path.join(bin, 'docker'), '#!/bin/sh\n[ "$1" = info ] && exit 0\nexit 99\n', {
+      mode: 0o755,
+    });
     for (const name of binaries) {
       fs.writeFileSync(path.join(dist, name), 'test-only binary placeholder\n', { mode: 0o644 });
     }
@@ -52,14 +50,20 @@ void test('Quick Setup signed-distribution mount preflight fails closed without 
       'version=0.0.0\ncommit=0000000000000000000000000000000000000000\n',
       { mode: 0o644 },
     );
-    const checksums = [...binaries, 'WORKER_RELEASE']
-      .map((name) => {
-        const digest = crypto.createHash('sha256').update(fs.readFileSync(path.join(dist, name))).digest('hex');
-        return digest + '  ' + name;
-      })
-      .join('\n') + '\n';
+    const checksums =
+      [...binaries, 'WORKER_RELEASE']
+        .map((name) => {
+          const digest = crypto
+            .createHash('sha256')
+            .update(fs.readFileSync(path.join(dist, name)))
+            .digest('hex');
+          return digest + '  ' + name;
+        })
+        .join('\n') + '\n';
     fs.writeFileSync(path.join(dist, 'SHA256SUMS'), checksums, { mode: 0o644 });
-    fs.writeFileSync(path.join(dist, 'SHA256SUMS.sig'), 'fixture-not-valid-signature', { mode: 0o644 });
+    fs.writeFileSync(path.join(dist, 'SHA256SUMS.sig'), 'fixture-not-valid-signature', {
+      mode: 0o644,
+    });
 
     assert.match(run('relative/path').stderr, /absolute path/);
     fs.rmSync(path.join(dist, 'SHA256SUMS.sig'));
@@ -67,7 +71,9 @@ void test('Quick Setup signed-distribution mount preflight fails closed without 
     fs.symlinkSync('WORKER_RELEASE', path.join(dist, 'SHA256SUMS.sig'));
     assert.match(run(dist).stderr, /missing, empty or symlinked: SHA256SUMS.sig/);
     fs.rmSync(path.join(dist, 'SHA256SUMS.sig'));
-    fs.writeFileSync(path.join(dist, 'SHA256SUMS.sig'), 'fixture-not-valid-signature', { mode: 0o644 });
+    fs.writeFileSync(path.join(dist, 'SHA256SUMS.sig'), 'fixture-not-valid-signature', {
+      mode: 0o644,
+    });
 
     fs.appendFileSync(path.join(dist, 'WORKER_RELEASE'), 'tampered\n');
     assert.match(run(dist).stderr, /checksum inventory mismatch/);
