@@ -12,6 +12,36 @@ This reuses an exact matching local image, including a previously pulled Docker 
 only on cache miss or `MCP_WORKER_FORCE_BUILD=1`. Fresh source installs use
 Docker Compose and a *separate* SQLite volume from Quick Setup.
 
+## Quick Setup public IP or hostname HTTPS
+
+Quick Setup now chooses `https://PUBLIC_IP` automatically for **new**
+instances, or a user-provided `MCP_WORKER_PUBLIC_URL=https://mcp.example.com`.
+On a VPS whose port 443 is already in use, Quick Setup selects
+port 3443 automatically when it can inspect local listening ports; explicitly
+set `MCP_WORKER_HTTPS_PORT=3443` to override this choice. IP discovery is based
+on the host outbound IPv4 address; for NAT, provide `MCP_WORKER_PUBLIC_IP`.
+
+**HTTPS requires a real trusted certificate and reverse proxy**, installed
+separately from the Docker image. The new HTTPS-backed container binds Node
+to `127.0.0.1:3333`, not the public interface, and uses Secure cookies and a
+one-hop trusted proxy. Before remote use, provision TLS, check certificates,
+configure WebSocket/SSE forwarding and ensure renewal works. Do not confuse
+the generated HTTPS URL with a verified/working endpoint. Consult
+[REMOTE_MCP.md](REMOTE_MCP.md).
+
+To migrate an existing HTTP Quick Setup instance after the proxy becomes
+reachable:
+
+```sh
+MCP_WORKER_PUBLIC_URL=https://YOUR_PUBLIC_IP:3443 sh quick-setup.sh --https
+```
+
+The cutover validates remote HTTPS before any change, retains SQLite and
+credentials, makes an online database backup, and has container/config
+recovery if the new health check fails. Run from the original directory
+containing `.env.setup`. The explicit `--init` mode refuses orphaned old
+SQLite volumes, and `--rebind` never exposes a HTTPS-proxied backend.
+
 ## Requirements for Source Setup
 
 A Linux machine with Docker Engine, Docker Compose v2, Git, OpenSSL and
