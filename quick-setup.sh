@@ -3,11 +3,11 @@
 set -eu
 umask 077
 fail() { printf 'Quick setup: %s\n' "$*" >&2; exit 1; }
-usage() { echo 'Usage: sh quick-setup.sh [--init|--start|--rebind|--down] (default: --init)'; }
+usage() { echo 'Usage: sh quick-setup.sh [--init|--start|--rebind|--https|--down] (default: --init)'; }
 
 mode="${1:---init}"
 [ "$#" -le 1 ] || fail 'Unexpected argument.'
-case "$mode" in --init|--start|--rebind|--down) ;; -h|--help) usage; exit 0 ;; *) usage; exit 2 ;; esac
+case "$mode" in --init|--start|--rebind|--https|--down) ;; -h|--help) usage; exit 0 ;; *) usage; exit 2 ;; esac
 command -v docker >/dev/null 2>&1 || fail 'Docker Engine is required.'
 docker info >/dev/null 2>&1 || fail 'Docker daemon is unavailable.'
 name="${MCP_WORKER_CONTAINER:-mcp_worker-server}"
@@ -22,6 +22,7 @@ case "$port" in ''|*[!0-9]*) fail 'Invalid port.' ;; esac
 # outbound IPv4 source address (no network request is sent by `ip route get`).
 find_public_origin() {
   if [ -n "${MCP_WORKER_PUBLIC_URL:-}" ]; then
+    case "$MCP_WORKER_PUBLIC_URL" in https://*) ;; *) fail 'Explicit public URL must use HTTPS.' ;; esac
     printf '%s\n' "$MCP_WORKER_PUBLIC_URL"
     return
   fi
@@ -35,8 +36,25 @@ find_public_origin() {
   if ! printf '%s\n' "$host_ip" | awk -F. 'NF != 4 {exit 1} {for(i=1;i<=4;i++) if($i !~ /^[0-9]+$/ || $i > 255 || $i < 0) exit 1}'; then
     fail 'Cannot determine host IPv4; set MCP_WORKER_PUBLIC_IP or MCP_WORKER_PUBLIC_URL.'
   fi
-  case "$host_ip" in 0.*|127.*|169.254.*|255.*) fail 'Unusable host IP; set MCP_WORKER_PUBLIC_URL.' ;; esac
-  printf 'http://%s:%s\n' "$host_ip" "$port"
+  case "$host_ip" in
+    0.*|10.*|127.*|169.254.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|192.168.*|255.*)
+      fail 'Private/unusable host IP; supply MCP_WORKER_PUBLIC_IP or an HTTPS public URL.' ;;
+  esac
+  https_port="${MCP_WORKER_HTTPS_PORT:-}"
+  if [ -z "$https_port" ]; then
+    https_port=443
+    # On shared VPS hosts keep the existing TLS/hostname listeners on 443.
+    if command -v ss >/dev/null 2>&1 && ss -ltn | grep -Eq ':443[[:space:]]'; then
+      https_port=3443
+    fi
+  fi
+  case "$https_port" in ''|*[!0-9]*) fail 'MCP_WORKER_HTTPS_PORT must be numeric.' ;; esac
+  [ "$https_port" -ge 1 ] && [ "$https_port" -le 65535 ] || fail 'HTTPS port out of range.'
+  if [ "$https_port" -eq 443 ]; then
+    printf 'https://%s\n' "$host_ip"
+  else
+    printf 'https://%s:%s\n' "$host_ip" "$https_port"
+  fi
 }
 
 envfile="$PWD/.env.setup"
@@ -95,25 +113,41 @@ if [ -e "$envfile" ]; then
   [ -n "$saved_port" ] && [ "$saved_port" = "$port" ] || fail 'Saved port differs from requested port.'
 fi
 
-saved_origin=""
-if [ -f "$envfile" ]; then saved_origin="$(sed -n 's/^MCP_PUBLIC_BASE_URL=//p' "$envfile")"; fi
-public_origin="${saved_origin:-$(find_public_origin)}"
-case "$public_origin" in http://*|https://*) ;; *) fail 'Public URL must start with http:// or https://.' ;; esac
-case "$public_origin" in *[[:space:]]*|*'#'*|*'?'*|*'@'*) fail 'Invalid public origin.' ;; esac
-
 if [ "$mode" != --init ] && [ ! -e "$envfile" ]; then
   fail 'No installation found. Use --init for a fresh instance.'
 fi
 
-# Host bind is deliberately public; inside the container the server already
-# listens on 0.0.0.0. Do not use 0.0.0.0 as the OAuth public URL.
+saved_origin=""
+if [ -f "$envfile" ]; then saved_origin="$(sed -n 's/^MCP_PUBLIC_BASE_URL=//p' "$envfile")"; fi
+if [ "$mode" = --https ]; then
+  [ -n "${MCP_WORKER_PUBLIC_URL:-}" ] || fail '--https requires MCP_WORKER_PUBLIC_URL=https://IP:PORT or https://hostname.'
+  public_origin="$MCP_WORKER_PUBLIC_URL"
+else
+  public_origin="${saved_origin:-$(find_public_origin)}"
+fi
+case "$public_origin" in
+  https://*) ;;
+  http://*) [ -n "$saved_origin" ] || fail 'New public deployments require HTTPS.' ;;
+  *) fail 'Public URL must start with HTTPS.' ;;
+esac
+origin_authority="${public_origin#*://}"
+case "$origin_authority" in
+  ''|*/*|*'@'*|*'?'*|*'#'*|*[!a-zA-Z0-9.:_-]*)
+    fail 'Public URL must be a bare IP/hostname HTTPS origin and optional port.' ;;
+esac
+
+# HTTPS is terminated by a trusted local proxy; keep its backend loopback-only.
+# Legacy HTTP servers retain their binding until a deliberate HTTPS migration.
 start_server() {
   run_image="$1"
-  bind_host="${2:-0.0.0.0}"
+  case "$public_origin" in
+    https://*) bind_host="127.0.0.1"; trust_proxy=1; cookie_secure=true ;;
+    *) bind_host="${2:-0.0.0.0}"; trust_proxy=false; cookie_secure=false ;;
+  esac
   set -- docker run -d --name "$name" --init --restart unless-stopped \
     --label mcp_worker.install=quick \
     --env-file "$envfile" -e NODE_ENV=production -e PORT=80 -e HOST=0.0.0.0 \
-    -e TRUST_PROXY=false -e COOKIE_SECURE=false \
+    -e "TRUST_PROXY=$trust_proxy" -e "COOKIE_SECURE=$cookie_secure" \
     -e "MCP_PUBLIC_BASE_URL=$public_origin" \
     --publish "$bind_host:$port:80" \
     --mount "type=volume,src=$volume,dst=/app/data"
@@ -123,7 +157,105 @@ start_server() {
   "$@" "$run_image" >/dev/null
 }
 
+# Deliberate HTTPS cutover: validate the real public certificate and proxy
+# before changing the only Quick Setup container or its persistent settings.
+if [ "$mode" = --https ]; then
+  [ -n "$saved_origin" ] || fail 'Existing Quick Setup origin is missing.'
+  container_exists || fail 'Existing Quick Setup container is missing.'
+  volume_exists || fail 'Existing SQLite volume is missing.'
+  verify_ownership
+  verify_signed_dist_mount
+  [ "$(docker inspect "$name" --format '{{.State.Running}}')" = true ] || fail 'Existing container must be running.'
+  [ "$(docker inspect "$name" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Name}}{{end}}{{end}}')" = "$volume" ] || fail 'Unexpected SQLite mount.'
+  command -v curl >/dev/null 2>&1 || fail 'curl is required to verify external HTTPS.'
+  curl -fsS --proto '=https' --max-redirs 0 --max-time 15 "$public_origin/healthz" |
+    grep -q '"service":"mcp_worker"' || fail 'Trusted HTTPS healthcheck failed; refusing cutover.'
+  current_bind="$(docker port "$name" 80/tcp)"
+  case "$current_bind" in "0.0.0.0:$port"|"127.0.0.1:$port") ;; *) fail 'Unexpected host port binding.' ;; esac
+  if [ "$saved_origin" = "$public_origin" ]; then
+    [ "$current_bind" = "127.0.0.1:$port" ] || fail 'HTTPS origin configured but backend is not loopback-only.'
+    echo "HTTPS origin already configured: $public_origin"
+    exit 0
+  fi
+
+  original_image="$(docker inspect "$name" --format '{{.Image}}')"
+  docker image inspect "$original_image" >/dev/null 2>&1 || fail 'Original image unavailable for recovery.'
+  old_public_origin="$saved_origin"
+  old_db_origin="$(docker exec "$name" node -e '
+    const D=require("better-sqlite3");
+    const d=new D("data/mcp_worker.sqlite",{readonly:true});
+    const row=d.prepare("SELECT value FROM system_settings WHERE key=?").get("mcp.public_base_url");
+    if (!row || typeof row.value !== "string") process.exit(1);
+    console.log(row.value);
+    d.close();
+  ')" || fail 'Cannot read existing SQLite origin.'
+
+  # Online SQLite backup, stored alongside the live database in its volume.
+  docker exec "$name" node -e '
+    const D=require("better-sqlite3"),fs=require("node:fs");
+    const d=new D("data/mcp_worker.sqlite",{readonly:true});
+    const target="data/.mcp-worker-before-https-"+Date.now()+".sqlite";
+    if(fs.existsSync(target)||d.pragma("integrity_check",{simple:true})!=="ok")process.exit(2);
+    d.backup(target).then(()=>{
+      const check=new D(target,{readonly:true});
+      if(check.pragma("integrity_check",{simple:true})!=="ok")process.exit(4);
+      check.close();d.close();console.log("SQLite backup verified");
+    }).catch(()=>process.exit(3));
+  ' || fail 'SQLite backup failed; refusing HTTPS cutover.'
+
+  set_db_public_origin() {
+    docker run --rm --network none --env "MCP_NEXT_PUBLIC_URL=$1"       --mount "type=volume,src=$volume,dst=/app/data" --entrypoint node "$original_image" -e '
+        const D=require("better-sqlite3"), db=new D("data/mcp_worker.sqlite");
+        const r=db.prepare("UPDATE system_settings SET value=?, updated_at=? WHERE key=?")
+          .run(process.env.MCP_NEXT_PUBLIC_URL,new Date().toISOString(),"mcp.public_base_url");
+        db.close();
+        if(r.changes!==1)process.exit(3);
+      '
+  }
+  old_bind="$(printf '%s' "$current_bind" | sed "s/:$port$//")"
+  original_env_backup="$(mktemp "$PWD/.env.setup.pre-https.XXXXXXXX")" || fail 'Cannot create env recovery copy.'
+  cp "$envfile" "$original_env_backup"
+  chmod 0600 "$original_env_backup"
+  new_env_file="$(mktemp "$PWD/.env.setup.new.XXXXXXXX")" || fail 'Cannot prepare HTTPS env.'
+  sed "s|^MCP_PUBLIC_BASE_URL=.*|MCP_PUBLIC_BASE_URL=$public_origin|" "$envfile" > "$new_env_file"
+  chmod 0600 "$new_env_file"
+  rollback_https() {
+    status=$?
+    trap - EXIT
+    if [ "$status" -ne 0 ]; then
+      echo 'HTTPS cutover failed; restoring original container and origin.' >&2
+      docker rm -f "$name" >/dev/null 2>&1 || :
+      cp "$original_env_backup" "$envfile" || :
+      public_origin="$old_public_origin"
+      set_db_public_origin "$old_db_origin" >/dev/null 2>&1 || echo 'WARNING: SQLite URL recovery failed; restore the online backup.' >&2
+      start_server "$original_image" "$old_bind" || echo 'WARNING: container recovery failed; SQLite volume retained.' >&2
+    fi
+    rm -f "$new_env_file" "$original_env_backup"
+    exit "$status"
+  }
+  trap rollback_https EXIT
+  trap 'exit 1' INT HUP TERM
+  docker stop "$name" >/dev/null
+  docker rm "$name" >/dev/null
+  set_db_public_origin "$public_origin" >/dev/null
+  mv "$new_env_file" "$envfile"
+  start_server "$original_image"
+  tries=0
+  until docker exec "$name" node -e "fetch('http://127.0.0.1:80/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; do
+    tries=$((tries+1))
+    [ "$tries" -lt 40 ] || fail 'HTTPS container readiness failed.'
+    sleep 1
+  done
+  curl -fsS --proto '=https' --max-redirs 0 --max-time 15 "$public_origin/readyz" >/dev/null ||
+    fail 'External HTTPS readiness failed after cutover.'
+  trap - EXIT INT HUP TERM
+  rm -f "$original_env_backup" "$new_env_file"
+  echo "HTTPS cutover complete: $public_origin (SQLite and private setup credentials preserved)."
+  exit 0
+fi
+
 if [ "$mode" = --rebind ]; then
+  case "$public_origin" in https://*) fail '--rebind cannot publicly expose an HTTPS-proxied backend.' ;; esac
   container_exists || fail 'No installed Quick Setup container to rebind.'
   verify_ownership
   verify_signed_dist_mount
@@ -175,6 +307,10 @@ else
   fi
   [ -f "$envfile" ] && [ ! -L "$envfile" ] || fail 'Private .env.setup missing.'
   [ "$(stat -c %a "$envfile")" = 600 ] || fail '.env.setup must have permission 0600.'
+  # --init must never recreate an orphaned existing database.
+  if [ "$mode" = --init ] && volume_exists; then
+    fail 'Existing SQLite volume detected; --init refused. Restore the container or use --start.'
+  fi
   # Do not start if another container holds this SQLite volume.
   if volume_exists; then
     users="$(docker ps -q --filter "volume=$volume")"
@@ -196,4 +332,10 @@ until docker exec "$name" node -e "fetch('http://127.0.0.1:80/readyz').then(r=>p
   [ "$tries" -lt 40 ] || fail "Readiness failed. Check docker logs $name; data retained."
   sleep 1
 done
-echo "Ready: listening on 0.0.0.0:$port; public URL $public_origin (Admin password in $envfile)"
+case "$public_origin" in
+  https://*)
+    echo "Ready: backend on 127.0.0.1:$port; HTTPS origin $public_origin (Admin password in $envfile)"
+    echo "HTTPS needs a valid certificate and reverse proxy at this origin; verify externally before enrolling Workers." ;;
+  *)
+    echo "Ready: legacy HTTP on 0.0.0.0:$port; public URL $public_origin (Admin password in $envfile)" ;;
+esac

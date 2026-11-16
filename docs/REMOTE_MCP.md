@@ -5,9 +5,17 @@ reach it. Do not forward the standalone HTTP port or expose the SQLite database 
 configuration is an advanced deployment, not an automatically enabled
 feature. The external HTTPS flow is not yet end-to-end release-certified.
 
-Use a controlled HTTPS hostname with a valid trusted certificate and an
-explicit reverse proxy configured by the operator. This repository does not
-provide an automated public reverse-proxy deployment script.
+Use a trusted HTTPS origin: either an operator-controlled hostname
+(`https://mcp.example.com`) or a public IP with an IP-address certificate
+(`https://PUBLIC_IP:3443`). The hostname is optional. Certbot 5.4+ supports
+IP-address certificate issuance through HTTP-01 webroot with
+`--preferred-profile shortlived --ip-address PUBLIC_IP`. An actual
+HTTP-01 challenge must be reachable on port 80. Verify with staging first,
+then a production certificate, and configure automatic renewal and Nginx
+reload; the short-lived IP certificate expires after about six days.
+Certbot's nginx installer does not handle IP certificate provisioning.
+An explicit reverse proxy must be configured by the operator; the standalone
+Quick Setup script does not yet automate certificate issuance.
 The proxy must forward Host and X-Forwarded-Proto, support WebSocket
 upgrades, and permit MCP streaming responses. Restrict direct backend
 access to the trusted proxy; set TRUST_PROXY to the actual trusted hop
@@ -16,7 +24,49 @@ configure the public base URL in Admin Settings > MCP. The public base URL
 is the HTTPS origin without /mcp; the resource URL includes /mcp. Verify
 external reachability and the certificate from an independent network.
 
-Check discovery from a remote machine (replace the example hostname):
+### IP certificate and reverse proxy example (Linux host)
+
+After the host has a dedicated HTTP server block for the exact public IP
+serving `/.well-known/acme-challenge/` from `/var/www/certbot`, request a
+short-lived certificate with an isolated Certbot 5.4+ installation:
+
+```sh
+certbot certonly --staging --non-interactive --agree-tos \
+  --preferred-profile shortlived --webroot -w /var/www/certbot \
+  --ip-address YOUR_PUBLIC_IP
+# Confirm the HTTP-01 challenge works; issue production without --staging.
+certbot certonly --non-interactive --agree-tos \
+  --preferred-profile shortlived --webroot -w /var/www/certbot \
+  --ip-address YOUR_PUBLIC_IP
+```
+
+The real deployment must configure a dedicated Nginx TLS listener (for
+example `:3443`) with this certificate and proxy to
+`http://127.0.0.1:3333`. Forward `Host`, `X-Forwarded-Proto: https`,
+`X-Forwarded-For` from the real client IP, and WebSocket Upgrade headers;
+disable proxy buffering for MCP streaming. Do not replace the catch-all
+port 443 virtual host of an unrelated website. The HTTPS proxy must already
+answer the expected `/healthz` before cutover of an existing Quick Setup
+instance:
+
+```sh
+MCP_WORKER_PUBLIC_URL=https://YOUR_PUBLIC_IP:3443 sh quick-setup.sh --https
+```
+
+For automatic IP certificate renewal, use a **separate** Certbot renewal
+timer/configuration if the host's system Certbot is too old; ensure its
+successful-renewal deploy hook tests and reloads Nginx. Confirm certificate
+expiry and renewals periodically. Do not mix staging certificates into a
+production proxy.
+
+For a hostname, use the same reverse-proxy setup with a hostname SAN
+certificate and `MCP_WORKER_PUBLIC_URL=https://mcp.example.com`.
+No hostname is required for an IP SAN certificate. The public Worker
+signed-release gate is independent and must remain closed until explicitly
+approved.
+
+Check discovery from a remote machine (replace the example HTTPS origin;
+a hostname or public IP works):
 
     curl -fsS https://mcp-worker.example.com/.well-known/oauth-protected-resource/mcp
     curl -fsS https://mcp-worker.example.com/.well-known/oauth-authorization-server

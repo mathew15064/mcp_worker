@@ -33,35 +33,47 @@ curl -fsSLO https://raw.githubusercontent.com/mathew15064/mcp_worker/main/quick-
 sh quick-setup.sh --init
 ```
 
-The script pulls `mathew15604/mcp-worker:dev-main`. A Node command *inside that image*
-creates a private **`.env.setup` on your host** (mode 0600) with three random
-secrets. The script initializes a new persistent volume (`mcp_worker_quick_app-data`)
-only when requested and publishes port **3333 on `0.0.0.0`** (all IPv4 interfaces).
-Open **`http://YOUR_VPS_IP:3333/admin`** from another machine, or
-`http://127.0.0.1:3333/admin` on the VPS itself. Read `ADMIN_PASSWORD`
-privately from `.env.setup` and log in as `admin`. On first installation,
-Quick Setup detects the host's primary IPv4 address and saves an origin such as
-`http://YOUR_VPS_IP:3333` in `.env.setup` and the SQLite settings. For NAT or
-an HTTPS reverse proxy, set `MCP_WORKER_PUBLIC_IP` or
-`MCP_WORKER_PUBLIC_URL=https://your-domain.example` before running setup.
-MCP is **enabled by default**; later Admin settings overrides are respected.
+The script pulls `mathew15604/mcp-worker:dev-main` and creates a private
+`.env.setup` (mode 0600) and fresh persistent SQLite volume. With no hostname
+configured, it chooses an HTTPS origin based on the detected public IPv4
+address (port 443 when free; port 3443 if a local listener already owns 443,
+or the port explicitly selected via `MCP_WORKER_HTTPS_PORT`). With a hostname, specify
+`MCP_WORKER_PUBLIC_URL=https://mcp.example.com`. For NAT, explicitly set
+`MCP_WORKER_PUBLIC_IP`. The public origin is saved and **does not change
+automatically** on restart.
 
-**Security:** This exposes the Admin login over plain HTTP wherever the VPS
-firewall allows port 3333. Restrict access to trusted IPs or put the server
-behind HTTPS before using it over the public Internet. For remote OAuth/MCP,
-configure an HTTPS public base URL separately; `0.0.0.0` is a listening address,
-not a client-facing URL.
+**Important:** The Docker app listens only on `127.0.0.1:3333` when configured
+for HTTPS; the host still needs a trusted certificate and an HTTPS reverse
+proxy pointing at this backend. An HTTPS URL in `.env.setup` is **not proof
+that TLS is installed**. Set up the IP/hostname certificate and proxy before
+using public Admin, OAuth, or Worker WSS. IP certificates require a supported
+ACME client (Certbot 5.4+ for webroot) and automated renewal because they
+are short-lived. See [remote HTTPS guide](docs/REMOTE_MCP.md).
+
+For an **existing HTTP Quick Setup installation** with a working trusted HTTPS
+reverse proxy, run a deliberate, recoverable cutover from its original setup
+directory:
 
 ```sh
-sh quick-setup.sh --down     # stop; keep credentials and database
-sh quick-setup.sh --start    # restart using the same image and volume
-sh quick-setup.sh --rebind   # move existing localhost-only install to 0.0.0.0
+MCP_WORKER_PUBLIC_URL=https://YOUR_IP:3443 sh quick-setup.sh --https
 ```
 
-You can pin an immutable registry digest with `MCP_WORKER_IMAGE=docker.io/mathew15604/mcp-worker@sha256:...`
-when starting a fresh installation. A newer image is **not** silently swapped
-under an existing container: verify and explicitly migrate before upgrading.
-Keep `.env.setup` and the volume together; never delete either to troubleshoot.
+This checks public TLS first, makes a consistent SQLite backup, updates the
+saved URL and database, and recreates only the container with loopback
+backend, secure cookies and trusted proxy hop. Do **not** use `--init` on an
+existing SQLite volume; it refuses to reinitialize an orphaned volume.
+
+```sh
+sh quick-setup.sh --down    # stop; keep credentials and database
+sh quick-setup.sh --start   # restart same image and volume
+```
+
+Legacy HTTP installations retain their previous binding until an explicit
+HTTPS cutover. `--rebind` is only for legacy HTTP and cannot expose a
+secured backend. You can pin an immutable image with
+`MCP_WORKER_IMAGE=docker.io/mathew15604/mcp-worker@sha256:...` on fresh setup.
+No Docker Hub image, Go Worker binary, or public signed installer is published
+by changing the URL; Worker distribution remains HTTP 503.
 
 ## Source Setup — developer workflow
 
