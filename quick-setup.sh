@@ -65,8 +65,10 @@ if [ -n "$signed_dist_dir" ]; then
   [ -d "$signed_dist_dir" ] && [ ! -L "$signed_dist_dir" ] || fail 'Signed distribution directory missing or symlinked.'
   [ "$(cd "$signed_dist_dir" && pwd -P)" = "$signed_dist_dir" ] || fail 'Signed distribution directory must use its canonical path.'
   command -v sha256sum >/dev/null 2>&1 && command -v cmp >/dev/null 2>&1 || fail 'Signed distribution checks require sha256sum and cmp.'
+  case "$(stat -c %a "$signed_dist_dir")" in *[1357]) ;; *) fail 'Signed distribution directory must be traversable by the non-root server.' ;; esac
   for file in worker_mcp-linux-amd64 worker_mcp-linux-arm64 worker_mcp-linux-386 worker_mcp-linux-armv7 worker_mcp-darwin-amd64 worker_mcp-darwin-arm64 worker_mcp-windows-amd64.exe worker_mcp-windows-arm64.exe WORKER_RELEASE SHA256SUMS SHA256SUMS.sig; do
     [ -f "$signed_dist_dir/$file" ] && [ ! -L "$signed_dist_dir/$file" ] && [ -s "$signed_dist_dir/$file" ] || fail "Signed distribution file missing, empty or symlinked: $file"
+    case "$(stat -c %a "$signed_dist_dir/$file")" in *[4567]) ;; *) fail "Signed distribution file is unreadable by the non-root server: $file" ;; esac
   done
   [ "$(find "$signed_dist_dir" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = 11 ] || fail 'Signed distribution directory must contain exactly eleven release files.'
   (cd "$signed_dist_dir" && sha256sum worker_mcp-* WORKER_RELEASE | cmp -s - SHA256SUMS) || fail 'Signed distribution checksum inventory mismatch.'
