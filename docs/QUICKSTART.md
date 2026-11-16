@@ -21,16 +21,25 @@ port 3443 automatically when it can inspect local listening ports; explicitly
 set `MCP_WORKER_HTTPS_PORT=3443` to override this choice. IP discovery is based
 on the host outbound IPv4 address; for NAT, provide `MCP_WORKER_PUBLIC_IP`.
 
-**HTTPS requires a real trusted certificate and reverse proxy**, installed
-separately from the Docker image. The new HTTPS-backed container binds Node
-to `127.0.0.1:3333`, not the public interface, and uses Secure cookies and a
-one-hop trusted proxy. Before remote use, provision TLS, check certificates,
-configure WebSocket/SSE forwarding and ensure renewal works. Do not confuse
-the generated HTTPS URL with a verified/working endpoint. Consult
-[REMOTE_MCP.md](REMOTE_MCP.md).
+**Automatic HTTPS is enabled for fresh Quick Setup installations.** Run
+as root on a Debian/Ubuntu VPS with Docker Engine, Internet access, ports
+80 and 443 (or a chosen alternate HTTPS port) available as appropriate.
+The installer installs Nginx and an isolated Certbot 5.4 when needed, uses
+ACME staging and then production to obtain a matching IP or hostname
+certificate, and installs an enabled renewal timer every four hours. The
+companion helper is fetched from the repository over HTTPS and its exact
+SHA-256 is checked before execution. If DNS, ACME validation, package
+installation or an existing Nginx vhost conflicts, setup stops without
+enabling HTTP as fallback. The new backend is loopback-only
+(`127.0.0.1:3333`) with Secure cookies and one trusted proxy hop.
 
-To migrate an existing HTTP Quick Setup instance after the proxy becomes
-reachable:
+For a preconfigured reverse proxy, use `MCP_WORKER_TLS_MODE=external`
+and provide `MCP_WORKER_PUBLIC_URL=https://...`; this leaves the host TLS
+configuration untouched. Verify the external certificate and renewal
+independently. Consult [REMOTE_MCP.md](REMOTE_MCP.md).
+
+To migrate an existing HTTP Quick Setup instance, with automatic TLS setup
+when no trusted proxy is already reachable:
 
 ```sh
 MCP_WORKER_PUBLIC_URL=https://YOUR_PUBLIC_IP:3443 sh quick-setup.sh --https
