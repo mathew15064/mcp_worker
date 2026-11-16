@@ -29,7 +29,10 @@ void test('Admin Worker page always offers first-time Worker installation', () =
   assert.match(html, /Start with Install \/ Connect Worker above/);
   assert.match(html, /data-modal-open="worker-enrollment-modal"/);
   assert.match(html, /Generate one-time token/);
+  assert.match(html, /Signed one-command installation unavailable/);
+  assert.match(html, /<details[^>]*><summary>Developer fallback/);
   assert.match(html, /go build -trimpath -o worker_mcp/);
+  assert.doesNotMatch(html, /id="worker-install-(linux|macos|windows)-command"/);
   assert.doesNotMatch(html, /id="worker-enrollment-token"/);
   assert.doesNotMatch(html, /data-auto-open="true"/);
   assert.doesNotMatch(html, /New Execution Target · connect a Worker first/);
@@ -46,12 +49,27 @@ void test('Admin Worker setup shows a real one-time token and manual build path 
   });
   assert.match(html, /Install & Connect Worker/);
   assert.match(html, /br_enroll_test_fixture_only/);
+  assert.match(html, /Owner approval of a signed Worker release is pending/);
   assert.match(html, /data-auto-open="true"/);
   assert.doesNotMatch(html, /Generate one-time token<\/button>/);
   assert.match(html, /go build -trimpath -o worker_mcp/);
   assert.match(html, /worker_mcp login --server https:\/\/mcp\.example\.test/);
   assert.match(html, /Profile is created automatically/);
   assert.doesNotMatch(html, /id="worker-install-linux-command"/);
+});
+
+void test('HTTP-only Worker setup stays fail-closed and never advertises an install command', () => {
+  const html = pages.workersPage({
+    workers: [],
+    profiles: [],
+    csrfToken: 'test',
+    workerInstallUrl: 'http://mcp.example.test/worker/install.sh',
+    enrollment: { token: 'br_enroll_http_fixture', expires_at: '2026-11-16T18:00:00Z' },
+  });
+  assert.match(html, /Public installers return HTTP 503/);
+  assert.doesNotMatch(html, /id="worker-install-(linux|macos|windows)-command"/);
+  assert.match(html, /HTTPS required for remote Worker connections/);
+  assert.match(html, /https:\/\/YOUR_MCP_DOMAIN/);
 });
 
 void test('User Worker page cannot bypass signed-release enrollment gating', () => {
