@@ -66,6 +66,7 @@ void test('Quick Setup signed-distribution mount preflight fails closed without 
     });
 
     assert.match(run('relative/path').stderr, /absolute path/);
+    assert.match(run('/tmp/unsafe,path').stderr, /unsafe mount characters/);
     fs.rmSync(path.join(dist, 'SHA256SUMS.sig'));
     assert.match(run(dist).stderr, /missing, empty or symlinked: SHA256SUMS.sig/);
     fs.symlinkSync('WORKER_RELEASE', path.join(dist, 'SHA256SUMS.sig'));
