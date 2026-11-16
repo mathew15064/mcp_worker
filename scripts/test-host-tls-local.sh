@@ -83,7 +83,7 @@ exit 8
 MOCK
 cat >/opt/mcp-worker-certbot/venv/bin/certbot <<"MOCK"
 #!/bin/sh
-if [ "$1" = --version ]; then echo "certbot 5.4.0"; exit 0; fi
+if [ "$1" = --version ]; then echo "certbot ${MCPW_FAKE_CERTBOT_VERSION:-5.4.0}"; exit 0; fi
 printf "%s\n" "$*" >>/tmp/mock-certbot-calls
 case " $* " in
   *" --staging "*) ;;
@@ -122,7 +122,7 @@ grep -Fq "shortlived" /etc/mcp-worker/letsencrypt/renewal/*.conf 2>/dev/null || 
 test -f /etc/systemd/system/mcp-worker-certbot-renew.service
 test -f /etc/systemd/system/mcp-worker-certbot-renew.timer
 echo MOCK_IP_ACME_TLS_AND_RENEWAL=PASS
-sh /fixture/provision.sh https://mcp.example.com 3334
+MCPW_FAKE_CERTBOT_VERSION=5.10.0 sh /fixture/provision.sh https://mcp.example.com 3334
 grep -l "listen 443 ssl;" /etc/nginx/sites-available/*-https >/dev/null
 grep -q -- "-d mcp.example.com" /tmp/mock-certbot-calls
 grep -l "server_name mcp.example.com;" /etc/nginx/sites-available/*-acme >/dev/null
