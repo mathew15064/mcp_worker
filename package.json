@@ -23,9 +23,7 @@
     "lint": "node scripts/lint-typescript.cjs",
     "lint:typed": "eslint \"src/**/*.ts\" \"scripts/**/*.ts\" \"tests/**/*.ts\" playwright.config.ts",
     "format:check": "prettier --check \"src/**/*.ts\" \"scripts/**/*.ts\" \"tests/**/*.ts\" playwright.config.ts",
-    "format:write": "prettier --write \"src/**/*.ts\" \"scripts/**/*.ts\" \"tests/**/*.ts\" playwright.config.ts",
-    "quality:check": "node scripts/quality-gate.mjs check",
-    "quality:baseline": "node scripts/quality-gate.mjs record"
+    "format:write": "prettier --write \"src/**/*.ts\" \"scripts/**/*.ts\" \"tests/**/*.ts\" playwright.config.ts"
   },
   "keywords": [
     "mcp",

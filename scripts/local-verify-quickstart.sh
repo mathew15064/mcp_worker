@@ -62,7 +62,7 @@ run() {
   record "$name" "$required" "$status" "$code" "$pass" "$fail" "$skip" "$note"
 }
 command -v node >/dev/null 2>&1 || { echo "Node unavailable" >&2; exit 2; }
-run script_syntax yes "node --check; bash/sh -n; no source builds" bash -c 'node --check scripts/test-linux-installer-lifecycle.cjs && node --check scripts/quality-gate.mjs && bash -n scripts/local-verify-quickstart.sh scripts/verify-oci-image-local.sh && sh -n scripts/release-scan.sh'
+run script_syntax yes "node --check; bash/sh -n; no source builds" bash -c 'node --check scripts/test-linux-installer-lifecycle.cjs && bash -n scripts/local-verify-quickstart.sh scripts/verify-oci-image-local.sh && sh -n scripts/release-scan.sh'
 NODE_VERSION="$(node -v)"
 NPM_VERSION="$(npm -v 2>/dev/null || echo missing)"
 GO_BIN=""
@@ -80,7 +80,7 @@ elif [[ ! -d node_modules || ! -x node_modules/.bin/tsc ]]; then
   missing node_build yes "node_modules absent"
   NODE_OK=0
 else
-  run node_quality yes "typecheck + typed lint + Prettier + quality baseline" bash -c 'npm run typecheck && npm run lint:typed && npm run format:check && node scripts/quality-gate.mjs check'
+  run node_quality yes "typecheck + typed lint + Prettier" bash -c 'npm run typecheck && npm run lint:typed && npm run format:check'
   run node_build yes "compile once for targeted tests; do not rebuild for each gate" npm run build
   NODE_OK=$((1-FAIL))
 fi

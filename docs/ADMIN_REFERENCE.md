@@ -214,13 +214,22 @@ Telegram Bot Token stays AES-256-GCM encrypted at rest.
 
 ## Developer setup
 
-```bash
+```sh
 cp .env.example .env
+chmod 600 .env
+# Fill in all three secrets in .env (see the generation hints in the template).
 npm ci
-npm start
+npm run build
+HOST=127.0.0.1 npm start
 ```
 
-Open `/admin`, sign in using `ADMIN_USERNAME` / `ADMIN_PASSWORD`, then configure MySQL from Settings.
+This is a manual development setup, not the Docker installation path.
+For Docker use `./setup.sh --init` instead; it creates its own private
+`.env.setup` with separate persistent secrets. Never reuse example or
+test secrets with real data. For local Node, open
+`http://127.0.0.1:3333/admin`, sign in as `admin` with `ADMIN_PASSWORD`,
+then configure MySQL from Settings. By default the Node server binds
+all interfaces; `HOST=127.0.0.1` limits this example to the local machine.
 
 Playwright UI checks:
 
