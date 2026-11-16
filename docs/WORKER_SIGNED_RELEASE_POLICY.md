@@ -142,6 +142,30 @@ HTTP header, user input or self-signed manifest as authority to change roots.
    The existing unconditional Worker HTTP 503 must **not** be removed by
    this task or implicitly by a key update.
 
+## Server distribution storage — opt-in, does not authorize release
+
+The standalone Docker image bundles only the Linux/amd64 runtime Worker; it is
+**not** the eight-platform signed distribution. After a separate, approved offline
+release/signing process, the owner may place the eleven **public-only** files
+(eight binaries, `WORKER_RELEASE`, `SHA256SUMS`, `SHA256SUMS.sig`) in a dedicated
+canonical absolute host directory and supply its path via
+`MCP_WORKER_SIGNED_DIST_DIR` when creating the Quick Setup container. Quick
+Setup validates file presence, canonical checksums, lack of symlinks and
+non-root readability, then mounts that directory **read-only** at
+`/app/dist/worker/bin` for the existing Express distribution routes.
+
+This is a **storage path, not a release gate or signing approval**. A checksum
+match is not signature authentication. Never store the private key in this
+directory, source checkout, image or container. An existing Quick Setup
+container cannot gain/change this mount with `--start`; use an explicitly
+reviewed, backed-up, recoverable container replacement procedure. Once
+mounted, subsequent `--start` and `--rebind` invocations must supply the
+same `MCP_WORKER_SIGNED_DIST_DIR`; differing or omitted paths are refused
+rather than silently removing the approved data mount. Until separate owner
+approval of exact release tuple, native QA and a reviewed distribution gate
+change, all public routes remain HTTP 503 and this storage option must not be
+used to publish unapproved binaries.
+
 ## Read-only status contract for Admin/onboarding consumers (T5)
 
 Use `workerSignedReleaseReadiness()` for an immutable NO_GO contract,
