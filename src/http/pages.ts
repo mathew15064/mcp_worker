@@ -814,9 +814,15 @@ function workersPage({
   const workerBaseUrl = workerInstallUrl.replace(/\/worker\/install\.sh$/, '');
   const workerBaseIsHttps = trustedWorkerHttpsOrigin(workerBaseUrl);
   const directInstallAvailable = signedReleaseApproved && workerBaseIsHttps;
-  const linuxInstallCommand = directInstallAvailable ? workerInstallCommand(workerBaseUrl, 'linux') : '';
-  const macInstallCommand = directInstallAvailable ? workerInstallCommand(workerBaseUrl, 'macos') : '';
-  const windowsInstallCommand = directInstallAvailable ? workerInstallCommand(workerBaseUrl, 'windows') : '';
+  const linuxInstallCommand = directInstallAvailable
+    ? workerInstallCommand(workerBaseUrl, 'linux')
+    : '';
+  const macInstallCommand = directInstallAvailable
+    ? workerInstallCommand(workerBaseUrl, 'macos')
+    : '';
+  const windowsInstallCommand = directInstallAvailable
+    ? workerInstallCommand(workerBaseUrl, 'windows')
+    : '';
   const canEnroll = !accountUser || directInstallAvailable;
   const loginServer = workerBaseIsHttps ? workerBaseUrl : 'https://YOUR_MCP_DOMAIN';
   const devClone = 'git clone https://github.com/mathew15064/mcp_worker.git';
