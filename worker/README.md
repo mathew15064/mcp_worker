@@ -14,42 +14,41 @@ Linux binaries use `CGO_ENABLED=0`, avoiding a target glibc dependency. macOS an
 
 The retired Node Worker source and npm CLI are no longer shipped. Existing
 Node Worker installations and saved identities are not modified by this source
-cleanup. Migration to Go uses the compatible identity format, but requires an
-independently approved signed Go Worker release. Do not replace a running
-Worker using an unsigned installer.
+cleanup. Migration to Go uses the compatible identity format. Use the approved signed GitHub Worker release; do not replace a running Worker with unsigned files.
 
-## Install
+## Install standalone Worker v2.0.0
 
-**Public signed Worker installers are not yet approved.** Admin users can use
-**Workers → Install / Connect Worker** to generate a short-lived, one-use
-development enrollment token and see manual Go build commands for the target
-machine. Build from reviewed source (Go 1.24+) and run `worker_mcp login`
-against a secure HTTPS endpoint; login creates the first Worker Profile
-without a separate Create Profile step. Account-user enrollment remains gated.
+The published [GitHub Release v2.0.0](https://github.com/mathew15064/mcp_worker/releases/tag/v2.0.0) includes signed assets for Linux (amd64, arm64, 386, armv7), macOS (amd64, arm64), and Windows (amd64, arm64), built from `165d41aa0ba0479e3b54cc5f9d6b31bb43a9f26e`. No Node.js, npm, Go, Python, or Docker is needed on the target. Linux/macOS require curl and OpenSSL; Windows requires PowerShell and OpenSSL on PATH.
 
-The commands below document the **future owner-approved signed installer**
-process; do not execute them against the current server. Existing Workers
-remain manageable.
+**Linux:**
 
-Linux:
-
-```bash
-curl -fsSL https://mcp-worker.example.com/worker/install-linux.sh | sh
+```sh
+curl -fsSLo install-linux.sh https://github.com/mathew15064/mcp_worker/releases/download/v2.0.0/install-linux.sh
+# Read the installer before executing.
+sh install-linux.sh
+~/.local/bin/mcp_worker version
+~/.local/bin/mcp_worker --help
 ```
 
-macOS:
+**macOS:**
 
-```bash
-curl -fsSL https://mcp-worker.example.com/worker/install-macos.sh | sh
+```sh
+curl -fsSLo install-macos.sh https://github.com/mathew15064/mcp_worker/releases/download/v2.0.0/install-macos.sh
+sh install-macos.sh
 ```
 
-Windows PowerShell:
+**Windows PowerShell:**
 
 ```powershell
-irm https://mcp-worker.example.com/worker/install.ps1 | iex
+Invoke-WebRequest https://github.com/mathew15064/mcp_worker/releases/download/v2.0.0/install-windows.ps1 -OutFile install-windows.ps1
+.\install-windows.ps1
 ```
 
-Once an approved release is pinned, all installers download the matching binary from `/worker/dist/`, verify a mandatory signature and `SHA256SUMS`, preserve an existing Worker identity during upgrades, and print the next `login` or `start` command. Windows adds the managed `current` directory to the user PATH; Linux installs the OS-facing CLI as `worker_mcp`; there is no legacy CLI alias. The default is user-mode, without systemd or sudo. macOS keeps the standalone CLI flow for now.
+The installers pin release version, source commit and RSA public key, and verify the signed nine-entry manifest and platform binary checksum before replacement. They expose `mcp_worker` as the standalone alias alongside compatible `worker_mcp`. Default install is user-mode without systemd.
+
+**Enroll:** In the existing MCP Server's Admin → Workers page generate a one-time enrollment token. Run `mcp_worker setup --server https://YOUR_TRUSTED_MCP_SERVER` and enter the token when prompted. Do not pass tokens in command arguments or logs. Check `mcp_worker status`, `mcp_worker logs`, and Admin Workers for authenticated WSS; `mcp_worker connection test` checks HTTPS health/readiness only.
+
+**Important:** `quick-setup.sh` installs the Docker MCP Server, **not** this standalone Worker. The Server's `/worker/install*` distribution routes still return HTTP 503. If Quick Setup detects existing Docker data/container without `.env.setup`, recover the original credentials and directory instead of deleting SQLite volumes. Native Windows/macOS installers passed simulation testing only; privileged Linux systemd lifecycle is not fully acceptance-tested.
 
 ## Upgrade and rollback
 
@@ -89,16 +88,7 @@ macOS/Windows use manual mode; OS-native lifecycle tests remain a release gate.
 The normative owner-operated RC checklist, key custody and root-rotation
 policy are in [Signed Worker release and trust policy](../docs/WORKER_SIGNED_RELEASE_POLICY.md).
 
-**Current state: no production Worker release is approved.** Admin-only manual
-source-build enrollment is separate from public artifact distribution. All server
-environments return `503 WORKER_SIGNED_RELEASE_PENDING` for installer and
-binary distribution endpoints, including missing/misspelled `MCP_PLATFORM`.
-The installer templates also fail closed without an independently approved
-signing key, release version and commit. Do **not** work around this by setting an
-environment variable or disabling signature verification. The `curl | sh`
-and PowerShell examples above are for an *approved future release*, not current
-Railway deployment instructions.
-
+**Current release:** v2.0.0 is publicly available on GitHub with RSA-signed binaries and installer scripts. MCP Server-hosted `/worker/install*` routes remain HTTP 503; use GitHub Release assets, not the inactive server distribution endpoint. Old fail-closed RC templates remain historical/development-only. Do not disable signature verification.
 All eight Linux/macOS/Windows Go binaries and `WORKER_RELEASE` are listed in
 `SHA256SUMS`. `WORKER_RELEASE` has exactly two lines:
 `version=x.y.z` and `commit=<full 40-character lowercase Git SHA>`. A detached
@@ -194,7 +184,6 @@ Non-interactive example:
 
 ```bash
 worker_mcp login \
-  --token 'br_enroll_...' \
   --name 'Dev Laptop' \
   --profile 'Dev Laptop'
 ```
@@ -232,7 +221,8 @@ intact and diagnose the connection before starting again.
 The Go runtime intentionally uses the same JSON state/config schema and the same PKCS#8/SPKI Ed25519 PEM format as the Node runtime. Existing enrolled identities can therefore be upgraded in place:
 
 ```bash
-curl -fsSL https://mcp-worker.example.com/worker/install.sh | sh
+curl -fsSLo install-linux.sh https://github.com/mathew15064/mcp_worker/releases/download/v2.0.0/install-linux.sh
+sh install-linux.sh
 worker_mcp start
 ```
 
@@ -243,7 +233,7 @@ No new enrollment token is required.
 Go is a **build-time dependency only**. It is never required on a target Worker machine.
 
 ```bash
-GO_BIN=/path/to/go ./scripts/build-worker-go.sh
+VERSION=2.0.0 COMMIT="$(git rev-parse HEAD)" ./scripts/build-worker-go.sh
 ```
 
 Artifacts are written to `worker/bin/` for Linux (`amd64`, `arm64`, `386`, `armv7`), macOS (`amd64`, `arm64`), and Windows (`amd64`, `arm64`), together with `SHA256SUMS`. Generated binaries are intentionally excluded from Git and must be built as part of the deployment/release pipeline.
