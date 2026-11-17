@@ -42,3 +42,6 @@ worker/bin/WORKER_RELEASE
 # Vercel static assets are generated during npm run build:vercel
 /public/assets/
 .vercel/
+
+# Unsigned development-only standalone CLI and private release template outputs
+/worker/dev-bin/
