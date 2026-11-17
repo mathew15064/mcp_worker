@@ -86,38 +86,34 @@ void test('root redirects to authenticated admin console with configuration navi
   assert.match(html, /Data Store/);
   assert.match(html, /Settings/);
   assert.match(html, /OAuth Clients/);
-  assert.match(html, /Audit Log/);
+  assert.match(html, /Activity/);
   assert.match(html, /Workers/);
   assert.doesNotMatch(html, /SSH Profiles/);
-  assert.doesNotMatch(html, /href="\/admin\/users"/);
+  assert.match(html, /href="\/admin\/users"/);
   assert.match(html, /Telegram/);
   assert.doesNotMatch(html, /Antigravity|Control Plane|Bot Inbox/);
 });
 
-void test('Users management is unavailable even with an authenticated admin session', async () => {
-  const urls = [
-    '/admin/users',
-    '/admin/users/retired/enable',
-    '/admin/users/retired/disable',
-    '/admin/users/retired/reset-password',
-  ];
-  for (const path of urls) {
-    const get = await fetch(baseUrl + path, { headers: { cookie }, redirect: 'manual' });
-    assert.equal(get.status, 404, 'GET ' + path);
-    const post = await fetch(baseUrl + path, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded', cookie },
-      redirect: 'manual',
-      body: new URLSearchParams({ _csrf: csrf, username: 'retired', password: 'TestOnly2026!' }),
-    });
-    assert.equal(post.status, 404, 'POST ' + path);
-  }
-  for (const path of ['/admin', '/admin/clients', '/admin/workers']) {
-    const response = await fetch(baseUrl + path, { headers: { cookie } });
-    assert.equal(response.status, 200, path);
-    const html = await response.text();
-    assert.doesNotMatch(html, /href="\/admin\/users"/);
-    assert.doesNotMatch(html, /New User|Reset User Password/);
+void test('Hosted v3 Users management is available only to authenticated administrators', async () => {
+  const usersPage = await fetch(baseUrl + '/admin/users', { headers: { cookie } });
+  assert.equal(usersPage.status, 200);
+  const usersHtml = await usersPage.text();
+  assert.match(usersHtml, /Allow public registration/);
+  assert.match(usersHtml, /Create user/);
+  assert.match(usersHtml, /All users/);
+  const unsafeGet = await fetch(baseUrl + '/admin/users/retired/disable', {
+    headers: { cookie }, redirect: 'manual',
+  });
+  assert.equal(unsafeGet.status, 404);
+  const failedPost = await fetch(baseUrl + '/admin/users/retired/disable', {
+    method: 'POST', headers: {'content-type':'application/x-www-form-urlencoded',cookie},
+    body: new URLSearchParams({_csrf:csrf}), redirect:'manual',
+  });
+  assert.equal(failedPost.status, 303); // Non-existent users fail closed and flash an error.
+  for (const path of ['/admin','/admin/clients','/admin/workers']) {
+    const response=await fetch(baseUrl+path,{headers:{cookie}});
+    assert.equal(response.status,200,path);
+    assert.match(await response.text(), /href="\/admin\/users"/);
   }
 });
 

@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { ExecutionProfile, ExecutionTransport } from './executionContracts';
 import { errorFields } from './workerProtocol';
 import executionProfileRepository from '../repositories/executionProfileRepository';
+import runtimeSettings from './runtimeSettingsService';
 import terminalAuditRepository from '../repositories/terminalAuditRepository';
 import workerExecutionService from './workerExecutionService';
 type ProfileRepository = Pick<typeof executionProfileRepository, 'findAll'>;
@@ -307,6 +308,8 @@ class TerminalMcpService {
         'WORKER_ONLY',
         'Only enrolled Worker execution targets are supported.',
       );
+    if (ownerUserId && (!runtimeSettings.bool('hosted.execution.enabled', false) || !profile.hosted_isolated))
+      throw terminalServiceError('HOSTED_EXECUTION_DISABLED', 'Per-user isolated execution is not enabled or verified.');
     return profile;
   }
 

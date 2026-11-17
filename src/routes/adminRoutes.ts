@@ -4,6 +4,9 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import { routeError } from '../http/domainErrors';
 import { formString, formFlag, formList } from '../http/requestContracts';
 import pages from '../http/pages';
+import hostedPages from '../http/hostedPages';
+import userRepository from '../repositories/userRepository';
+import userService from '../services/userService';
 const packageJson = createRequire(__filename)('../../package.json') as { version: string };
 import authRoutes from './authRoutes';
 const { currentAdmin } = authRoutes;
@@ -140,6 +143,65 @@ async function migrateTelegramTokenIfNeeded() {
 router.use('/admin', requireAdmin, (req, res, next) => {
   res.set('Cache-Control', 'no-store');
   next();
+});
+
+router.get('/admin/users', requireDataStore, async (req, res, next) => {
+  try {
+    const users = await userRepository.list();
+    return res.type('html').send(hostedPages.adminUsersPage({
+      users, csrfToken: csrf(req), registrationOpen: runtimeSettings.bool('registration.enabled', true),
+      hostedExecutionEnabled: runtimeSettings.bool('hosted.execution.enabled', false), ...consumeFlash(req),
+    }));
+  } catch (error) { next(error); }
+});
+
+router.post('/admin/registration', requireDataStore, async (req, res) => {
+  try {
+    await runtimeSettings.set('registration.enabled', formFlag(req.body, 'enabled') ? 'true' : 'false');
+    setFlash(req, 'success', 'Registration policy updated.');
+  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+  return res.redirect(303, '/admin/users');
+});
+
+router.post('/admin/hosted', requireDataStore, async (req, res) => {
+  try {
+    await runtimeSettings.set('hosted.execution.enabled', formFlag(req.body, 'enabled') ? 'true' : 'false');
+    setFlash(req, 'success', 'Hosted execution policy updated.');
+  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+  return res.redirect(303, '/admin/users');
+});
+
+router.post('/admin/users', requireDataStore, async (req, res) => {
+  try {
+    await userService.createUser({
+      username: formString(req.body, 'username'),
+      email: formString(req.body, 'email'),
+      displayName: formString(req.body, 'display_name'),
+      password: formString(req.body, 'password'),
+    });
+    setFlash(req, 'success', 'Active user created.');
+  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+  return res.redirect(303, '/admin/users');
+});
+
+router.post('/admin/users/:id/:action', requireDataStore, async (req, res) => {
+  try {
+    const action = String(req.params.action || '');
+    const userId = String(req.params.id || '');
+    if (action === 'reset-password') {
+      await userService.resetPassword(userId, formString(req.body, 'password'));
+      await oauthRepo.revokeAllTokensByOwner(userId);
+    } else {
+      const status = ({approve:'active', enable:'active', reject:'rejected', disable:'disabled'} as Record<string,string>)[action];
+      if (!status) return res.status(404).type('html').send(errorPage(404, 'Unknown user action.'));
+      await userService.setStatus(userId, status);
+      if (status !== 'active') {
+        await oauthRepo.revokeAllTokensByOwner(userId);
+      }
+    }
+    setFlash(req, 'success', 'User action completed.');
+  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+  return res.redirect(303, '/admin/users');
 });
 
 router.get('/admin', async (req, res, next) => {

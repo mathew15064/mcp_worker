@@ -1,5 +1,5 @@
 import { config } from 'dotenv';
-config();
+config({ quiet: true });
 import path from 'node:path';
 import crypto from 'node:crypto';
 

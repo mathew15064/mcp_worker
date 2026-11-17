@@ -1,0 +1,20 @@
+# Minimal dedicated outbound Worker runtime; no Docker socket, supervisor or privileged app.
+FROM golang:1.26.10-alpine@sha256:87c65a688975c0b1d4585d204874c45ca78354670e3a5f11368c5a492303d696 AS builder
+WORKDIR /src
+COPY worker-go/go.mod worker-go/go.sum ./
+RUN go mod download
+COPY worker-go/ ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/worker_mcp .
+
+FROM alpine:3.22
+RUN apk add --no-cache ca-certificates bash git curl tmux coreutils ripgrep python3 nodejs \
+    && addgroup -g 10001 worker \
+    && adduser -D -H -u 10001 -G worker worker \
+    && mkdir -p /home/worker /workspace \
+    && chown -R 10001:10001 /home/worker /workspace
+COPY --from=builder /out/worker_mcp /usr/local/bin/worker_mcp
+ENV HOME=/home/worker MCP_WORKER_WORKER_HOME=/home/worker/.mcp_worker
+WORKDIR /workspace
+USER 10001:10001
+ENTRYPOINT ["/usr/local/bin/worker_mcp"]
+CMD ["run"]

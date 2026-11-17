@@ -3,6 +3,8 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import { routeError } from '../http/domainErrors';
 import { formString, formFlag, formList } from '../http/requestContracts';
 import pages from '../http/pages';
+import hostedPages from '../http/hostedPages';
+import runtimeSettings from '../services/runtimeSettingsService';
 declare module 'express-serve-static-core' {
   interface Request {
     /** Present only after requireUser middleware succeeds. */
@@ -123,7 +125,42 @@ router.use('/account', requireUser, (req, res, next) => {
   res.set('Cache-Control', 'no-store');
   next();
 });
-router.get('/account', (req, res) => res.redirect('/account/clients'));
+router.get('/account', async (req, res, next) => {
+  try {
+    const clients = await oauthRepo.listClientsByOwner(req.currentUser.id);
+    return res.type('html').send(hostedPages.userHomePage({
+      user: {...req.currentUser, username:req.currentUser.username || '', status:'active'},
+      clients:clients.length, endpoint:mcpConfig.resourceUrl, csrfToken:csrf(req),
+    }));
+  } catch (error) { next(error); }
+});
+
+router.get('/account/connect', (req, res) =>
+  res.type('html').send(hostedPages.connectPage({
+    user:{...req.currentUser,username:req.currentUser.username || '',status:'active'},
+    endpoint:mcpConfig.resourceUrl,csrfToken:csrf(req)
+  }))
+);
+
+router.get('/account/tools', async (req, res, next) => {
+  try {
+    const profiles = await workerRepo.listProfilesByOwner(req.currentUser.id);
+    return res.type('html').send(hostedPages.userToolsPage({
+      user:{...req.currentUser,username:req.currentUser.username || '',status:'active'},
+      csrfToken:csrf(req),hasWorker: runtimeSettings.bool('hosted.execution.enabled', false) &&
+        profiles.some(p => !!p?.enabled && !!p.hosted_isolated),
+    }));
+  } catch (error) { next(error); }
+});
+
+router.get('/account/activity', async (req, res, next) => {
+  try {
+    return res.type('html').send(hostedPages.userActivityPage({
+      user:{...req.currentUser,username:req.currentUser.username || '',status:'active'},
+      csrfToken:csrf(req),activity:await oauthRepo.listAuditLogsForOwner(req.currentUser.id),
+    }));
+  } catch (error) { next(error); }
+});
 
 router.get('/account/clients', async (req, res, next) => {
   try {
@@ -435,6 +472,7 @@ router.post('/account/password', async (req, res, next) => {
   const returnTo = accountReturnTo(req);
   try {
     await userService.changePassword(req.currentUser.id, formString(req.body, 'password'));
+    await oauthRepo.revokeAllTokensByOwner(req.currentUser.id);
     return req.session.destroy((error) => (error ? next(error) : res.redirect('/login')));
   } catch (error) {
     setFlash(req, 'error', routeError(error).message);

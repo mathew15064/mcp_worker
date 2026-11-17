@@ -36,7 +36,7 @@ async function pageWithCsrf(base: string, pathname: string, cookie: string) {
 }
 
 void test(
-  'existing user identities retain isolated OAuth profiles and sessions without Users management routes',
+  'existing user identities retain isolated OAuth profiles and sessions with hosted Users management',
   { skip: !enabled },
   async (t) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp_worker-user-integration-'));
@@ -85,13 +85,13 @@ void test(
     assert.equal(adminLogin.response.headers.get('location'), '/admin');
     const adminPage = await pageWithCsrf(base, '/admin', adminLogin.cookie);
     assert.equal(adminPage.response.status, 200);
-    assert.doesNotMatch(adminPage.html, /href="\/admin\/users"/);
+    assert.match(adminPage.html, /href="\/admin\/users"/);
     assert.ok(adminPage.csrf);
     const disabledUsersRoute = await fetch(base + '/admin/users', {
       headers: { cookie: adminLogin.cookie },
       redirect: 'manual',
     });
-    assert.equal(disabledUsersRoute.status, 404);
+    assert.equal(disabledUsersRoute.status, 200);
     const userService = (await import('../src/services/userService.js')).default;
     for (const user of [
       {
@@ -130,12 +130,12 @@ void test(
 
     const aliceLogin = await login(base, 'alice', 'AlicePassword2026!');
     assert.equal(aliceLogin.response.status, 302);
-    assert.equal(aliceLogin.response.headers.get('location'), '/account/clients');
+    assert.equal(aliceLogin.response.headers.get('location'), '/account');
     const aliceClientsPage = await pageWithCsrf(base, '/account/clients', aliceLogin.cookie);
     assert.equal(aliceClientsPage.response.status, 200);
     assert.match(aliceClientsPage.html, /My Clients/);
     assert.match(aliceClientsPage.html, /Client Profile/);
-    assert.match(aliceClientsPage.html, />Workers</);
+    assert.match(aliceClientsPage.html, />Connect ChatGPT</);
     assert.doesNotMatch(aliceClientsPage.html, />Settings</);
 
     const createAliceClient = await fetch(`${base}/account/clients`, {
@@ -411,6 +411,6 @@ void test(
     assert.equal((await login(base, 'alice', 'AlicePassword2026!')).response.status, 401);
     const aliceRelogin = await login(base, 'alice', 'AlicePasswordReset2026!');
     assert.equal(aliceRelogin.response.status, 302);
-    assert.equal(aliceRelogin.response.headers.get('location'), '/account/clients');
+    assert.equal(aliceRelogin.response.headers.get('location'), '/account');
   },
 );

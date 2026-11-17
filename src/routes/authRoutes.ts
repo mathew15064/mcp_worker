@@ -4,6 +4,12 @@ import authService from '../services/authService';
 import * as adminIdentity from '../services/adminIdentityService';
 import config from '../config/env';
 import pages from '../http/pages';
+import hostedPages from '../http/hostedPages';
+import runtimeSettings from '../services/runtimeSettingsService';
+import databaseManager from '../db/databaseManager';
+import userService from '../services/userService';
+import { routeError } from '../http/domainErrors';
+import { formString } from '../http/requestContracts';
 const { loginPage } = pages;
 
 const router = express.Router();
@@ -50,7 +56,7 @@ function sanitizeReturnTo(value: unknown) {
 
 function destinationFor(identity: { role?: string } | null | undefined, requested: unknown = '/') {
   const safe = sanitizeReturnTo(requested);
-  const defaultPath = identity?.role === 'admin' ? '/admin' : '/account/clients';
+  const defaultPath = identity?.role === 'admin' ? '/admin' : '/account';
   if (safe === '/') return defaultPath;
   const pathname = new URL(safe, 'http://localhost').pathname;
   if (pathname === '/oauth/authorize') return safe;
@@ -58,6 +64,38 @@ function destinationFor(identity: { role?: string } | null | undefined, requeste
   if (identity?.role === 'user' && pathname.startsWith('/account')) return safe;
   return defaultPath;
 }
+
+const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false });
+
+router.get('/register', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!databaseManager.isOperational()) return res.status(503).send('Registration is unavailable.');
+  return res.type('html').send(hostedPages.registrationPage({
+    csrfToken: req.session?.csrfToken || '',
+    open: runtimeSettings.bool('registration.enabled', true),
+  }));
+});
+
+router.post('/register', registerLimiter, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const open = databaseManager.isOperational() && runtimeSettings.bool('registration.enabled', true);
+  if (!open) return res.status(403).type('html').send(hostedPages.registrationPage({csrfToken: req.session?.csrfToken || '',open:false}));
+  try {
+    await userService.createUser({
+      username: formString(req.body, 'username'),
+      email: formString(req.body, 'email'),
+      displayName: formString(req.body, 'display_name'),
+      password: formString(req.body, 'password'),
+      status: 'pending',
+    });
+    return res.redirect(303, '/registration-pending');
+  } catch (err) {
+    return res.status(400).type('html').send(hostedPages.registrationPage({
+      csrfToken: req.session?.csrfToken || '', open:true, error:routeError(err).message,
+    }));
+  }
+});
+router.get('/registration-pending', (_req, res) => res.set('Cache-Control','no-store').type('html').send(hostedPages.pendingPage()));
 
 router.get('/login', async (req, res, next) => {
   try {

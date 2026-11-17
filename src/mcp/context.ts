@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { AuthenticatedPrincipal } from '../auth/principal';
-import { AuthorizationError } from '../auth/principal';
+import { AuthorizationError, SCOPES } from '../auth/principal';
+import runtimeSettings from '../services/runtimeSettingsService';
 export interface McpRequestContext {
   principal: AuthenticatedPrincipal | null;
   requestId: string | null;
@@ -31,6 +32,15 @@ export function getStore(): McpRequestContext | null {
 export function getPrincipal(): AuthenticatedPrincipal | null {
   return getStore()?.principal || null;
 }
+export function assertHostedTerminalPrincipal(): AuthenticatedPrincipal {
+  const principal = assertPrincipal();
+  principal.assertScope(SCOPES.TERMINAL);
+  if (principal.owner_user_id && !runtimeSettings.bool('hosted.execution.enabled', false)) {
+    throw new AuthorizationError('Hosted execution is disabled until isolated per-user runtimes are verified.', 403, 'HOSTED_EXECUTION_DISABLED');
+  }
+  return principal;
+}
+
 export function assertPrincipal(): AuthenticatedPrincipal {
   const principal = getPrincipal();
   if (!principal)
