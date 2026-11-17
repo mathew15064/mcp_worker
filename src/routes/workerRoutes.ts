@@ -77,8 +77,10 @@ function unixInstallerScript(
   approved: ApprovedWorkerRelease = APPROVED_WORKER_RELEASE,
   // Test callers may generate a disposable script; HTTP routes use fixed paths.
   systemdPaths: SystemdPaths = SYSTEMD_PATHS,
+  githubReleasePath = '',
 ) {
   const base = shellSingleQuote(baseUrl);
+  const githubPath = shellSingleQuote(githubReleasePath);
   const osName = shellSingleQuote(expectedOS);
   const pinnedVersion = shellSingleQuote(approved.version);
   const pinnedCommit = shellSingleQuote(approved.commit);
@@ -91,6 +93,7 @@ function unixInstallerScript(
 set -eu
 
 BASE_URL=${base}
+GITHUB_RELEASE_PATH=${githubPath}
 EXPECTED_OS=${osName}
 PINNED_VERSION=${pinnedVersion}
 PINNED_COMMIT=${pinnedCommit}
@@ -156,8 +159,19 @@ case "$BASE_URL" in
       echo "[worker_mcp] HTTPS release origin required" >&2; exit 1
     fi ;;
 esac
+if [ -n "$GITHUB_RELEASE_PATH" ]; then
+  [ "$BASE_URL" = https://github.com ] &&
+    [ "$GITHUB_RELEASE_PATH" = "/mathew15064/mcp_worker/releases/download/v$PINNED_VERSION" ] || {
+    echo "[worker_mcp] unapproved GitHub release URL" >&2; exit 1;
+  }
+fi
 download_release_file() {
-  curl -fsSL --max-redirs 0 --proto "=$DOWNLOAD_SCHEME" --proto-redir "=$DOWNLOAD_SCHEME" "$BASE_URL/worker/dist/$1" -o "$2"
+  if [ -n "$GITHUB_RELEASE_PATH" ]; then
+    # GitHub redirects release assets to HTTPS object storage; all bytes remain RSA-verified.
+    curl -fsSL --max-redirs 5 --proto '=https' --proto-redir '=https' "$BASE_URL$GITHUB_RELEASE_PATH/$1" -o "$2"
+  else
+    curl -fsSL --max-redirs 0 --proto "=$DOWNLOAD_SCHEME" --proto-redir "=$DOWNLOAD_SCHEME" "$BASE_URL/worker/dist/$1" -o "$2"
+  fi
 }
 [ -n "$PINNED_VERSION" ] && [ -n "$PINNED_COMMIT" ] && [ -n "$PINNED_PUBLIC_KEY_B64" ] && [ -n "$PINNED_PUBLIC_KEY_SHA256" ] || {
   echo "[worker_mcp] signed release not approved" >&2; exit 1;
@@ -201,7 +215,7 @@ fi
 if [ -f "$WORKER_HOME/install-root" ] && [ "$(cat "$WORKER_HOME/install-root")" != "$INSTALL_ROOT" ]; then
   echo "[worker_mcp] existing identity belongs to a different install root" >&2; exit 1
 fi
-if [ -f "$WORKER_HOME/default-server" ] && [ "$(cat "$WORKER_HOME/default-server")" != "$BASE_URL" ]; then
+if [ -z "$GITHUB_RELEASE_PATH" ] && [ -f "$WORKER_HOME/default-server" ] && [ "$(cat "$WORKER_HOME/default-server")" != "$BASE_URL" ]; then
   echo "[worker_mcp] existing installation belongs to a different server" >&2; exit 1
 fi
 mkdir "$INSTALL_ROOT/.install-lock" || { echo "[worker_mcp] installer already running or stale lock; inspect before removal" >&2; exit 1; }
@@ -341,6 +355,11 @@ if [ "$OS" = linux ] && [ "$SERVICE" = 1 ]; then
   fi
 fi
 
+if [ -e "$BIN_DIR/mcp_worker" ] || [ -L "$BIN_DIR/mcp_worker" ]; then
+  [ -L "$BIN_DIR/mcp_worker" ] && [ "$(readlink "$BIN_DIR/mcp_worker")" = "$WORKER_MCP" ] || {
+    echo "[worker_mcp] unrelated CLI path exists: $BIN_DIR/mcp_worker" >&2; exit 1;
+  }
+fi
 if [ -e "$BIN_DIR/worker_mcp" ] || [ -L "$BIN_DIR/worker_mcp" ]; then
   [ -L "$BIN_DIR/worker_mcp" ] && [ "$(readlink "$BIN_DIR/worker_mcp")" = "$WORKER_MCP" ] || {
     echo "[worker_mcp] unrelated CLI path exists: $BIN_DIR/worker_mcp" >&2; exit 1;
@@ -394,7 +413,7 @@ if [ "$OS" = linux ] && [ "$SERVICE" = 1 ]; then
     }
   fi
   mkdir -p "$TMP/saved-state"
-  for RECORD in default-server install-root bin-path service-mode release-version release-commit release-key-sha256 release-manifest-sha256; do
+  for RECORD in default-server install-root bin-path service-mode release-version release-commit release-key-sha256 release-manifest-sha256 release-public-key.pem; do
     if [ -e "$WORKER_HOME/$RECORD" ] || [ -L "$WORKER_HOME/$RECORD" ]; then
       [ -f "$WORKER_HOME/$RECORD" ] && [ ! -L "$WORKER_HOME/$RECORD" ] || {
         echo "[worker_mcp] unsafe managed release record: $RECORD" >&2; exit 1;
@@ -512,7 +531,7 @@ UNIT
         rm -f "$PREVIOUS/$RECORD" || restore_failed=1
       fi
     done
-    for RECORD in default-server install-root bin-path service-mode release-version release-commit release-key-sha256 release-manifest-sha256; do
+    for RECORD in default-server install-root bin-path service-mode release-version release-commit release-key-sha256 release-manifest-sha256 release-public-key.pem; do
       if [ -f "$TMP/saved-state/$RECORD" ]; then
         cp -p "$TMP/saved-state/$RECORD" "$WORKER_HOME/$RECORD" || restore_failed=1
       else
@@ -520,6 +539,7 @@ UNIT
       fi
     done
     if [ "$HAD_CLI_LINK" = 0 ]; then rm -f "$BIN_DIR/worker_mcp" || restore_failed=1; fi
+    if [ "$HAD_ALIAS_LINK" = 0 ]; then rm -f "$BIN_DIR/mcp_worker" || restore_failed=1; fi
     if [ -n "$SYSTEM_BIN_NEXT" ]; then root_cmd rm -f "$SYSTEM_BIN_NEXT" || restore_failed=1; fi
     if [ "$SERVICE_ACTIVE" = 1 ]; then
       root_cmd systemctl start worker_mcp.service && service_ready || restore_failed=1
@@ -548,7 +568,9 @@ if [ -f "$WORKER_MCP" ]; then
 fi
 if [ "$SERVICE" = 1 ]; then
   HAD_CLI_LINK=0
+  HAD_ALIAS_LINK=0
   [ -L "$BIN_DIR/worker_mcp" ] && HAD_CLI_LINK=1
+  [ -L "$BIN_DIR/mcp_worker" ] && HAD_ALIAS_LINK=1
   INSTALL_TXN_ACTIVE=1
 fi
 NEXT="$(mktemp "$TARGET/.worker_mcp.XXXXXX")"
@@ -557,12 +579,16 @@ chmod 0755 "$NEXT"
 mv -f "$NEXT" "$WORKER_MCP"
 if [ "$SERVICE" = 0 ]; then
   ln -sfn "$TARGET/worker_mcp" "$BIN_DIR/worker_mcp"
+  ln -sfn "$TARGET/worker_mcp" "$BIN_DIR/mcp_worker"
   mkdir -p "$WORKER_HOME"
-  [ -f "$WORKER_HOME/default-server" ] || printf '%s\n' "$BASE_URL" > "$WORKER_HOME/default-server"
+  if [ -z "$GITHUB_RELEASE_PATH" ]; then
+    [ -f "$WORKER_HOME/default-server" ] || printf '%s\n' "$BASE_URL" > "$WORKER_HOME/default-server"
+  fi
   printf '%s\n' "$INSTALL_ROOT" > "$WORKER_HOME/install-root"
   printf '%s\n' "$BIN_DIR/worker_mcp" > "$WORKER_HOME/bin-path"
   chmod 0700 "$WORKER_HOME"
-  chmod 0600 "$WORKER_HOME/default-server" "$WORKER_HOME/install-root" "$WORKER_HOME/bin-path"
+  [ ! -f "$WORKER_HOME/default-server" ] || chmod 0600 "$WORKER_HOME/default-server"
+  chmod 0600 "$WORKER_HOME/install-root" "$WORKER_HOME/bin-path"
 fi
 
 echo "[worker_mcp] staged verified runtime: $BIN_DIR/worker_mcp ($OS/$ARCH)"
@@ -592,13 +618,17 @@ fi
 
 if [ "$OS" = linux ] && [ "$SERVICE" = 1 ]; then
   ln -sfn "$TARGET/worker_mcp" "$BIN_DIR/worker_mcp"
+  ln -sfn "$TARGET/worker_mcp" "$BIN_DIR/mcp_worker"
   mkdir -p "$WORKER_HOME"
-  [ -f "$WORKER_HOME/default-server" ] || printf '%s\n' "$BASE_URL" > "$WORKER_HOME/default-server"
+  if [ -z "$GITHUB_RELEASE_PATH" ]; then
+    [ -f "$WORKER_HOME/default-server" ] || printf '%s\n' "$BASE_URL" > "$WORKER_HOME/default-server"
+  fi
   printf '%s\n' "$INSTALL_ROOT" > "$WORKER_HOME/install-root"
   printf '%s\n' "$BIN_DIR/worker_mcp" > "$WORKER_HOME/bin-path"
   printf '%s\n' systemd > "$WORKER_HOME/service-mode"
   chmod 0700 "$WORKER_HOME"
-  chmod 0600 "$WORKER_HOME/default-server" "$WORKER_HOME/install-root" "$WORKER_HOME/bin-path" "$WORKER_HOME/service-mode"
+  [ ! -f "$WORKER_HOME/default-server" ] || chmod 0600 "$WORKER_HOME/default-server"
+  chmod 0600 "$WORKER_HOME/install-root" "$WORKER_HOME/bin-path" "$WORKER_HOME/service-mode"
 fi
 
 # Manual installs restore the prior running state and fail back on connection failure.
@@ -632,6 +662,11 @@ printf '%s\\n' "$PINNED_VERSION" > "$WORKER_HOME/release-version"
 printf '%s\\n' "$PINNED_COMMIT" > "$WORKER_HOME/release-commit"
 printf '%s\\n' "$PINNED_KEY_SHA256" > "$WORKER_HOME/release-key-sha256"
 printf '%s\\n' "$RELEASE_MANIFEST_SHA256" > "$WORKER_HOME/release-manifest-sha256"
+[ ! -L "$WORKER_HOME/release-public-key.pem" ] || { echo "[worker_mcp] unsafe stored public key" >&2; exit 1; }
+KEY_NEXT="$(mktemp "$WORKER_HOME/.release-key.XXXXXX")"
+cp "$TMP/release-key.pem" "$KEY_NEXT"
+chmod 0600 "$KEY_NEXT"
+mv -f "$KEY_NEXT" "$WORKER_HOME/release-public-key.pem"
 chmod 0600 "$WORKER_HOME/release-version" "$WORKER_HOME/release-commit" "$WORKER_HOME/release-key-sha256" "$WORKER_HOME/release-manifest-sha256"
 # A failed managed upgrade may still be compensating until all signed records
 # have been written. Only here does the new service become the accepted state.
@@ -663,6 +698,32 @@ function installerScript(
 function macInstallerScript(baseUrl: string, approved?: ApprovedWorkerRelease) {
   return unixInstallerScript(baseUrl, 'darwin', approved);
 }
+// Offline/private RC only. These are deliberately not mounted on public server routes.
+function githubLinuxInstallerScript(approved: ApprovedWorkerRelease = APPROVED_WORKER_RELEASE) {
+  return unixInstallerScript(
+    'https://github.com',
+    'linux',
+    approved,
+    SYSTEMD_PATHS,
+    `/mathew15064/mcp_worker/releases/download/v${approved.version}`,
+  );
+}
+function githubMacInstallerScript(approved: ApprovedWorkerRelease = APPROVED_WORKER_RELEASE) {
+  return unixInstallerScript(
+    'https://github.com',
+    'darwin',
+    approved,
+    SYSTEMD_PATHS,
+    `/mathew15064/mcp_worker/releases/download/v${approved.version}`,
+  );
+}
+function githubWindowsInstallerScript(approved: ApprovedWorkerRelease = APPROVED_WORKER_RELEASE) {
+  return windowsInstallerPayloadScript(
+    'https://github.com',
+    approved,
+    `/mathew15064/mcp_worker/releases/download/v${approved.version}`,
+  );
+}
 function powershellSingleQuote(value: string) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
@@ -674,15 +735,59 @@ function windowsInstallerScript(baseUrl: string, approved?: ApprovedWorkerReleas
 function windowsInstallerPayloadScript(
   baseUrl: string,
   approved: ApprovedWorkerRelease = APPROVED_WORKER_RELEASE,
+  githubReleasePath = '',
 ) {
   const base = powershellSingleQuote(baseUrl);
+  const githubPath = powershellSingleQuote(githubReleasePath);
   const pinnedVersion = powershellSingleQuote(approved.version);
   const pinnedCommit = powershellSingleQuote(approved.commit);
   const pinnedKey = powershellSingleQuote(approved.publicKeyBase64);
   const pinnedKeySha256 = powershellSingleQuote(approved.publicKeySha256);
   const previousKey = powershellSingleQuote(approved.previousPublicKeySha256 || '');
+  // Preserve the no-redirect legacy installer contract; GitHub assets use HTTPS-only redirects.
+  const download = (name: string, dest: string) =>
+    githubReleasePath
+      ? `  DownloadReleaseAsset ${name} ${dest}`
+      : `  Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -Uri "$BaseUrl/worker/dist/${name}" -OutFile ${dest}`;
+  const githubDownloader = githubReleasePath
+    ? `# GitHub release assets redirect to signed HTTPS object storage. No HTTP downgrade.
+function DownloadReleaseAsset([string]$Name, [string]$Destination) {
+  Add-Type -AssemblyName System.Net.Http
+  $Handler = New-Object System.Net.Http.HttpClientHandler
+  $Handler.AllowAutoRedirect = $false
+  $Client = New-Object System.Net.Http.HttpClient($Handler)
+  try {
+    $Uri = [Uri]("$AssetRoot/$Name")
+    for ($Hop = 0; $Hop -le 5; $Hop++) {
+      if ($Uri.Scheme -cne 'https') { throw 'Release redirect to plaintext HTTP refused' }
+      $Response = $Client.GetAsync($Uri).GetAwaiter().GetResult()
+      try {
+        if ([int]$Response.StatusCode -in @(301,302,303,307,308)) {
+          $Location = $Response.Headers.Location
+          if (-not $Location) { throw 'Missing release redirect destination' }
+          $Uri = [Uri]::new($Uri, $Location)
+          continue
+        }
+        if (-not $Response.IsSuccessStatusCode) { throw "Release asset HTTP $([int]$Response.StatusCode)" }
+        $Bytes = $Response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
+        if ($Bytes.Length -gt 150MB) { throw 'Oversized release artifact' }
+        [IO.File]::WriteAllBytes($Destination, $Bytes)
+        return
+      } finally { $Response.Dispose() }
+    }
+    throw 'Too many release redirects'
+  } finally {
+    $Client.Dispose()
+    $Handler.Dispose()
+  }
+}
+`
+    : '';
   return `$ErrorActionPreference = 'Stop'
 $BaseUrl = ${base}
+$GithubReleasePath = ${githubPath}
+$AssetRoot = if ($GithubReleasePath) { "$BaseUrl$GithubReleasePath" } else { "$BaseUrl/worker/dist" }
+if ($GithubReleasePath -and ($BaseUrl -cne 'https://github.com' -or $GithubReleasePath -cne "/mathew15064/mcp_worker/releases/download/v${approved.version}")) { throw 'Unapproved GitHub release URL' }
 $PinnedVersion = ${pinnedVersion}
 $PinnedCommit = ${pinnedCommit}
 $PinnedPublicKeyB64 = ${pinnedKey}
@@ -705,7 +810,7 @@ $Tmp = Join-Path ([IO.Path]::GetTempPath()) ('worker_mcp-' + [guid]::NewGuid().T
 New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
 $Lock = Join-Path $InstallRoot '.install-lock'
 $LockOwned = $false
-try {
+${githubDownloader}try {
   New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
   foreach ($Path in @($InstallRoot, $Target, $Previous, $WorkerHome)) {
     if ((Test-Path $Path) -and ((Get-Item -LiteralPath $Path).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Reparse point installation refused' }
@@ -713,7 +818,7 @@ try {
   $RecordedRoot = Join-Path $WorkerHome 'install-root'
   $RecordedServer = Join-Path $WorkerHome 'default-server'
   if ((Test-Path $RecordedRoot) -and ((Get-Content $RecordedRoot -Raw).Trim() -ne $InstallRoot)) { throw 'Different existing installation root' }
-  if ((Test-Path $RecordedServer) -and ((Get-Content $RecordedServer -Raw).Trim() -ne $BaseUrl)) { throw 'Different existing server' }
+  if (-not $GithubReleasePath -and (Test-Path $RecordedServer) -and ((Get-Content $RecordedServer -Raw).Trim() -ne $BaseUrl)) { throw 'Different existing server' }
   New-Item -ItemType Directory -Path $Lock -ErrorAction Stop | Out-Null
   $LockOwned = $true
   $ArchRaw = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
@@ -736,8 +841,8 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Cannot fingerprint pinned public key' }
   $PinnedKeySha256 = (Get-FileHash -Algorithm SHA256 $PublicDer).Hash.ToLowerInvariant()
   if ($PinnedPublicKeySha256 -cnotmatch '^[0-9a-f]{64}$' -or $PinnedKeySha256 -cne $PinnedPublicKeySha256) { throw 'Pinned RSA SPKI fingerprint mismatch' }
-  Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -Uri "$BaseUrl/worker/dist/SHA256SUMS" -OutFile $Sums
-  Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -Uri "$BaseUrl/worker/dist/SHA256SUMS.sig" -OutFile $Signature
+${download('SHA256SUMS', '$Sums')}
+${download('SHA256SUMS.sig', '$Signature')}
   & openssl dgst -sha256 -verify $KeyPath -signature $Signature $Sums | Out-Null
   if ($LASTEXITCODE -ne 0) { throw 'Manifest signature verification failed' }
   # Enforce the same nine-entry canonical manifest accepted by the offline signer.
@@ -763,7 +868,7 @@ try {
     if ($Found.Count -ne 1) { throw "Missing or duplicate checksum: $Name" }
     return $Found[0].Hash
   }
-  Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -Uri "$BaseUrl/worker/dist/WORKER_RELEASE" -OutFile $Metadata
+${download('WORKER_RELEASE', '$Metadata')}
   if ((Get-FileHash -Algorithm SHA256 $Metadata).Hash.ToLowerInvariant() -cne (ExpectedHash 'WORKER_RELEASE')) {
     throw 'Release metadata checksum failed'
   }
@@ -808,7 +913,7 @@ try {
     }
     if ($OldVersion -ceq $PinnedVersion -and ($OldCommit -cne $PinnedCommit -or $OldManifestSha256 -cne $ReleaseManifestSha256)) { throw 'Release version reused for a different commit or manifest' }
   }
-  Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -Uri "$BaseUrl/worker/dist/$File" -OutFile $Downloaded
+${download('$File', '$Downloaded')}
   $Expected = ExpectedHash $File
   $Actual = (Get-FileHash -Algorithm SHA256 $Downloaded).Hash.ToLowerInvariant()
   if ($Actual -ne $Expected.ToLowerInvariant()) { throw "Checksum verification failed for $File" }
@@ -855,7 +960,7 @@ try {
   }
 
   New-Item -ItemType Directory -Force -Path $WorkerHome | Out-Null
-  if (-not (Test-Path (Join-Path $WorkerHome 'default-server'))) { Set-Content -Encoding ascii -Path (Join-Path $WorkerHome 'default-server') -Value $BaseUrl }
+  if (-not $GithubReleasePath -and -not (Test-Path (Join-Path $WorkerHome 'default-server'))) { Set-Content -Encoding ascii -Path (Join-Path $WorkerHome 'default-server') -Value $BaseUrl }
   Set-Content -Encoding ascii -Path (Join-Path $WorkerHome 'install-root') -Value $InstallRoot
   Set-Content -Encoding ascii -Path (Join-Path $WorkerHome 'bin-path') -Value (Join-Path $Target 'worker_mcp.exe')
 
@@ -868,10 +973,16 @@ try {
       [Environment]::SetEnvironmentVariable('Path', $NewPath, 'User')
     }
   }
+  $TrustedKeyPath = Join-Path $WorkerHome 'release-public-key.pem'
+  if ((Test-Path $TrustedKeyPath) -and ((Get-Item -LiteralPath $TrustedKeyPath).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Unsafe stored public key' }
+  [IO.File]::WriteAllBytes($TrustedKeyPath, [IO.File]::ReadAllBytes($KeyPath))
   Set-Content -Encoding ascii -Path $VersionPath -Value $PinnedVersion
   Set-Content -Encoding ascii -Path $CommitPath -Value $PinnedCommit
   Set-Content -Encoding ascii -Path $KeyRecordPath -Value $PinnedKeySha256
   Set-Content -Encoding ascii -Path $ManifestRecordPath -Value $ReleaseManifestSha256
+  $Alias = Join-Path $Target 'mcp_worker.exe'
+  if ((Test-Path $Alias) -and ((Get-Item -LiteralPath $Alias).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Unsafe standalone CLI alias' }
+  Copy-Item -LiteralPath $Existing -Destination $Alias -Force
   $env:Path = "$Target;$env:Path"
   Write-Host "[worker_mcp] installed standalone runtime: $(Join-Path $Target 'worker_mcp.exe') (windows/$Arch)"
   if (Test-Path (Join-Path $WorkerHome 'state.json')) {
@@ -1101,4 +1212,7 @@ export = Object.assign(router, {
   windowsInstallerPayloadScript,
   publicBaseUrl,
   createEnrollmentProfile,
+  githubLinuxInstallerScript,
+  githubMacInstallerScript,
+  githubWindowsInstallerScript,
 });

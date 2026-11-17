@@ -301,3 +301,25 @@ separate audited migration; never silently inherit prior trust.
 
 **NO-GO remains in effect:** no production key, approval, binary or artifact
 has been published, and the Worker installer HTTP 503 must remain active.
+
+### Standalone v2.0.0 candidate tooling (development only)
+
+For a future owner-operated ceremony on an independently secured signing PC,
+./scripts/create-worker-signing-key.sh /absolute/owner-controlled-directory
+generates RSA-4096 with private key mode 0600. This script must **never**
+execute on the application VPS, a remote shared host, CI, or a machine not
+approved for production key custody. Independent owner review of the public
+SPKI DER SHA-256 is required even when the script prints the computed hash.
+The signer remains scripts/sign-worker-manifest.sh and intentionally rejects
+wrong SHA, missing approval fields, dirty sources and unsigned source
+substitution. The verifier scripts/verify-worker-signed-release.sh consumes
+**only a public key**, the exact version/commit and an independently approved
+SPKI hash. scripts/build-worker-go.sh requires explicit full-SHA release
+inputs and refuses to overwrite signed or existing artifacts.
+
+For local verification without production secrets, create a **test-only**
+ephemeral key outside the checkout, sign a disposable v2.0.0 candidate,
+verify the detached signature, checksum inventory and executable identity,
+then test tampering. Never publish the fixture key, signature or test-signed
+binaries. All statements about native release QA must distinguish cross-build,
+Windows CLI smoke and actual signed installation/restart/recovery.
