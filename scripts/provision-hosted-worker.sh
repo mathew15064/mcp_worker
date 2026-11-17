@@ -109,14 +109,8 @@ mounts="$(docker inspect --format '{{range .Mounts}}{{.Type}}:{{.Destination}};{
 [[ "$mounts" == *'volume:/workspace;'* ]]
 [[ "$(tr ';' '\n' <<< "$mounts" | grep -c '^volume:')" -eq 2 ]]
 
-for _ in {1..20}; do
-  if docker exec "$name" worker_mcp status 2>/dev/null | grep -q '^status: RUNNING$'; then
-    break
-  fi
-  sleep 1
-done
-docker exec "$name" worker_mcp status | grep -q '^status: RUNNING$'
-
+# A foreground Worker runs as container PID 1; the standalone CLI status
+# helper intentionally treats PID 1 as special. Attest broker presence instead.
 attested=0
 for _ in {1..20}; do
   if docker exec "$gateway" node dist/scripts/attest-hosted-worker.js "$user_id" "$worker_id" >/dev/null 2>&1; then
