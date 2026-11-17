@@ -29,3 +29,38 @@ Before a future release, complete owner signing outside this repo and record the
 ## QA status
 
 PC results (2026-11-17): Go unit tests PASS including disposable RSA-signed update, forged signature, tampered metadata/binary, downgrade and failed-upgrade binary recovery; Node 164 PASS / 0 FAIL / 1 SKIP; Playwright Chromium 16/16 PASS; TypeScript lint/typecheck PASS; 8/8 native-target Go cross-build PASS. On a real Windows PC, PowerShell installer syntax check, unsigned-release fail-closed, and compiled Windows amd64 CLI help/version/config-show smoke all PASS. These are NOT native signed-install or upgrade lifecycle acceptance. Native Windows signed installer lifecycle: NOT_TESTED; native macOS signed installer lifecycle: NOT_TESTED; multi-platform owner-signed release acceptance: NOT_TESTED. Public release remains NO_GO. The Server deployment and its SQLite volume must not be changed for this work.
+
+## Owner-controlled v2.0.0 RC key ceremony
+
+The first official candidate is **v2.0.0** only if the immutable final
+source commit has been reviewed and GitHub has no existing tag or release for
+that version. The standalone release build now rejects missing or shortened
+VERSION/COMMIT, wrong source checkout, dirty source and inconsistent
+package.json version. --runtime-only retains the legacy Docker Worker
+version independently; it is **not** a signed standalone release.
+
+On a **physical owner-controlled and secured offline signing machine**,
+create a new mode-0700 directory outside Git, then run
+./scripts/create-worker-signing-key.sh /absolute/private-directory.
+This generates RSA-4096 private.pem (0600), public.pem and
+public-spki-sha256.txt. Verify the fingerprint independently via
+openssl pkey -pubin -in public.pem -outform DER | openssl dgst -sha256;
+securely back up the private key offline. Do **not** run this ceremony on VPS,
+a shared development host, CI, or a remote tool execution session without
+explicit owner confirmation of key custody.
+
+After source review, VERSION=2.0.0 COMMIT=<full40> ./scripts/build-worker-go.sh
+creates all eight binaries and the canonical nine-entry manifest. The owner
+uses WORKER_RELEASE_EXPECTED_VERSION=2.0.0,
+WORKER_RELEASE_EXPECTED_COMMIT=<full40> and
+WORKER_RELEASE_EXPECTED_PUBLIC_KEY_SHA256=<independently-approved-fingerprint>
+with ./scripts/sign-worker-manifest.sh /absolute/private-directory/private.pem.
+Use ./scripts/verify-worker-signed-release.sh /absolute/private-directory/public.pem
+with the same three environment inputs to verify exact manifest, signature,
+fingerprint, metadata, artifact hashes and Linux binary identity.
+
+All automated signing tests use **throwaway test keys** under a disposable
+non-repository directory. A QA-signed candidate is never an owner-approved
+production signature, and native Windows/macOS acceptance is a separate gate.
+Public release remains **NO_GO** until the owner reviews a complete immutable
+tuple and release evidence.
