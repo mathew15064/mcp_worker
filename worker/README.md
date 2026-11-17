@@ -66,7 +66,7 @@ older signed release requires a separately reviewed release/pin change.
 A stale .install-lock after interruption requires manual inspection.
 
 Linux systemd is advanced opt-in:
-`curl .../worker/install-linux.sh | MCP_WORKER_WORKER_SYSTEMD=1 sh`.
+`MCP_WORKER_WORKER_SYSTEMD=1 sh install-linux.sh` (after downloading and reviewing the v2.0.0 GitHub installer).
 For a managed upgrade, the installer saves the previous installed binary,
 root-owned unit, active/enabled status, local aliases, and signed release records
 before changing the service. It installs the verified replacement, reloads the
