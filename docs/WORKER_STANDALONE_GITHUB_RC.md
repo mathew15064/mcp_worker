@@ -64,3 +64,34 @@ non-repository directory. A QA-signed candidate is never an owner-approved
 production signature, and native Windows/macOS acceptance is a separate gate.
 Public release remains **NO_GO** until the owner reviews a complete immutable
 tuple and release evidence.
+
+## Windows and macOS simulation on existing PC (no dedicated OS lab)
+
+Run npm run test:platform-sim from the development PC Linux/WSL checkout.
+The runner builds TypeScript, runs macOS x64/arm64 shell-installer scenarios,
+and runs Windows x64/arm64 PowerShell-installer scenarios. It obtains a
+**hash-pinned portable PowerShell Core 7.7.0 for Linux**, cached outside the
+repository, only when PWSH_BIN was not provided; this is QA tooling, not a
+Windows installation or production dependency.
+
+Each scenario runs the **actual installer renderer** with a disposable
+loopback HTTP artifact service, throwaway RSA key and correctly signed
+nine-entry manifest. Mac uses a mocked uname and signed POSIX stand-in in
+place of Mach-O. Windows uses PowerShell on Linux with a signed POSIX stand-in
+in place of PE; the test-only generated script adds chmod on the stand-in
+and (for arm64) overrides the architecture probe. Production source is not
+modified by these fixture adaptations. Tests cover fresh install, same-version
+reinstall, forged signature, corrupt binary checksum, signed upgrade with
+prior binary retention, downgrade rejection and failed-start binary recovery.
+The suite deletes temporary installation roots and does **not** access the
+production signing key or any live Worker identity.
+
+Simulation passing means **SIMULATED PASS**, never native OS acceptance.
+macOS Gatekeeper/notarization, launchd, native Mach-O execution and file
+permissions; Windows PE execution, service control, elevation, ACLs and
+actual PowerShell execution restrictions; and privileged Linux systemd
+all remain **NOT_TESTED** unless tested separately. The owner explicitly
+chose simulation instead of preparing dedicated Windows/macOS test
+environments. Record this as a release risk; it does not grant permission
+to treat native release gates as passed or to publish unsigned artifacts.
+Public distribution remains NO_GO pending separate explicit review.
