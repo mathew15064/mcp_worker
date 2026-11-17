@@ -2,7 +2,7 @@
 
 **A self-hosted MCP server that lets an authorized AI client use tools on your own machines through outbound Go Workers.** The server manages users, OAuth, Worker connections and audit records; the Worker performs approved file, Git, command and process operations.
 
-> **Current status:** SQLite-only development baseline on [`main`](https://github.com/mathew15064/mcp_worker/tree/main). The server and Go Worker have passed local integration tests, but **public signed Worker installation is not yet released**. Use a disposable test environment until you have reviewed the [security model](docs/SECURITY_MODEL.md).
+> **Status:** Signed standalone Worker [v2.0.0](https://github.com/mathew15064/mcp_worker/releases/tag/v2.0.0) is publicly available from source commit `165d41aa0ba0479e3b54cc5f9d6b31bb43a9f26e`. Its GitHub release is **separate** from the Docker MCP Server on `main`. Windows/macOS installers passed simulated QA but not complete native OS acceptance.
 
 ## How it works
 
@@ -19,6 +19,33 @@ flowchart TD
 - **Outbound Workers:** the Worker initiates the authenticated WSS connection; the server does not connect via SSH or store SSH passwords.
 - **15 MCP tools:** runtime info, Worker discovery, workspace commands, files, Git review, checks and managed processes.
 - **Security boundaries:** OAuth scopes, Worker identity, owner access controls and audit records. A Worker executes with its **operating-system user's permissions**; allowed workspace paths do not sandbox arbitrary shell commands.
+
+## Install standalone Worker v2.0.0
+
+**Worker is not MCP Server.** The Worker runs on a machine that will execute tasks and initiates an outbound authenticated WebSocket connection to an existing MCP Server. A prebuilt Worker needs no Node.js, npm, Python, Go, or Docker on the target. Installers come from the [official signed GitHub Release](https://github.com/mathew15064/mcp_worker/releases/tag/v2.0.0); Linux/macOS require `curl` and `openssl`, Windows requires PowerShell and OpenSSL in PATH.
+
+**Linux amd64 (Debian/Ubuntu/VPS):**
+
+```sh
+curl -fsSLo install-linux.sh https://github.com/mathew15064/mcp_worker/releases/download/v2.0.0/install-linux.sh
+# Review the script before running.
+sh install-linux.sh
+~/.local/bin/mcp_worker version
+~/.local/bin/mcp_worker --help
+```
+
+Enroll using a **one-time token** created in Admin → Workers on your existing, trusted MCP Server. The CLI prompts for the token without echoing it. Do not pass enrollment tokens in commands or chats.
+
+```sh
+~/.local/bin/mcp_worker setup --server https://YOUR_TRUSTED_MCP_SERVER
+~/.local/bin/mcp_worker status
+~/.local/bin/mcp_worker connection test
+~/.local/bin/mcp_worker logs
+```
+
+`connection test` checks HTTPS health/readiness only; use `status` and Admin → Workers to verify authenticated WSS. A Worker executes with its OS user's permissions, so prefer a separate least-privileged account instead of root. For upgrades rerun the reviewed installer under the same account without deleting `~/.worker_mcp`.
+
+**macOS:** Download and review [install-macos.sh](https://github.com/mathew15064/mcp_worker/releases/download/v2.0.0/install-macos.sh), then run `sh install-macos.sh`. **Windows:** Download and review [install-windows.ps1](https://github.com/mathew15064/mcp_worker/releases/download/v2.0.0/install-windows.ps1), then run it in PowerShell. Windows/macOS native lifecycle testing is incomplete (28 simulated cases passed). See [Worker documentation](worker/README.md).
 
 ## Quick Setup — image first, no source checkout
 
@@ -38,6 +65,8 @@ curl -fsSLO https://raw.githubusercontent.com/mathew15064/mcp_worker/main/quick-
 # Review the downloaded script before running it; it controls your local Docker daemon.
 sh quick-setup.sh --init
 ```
+
+**Quick Setup installs the Docker MCP Server, not the standalone Worker.** If it reports `Existing data/container but .env.setup is missing`, Docker already has a server container or persistent SQLite volume but the current directory lacks the original `.env.setup`. Run from the original setup directory or restore the existing credentials. Do not delete Docker volumes or regenerate secrets merely to bypass the guard.
 
 The script pulls `mathew15604/mcp-worker:dev-main` and creates a private
 `.env.setup` (mode 0600) and fresh persistent SQLite volume. With no hostname
@@ -93,8 +122,7 @@ Legacy HTTP installations retain their previous binding until an explicit
 HTTPS cutover. `--rebind` is only for legacy HTTP and cannot expose a
 secured backend. You can pin an immutable image with
 `MCP_WORKER_IMAGE=docker.io/mathew15604/mcp-worker@sha256:...` on fresh setup.
-No Docker Hub image, Go Worker binary, or public signed installer is published
-by changing the URL; Worker distribution remains HTTP 503.
+Changing the server URL does not publish Worker binaries. Server-hosted `/worker/install*` and `/worker/dist/*` endpoints still return HTTP 503 by design; the independently signed Worker v2.0.0 is distributed on GitHub Releases.
 
 ## Source Setup — developer workflow
 
@@ -138,10 +166,10 @@ A pull only downloads an image. Use **Quick Setup** for a no-clone install (Dock
 | MCP registry (15 tools) | Verified |
 | Go Worker WSS, authorization and execution | Verified in isolated integration tests |
 | Browser/Admin UI | Verified with Chromium |
-| Public signed Go Worker installer/binary downloads | **Unavailable — HTTP 503** |
-| External HTTPS / ChatGPT OAuth / native OS installers | Not yet certified for public release |
+| Public signed standalone Worker installers/binaries | **GitHub Release v2.0.0 available** |
+| Native Windows/macOS installer acceptance | Simulated QA passed; native lifecycle not fully tested |
 
-**Important:** `/worker/install*` and `/worker/dist/*` deliberately return `503 WORKER_SIGNED_RELEASE_PENDING` until an owner-approved signed Worker release exists. The Docker server image may contain compiled Go binaries, but **that does not authorize unsigned public installation**. Do not bypass signature checks. For the future approved installation process, read [Worker documentation](worker/README.md).
+**Important:** The MCP Server-hosted `/worker/install*` and `/worker/dist/*` endpoints deliberately remain HTTP 503. This does **not** mean the separate GitHub Release v2.0.0 is unavailable. Always verify signed installer artifacts; do not bypass signature checks.
 
 ## Available MCP tools
 
@@ -156,7 +184,7 @@ The server exposes exactly **15** authenticated tools:
 | Tests | `check_run` |
 | Managed processes | `process_start`, `process_status`, `process_logs`, `process_stop` |
 
-Current OAuth scopes are `mcp_worker.read` and `mcp_worker.terminal`; new runtime settings use `MCP_WORKER_*`. The Go Worker CLI/service is `worker_mcp`. The retired SSH commands and legacy names are not installed.
+Current OAuth scopes are `mcp_worker.read` and `mcp_worker.terminal`; new runtime settings use `MCP_WORKER_*`. The Go executable remains `worker_mcp`; the signed standalone installer also exposes the `mcp_worker` CLI alias. Retired SSH commands are not installed.
 
 ## Documentation and contributions
 
