@@ -355,6 +355,11 @@ if [ "$OS" = linux ] && [ "$SERVICE" = 1 ]; then
   fi
 fi
 
+if [ -e "$BIN_DIR/mcp_worker" ] || [ -L "$BIN_DIR/mcp_worker" ]; then
+  [ -L "$BIN_DIR/mcp_worker" ] && [ "$(readlink "$BIN_DIR/mcp_worker")" = "$WORKER_MCP" ] || {
+    echo "[worker_mcp] unrelated CLI path exists: $BIN_DIR/mcp_worker" >&2; exit 1;
+  }
+fi
 if [ -e "$BIN_DIR/worker_mcp" ] || [ -L "$BIN_DIR/worker_mcp" ]; then
   [ -L "$BIN_DIR/worker_mcp" ] && [ "$(readlink "$BIN_DIR/worker_mcp")" = "$WORKER_MCP" ] || {
     echo "[worker_mcp] unrelated CLI path exists: $BIN_DIR/worker_mcp" >&2; exit 1;
@@ -408,7 +413,7 @@ if [ "$OS" = linux ] && [ "$SERVICE" = 1 ]; then
     }
   fi
   mkdir -p "$TMP/saved-state"
-  for RECORD in default-server install-root bin-path service-mode release-version release-commit release-key-sha256 release-manifest-sha256; do
+  for RECORD in default-server install-root bin-path service-mode release-version release-commit release-key-sha256 release-manifest-sha256 release-public-key.pem; do
     if [ -e "$WORKER_HOME/$RECORD" ] || [ -L "$WORKER_HOME/$RECORD" ]; then
       [ -f "$WORKER_HOME/$RECORD" ] && [ ! -L "$WORKER_HOME/$RECORD" ] || {
         echo "[worker_mcp] unsafe managed release record: $RECORD" >&2; exit 1;
@@ -526,7 +531,7 @@ UNIT
         rm -f "$PREVIOUS/$RECORD" || restore_failed=1
       fi
     done
-    for RECORD in default-server install-root bin-path service-mode release-version release-commit release-key-sha256 release-manifest-sha256; do
+    for RECORD in default-server install-root bin-path service-mode release-version release-commit release-key-sha256 release-manifest-sha256 release-public-key.pem; do
       if [ -f "$TMP/saved-state/$RECORD" ]; then
         cp -p "$TMP/saved-state/$RECORD" "$WORKER_HOME/$RECORD" || restore_failed=1
       else
@@ -534,6 +539,7 @@ UNIT
       fi
     done
     if [ "$HAD_CLI_LINK" = 0 ]; then rm -f "$BIN_DIR/worker_mcp" || restore_failed=1; fi
+    if [ "$HAD_ALIAS_LINK" = 0 ]; then rm -f "$BIN_DIR/mcp_worker" || restore_failed=1; fi
     if [ -n "$SYSTEM_BIN_NEXT" ]; then root_cmd rm -f "$SYSTEM_BIN_NEXT" || restore_failed=1; fi
     if [ "$SERVICE_ACTIVE" = 1 ]; then
       root_cmd systemctl start worker_mcp.service && service_ready || restore_failed=1
@@ -562,7 +568,9 @@ if [ -f "$WORKER_MCP" ]; then
 fi
 if [ "$SERVICE" = 1 ]; then
   HAD_CLI_LINK=0
+  HAD_ALIAS_LINK=0
   [ -L "$BIN_DIR/worker_mcp" ] && HAD_CLI_LINK=1
+  [ -L "$BIN_DIR/mcp_worker" ] && HAD_ALIAS_LINK=1
   INSTALL_TXN_ACTIVE=1
 fi
 NEXT="$(mktemp "$TARGET/.worker_mcp.XXXXXX")"
@@ -571,6 +579,7 @@ chmod 0755 "$NEXT"
 mv -f "$NEXT" "$WORKER_MCP"
 if [ "$SERVICE" = 0 ]; then
   ln -sfn "$TARGET/worker_mcp" "$BIN_DIR/worker_mcp"
+  ln -sfn "$TARGET/worker_mcp" "$BIN_DIR/mcp_worker"
   mkdir -p "$WORKER_HOME"
   if [ -z "$GITHUB_RELEASE_PATH" ]; then
     [ -f "$WORKER_HOME/default-server" ] || printf '%s\n' "$BASE_URL" > "$WORKER_HOME/default-server"
@@ -609,6 +618,7 @@ fi
 
 if [ "$OS" = linux ] && [ "$SERVICE" = 1 ]; then
   ln -sfn "$TARGET/worker_mcp" "$BIN_DIR/worker_mcp"
+  ln -sfn "$TARGET/worker_mcp" "$BIN_DIR/mcp_worker"
   mkdir -p "$WORKER_HOME"
   if [ -z "$GITHUB_RELEASE_PATH" ]; then
     [ -f "$WORKER_HOME/default-server" ] || printf '%s\n' "$BASE_URL" > "$WORKER_HOME/default-server"
@@ -652,6 +662,11 @@ printf '%s\\n' "$PINNED_VERSION" > "$WORKER_HOME/release-version"
 printf '%s\\n' "$PINNED_COMMIT" > "$WORKER_HOME/release-commit"
 printf '%s\\n' "$PINNED_KEY_SHA256" > "$WORKER_HOME/release-key-sha256"
 printf '%s\\n' "$RELEASE_MANIFEST_SHA256" > "$WORKER_HOME/release-manifest-sha256"
+[ ! -L "$WORKER_HOME/release-public-key.pem" ] || { echo "[worker_mcp] unsafe stored public key" >&2; exit 1; }
+KEY_NEXT="$(mktemp "$WORKER_HOME/.release-key.XXXXXX")"
+cp "$TMP/release-key.pem" "$KEY_NEXT"
+chmod 0600 "$KEY_NEXT"
+mv -f "$KEY_NEXT" "$WORKER_HOME/release-public-key.pem"
 chmod 0600 "$WORKER_HOME/release-version" "$WORKER_HOME/release-commit" "$WORKER_HOME/release-key-sha256" "$WORKER_HOME/release-manifest-sha256"
 # A failed managed upgrade may still be compensating until all signed records
 # have been written. Only here does the new service become the accepted state.
@@ -730,14 +745,49 @@ function windowsInstallerPayloadScript(
   const pinnedKeySha256 = powershellSingleQuote(approved.publicKeySha256);
   const previousKey = powershellSingleQuote(approved.previousPublicKeySha256 || '');
   // Preserve the no-redirect legacy installer contract; GitHub assets use HTTPS-only redirects.
-  const assetRoot = githubReleasePath ? '$AssetRoot' : '$BaseUrl/worker/dist';
-  const redirects = githubReleasePath ? '$MaxRedirects' : '0';
+  const download = (name: string, dest: string) =>
+    githubReleasePath
+      ? `  DownloadReleaseAsset ${name} ${dest}`
+      : `  Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -Uri "$BaseUrl/worker/dist/${name}" -OutFile ${dest}`;
+  const githubDownloader = githubReleasePath
+    ? `# GitHub release assets redirect to signed HTTPS object storage. No HTTP downgrade.
+function DownloadReleaseAsset([string]$Name, [string]$Destination) {
+  Add-Type -AssemblyName System.Net.Http
+  $Handler = New-Object System.Net.Http.HttpClientHandler
+  $Handler.AllowAutoRedirect = $false
+  $Client = New-Object System.Net.Http.HttpClient($Handler)
+  try {
+    $Uri = [Uri]("$AssetRoot/$Name")
+    for ($Hop = 0; $Hop -le 5; $Hop++) {
+      if ($Uri.Scheme -cne 'https') { throw 'Release redirect to plaintext HTTP refused' }
+      $Response = $Client.GetAsync($Uri).GetAwaiter().GetResult()
+      try {
+        if ([int]$Response.StatusCode -in @(301,302,303,307,308)) {
+          $Location = $Response.Headers.Location
+          if (-not $Location) { throw 'Missing release redirect destination' }
+          $Uri = [Uri]::new($Uri, $Location)
+          continue
+        }
+        if (-not $Response.IsSuccessStatusCode) { throw "Release asset HTTP $([int]$Response.StatusCode)" }
+        $Bytes = $Response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
+        if ($Bytes.Length -gt 150MB) { throw 'Oversized release artifact' }
+        [IO.File]::WriteAllBytes($Destination, $Bytes)
+        return
+      } finally { $Response.Dispose() }
+    }
+    throw 'Too many release redirects'
+  } finally {
+    $Client.Dispose()
+    $Handler.Dispose()
+  }
+}
+`
+    : '';
   return `$ErrorActionPreference = 'Stop'
 $BaseUrl = ${base}
 $GithubReleasePath = ${githubPath}
 $AssetRoot = if ($GithubReleasePath) { "$BaseUrl$GithubReleasePath" } else { "$BaseUrl/worker/dist" }
 if ($GithubReleasePath -and ($BaseUrl -cne 'https://github.com' -or $GithubReleasePath -cne "/mathew15064/mcp_worker/releases/download/v${approved.version}")) { throw 'Unapproved GitHub release URL' }
-$MaxRedirects = if ($GithubReleasePath) { 5 } else { 0 }
 $PinnedVersion = ${pinnedVersion}
 $PinnedCommit = ${pinnedCommit}
 $PinnedPublicKeyB64 = ${pinnedKey}
@@ -760,7 +810,7 @@ $Tmp = Join-Path ([IO.Path]::GetTempPath()) ('worker_mcp-' + [guid]::NewGuid().T
 New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
 $Lock = Join-Path $InstallRoot '.install-lock'
 $LockOwned = $false
-try {
+${githubDownloader}try {
   New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
   foreach ($Path in @($InstallRoot, $Target, $Previous, $WorkerHome)) {
     if ((Test-Path $Path) -and ((Get-Item -LiteralPath $Path).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Reparse point installation refused' }
@@ -791,8 +841,8 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Cannot fingerprint pinned public key' }
   $PinnedKeySha256 = (Get-FileHash -Algorithm SHA256 $PublicDer).Hash.ToLowerInvariant()
   if ($PinnedPublicKeySha256 -cnotmatch '^[0-9a-f]{64}$' -or $PinnedKeySha256 -cne $PinnedPublicKeySha256) { throw 'Pinned RSA SPKI fingerprint mismatch' }
-  Invoke-WebRequest -UseBasicParsing -MaximumRedirection ${redirects} -Uri "${assetRoot}/SHA256SUMS" -OutFile $Sums
-  Invoke-WebRequest -UseBasicParsing -MaximumRedirection ${redirects} -Uri "${assetRoot}/SHA256SUMS.sig" -OutFile $Signature
+${download('SHA256SUMS', '$Sums')}
+${download('SHA256SUMS.sig', '$Signature')}
   & openssl dgst -sha256 -verify $KeyPath -signature $Signature $Sums | Out-Null
   if ($LASTEXITCODE -ne 0) { throw 'Manifest signature verification failed' }
   # Enforce the same nine-entry canonical manifest accepted by the offline signer.
@@ -818,7 +868,7 @@ try {
     if ($Found.Count -ne 1) { throw "Missing or duplicate checksum: $Name" }
     return $Found[0].Hash
   }
-  Invoke-WebRequest -UseBasicParsing -MaximumRedirection ${redirects} -Uri "${assetRoot}/WORKER_RELEASE" -OutFile $Metadata
+${download('WORKER_RELEASE', '$Metadata')}
   if ((Get-FileHash -Algorithm SHA256 $Metadata).Hash.ToLowerInvariant() -cne (ExpectedHash 'WORKER_RELEASE')) {
     throw 'Release metadata checksum failed'
   }
@@ -863,7 +913,7 @@ try {
     }
     if ($OldVersion -ceq $PinnedVersion -and ($OldCommit -cne $PinnedCommit -or $OldManifestSha256 -cne $ReleaseManifestSha256)) { throw 'Release version reused for a different commit or manifest' }
   }
-  Invoke-WebRequest -UseBasicParsing -MaximumRedirection ${redirects} -Uri "${assetRoot}/$File" -OutFile $Downloaded
+${download('$File', '$Downloaded')}
   $Expected = ExpectedHash $File
   $Actual = (Get-FileHash -Algorithm SHA256 $Downloaded).Hash.ToLowerInvariant()
   if ($Actual -ne $Expected.ToLowerInvariant()) { throw "Checksum verification failed for $File" }
@@ -923,10 +973,16 @@ try {
       [Environment]::SetEnvironmentVariable('Path', $NewPath, 'User')
     }
   }
+  $TrustedKeyPath = Join-Path $WorkerHome 'release-public-key.pem'
+  if ((Test-Path $TrustedKeyPath) -and ((Get-Item -LiteralPath $TrustedKeyPath).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Unsafe stored public key' }
+  [IO.File]::WriteAllBytes($TrustedKeyPath, [IO.File]::ReadAllBytes($KeyPath))
   Set-Content -Encoding ascii -Path $VersionPath -Value $PinnedVersion
   Set-Content -Encoding ascii -Path $CommitPath -Value $PinnedCommit
   Set-Content -Encoding ascii -Path $KeyRecordPath -Value $PinnedKeySha256
   Set-Content -Encoding ascii -Path $ManifestRecordPath -Value $ReleaseManifestSha256
+  $Alias = Join-Path $Target 'mcp_worker.exe'
+  if ((Test-Path $Alias) -and ((Get-Item -LiteralPath $Alias).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Unsafe standalone CLI alias' }
+  Copy-Item -LiteralPath $Existing -Destination $Alias -Force
   $env:Path = "$Target;$env:Path"
   Write-Host "[worker_mcp] installed standalone runtime: $(Join-Path $Target 'worker_mcp.exe') (windows/$Arch)"
   if (Test-Path (Join-Path $WorkerHome 'state.json')) {

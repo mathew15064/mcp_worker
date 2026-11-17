@@ -13,6 +13,8 @@ void test('GitHub-first RC installers remain offline-only and fail closed withou
     assert.match(installer, /mathew15064\/mcp_worker\/releases\/download/);
     assert.match(installer, /--proto-redir '=https'/);
     assert.match(installer, /signed release not approved/);
+    assert.match(installer, /release-public-key\.pem/);
+    assert.match(installer, /\$BIN_DIR\/mcp_worker/);
     assert.match(installer, /\[ -z "\$GITHUB_RELEASE_PATH" \]/);
     if (process.platform !== 'win32') {
       const result = spawnSync('sh', ['-c', installer], { encoding: 'utf8', timeout: 5000 });
@@ -24,5 +26,10 @@ void test('GitHub-first RC installers remain offline-only and fail closed withou
   assert.match(windows, /https:\/\/github\.com/);
   assert.match(windows, /Signed release not approved/);
   assert.match(windows, /\$GithubReleasePath/);
-  assert.match(windows, /-MaximumRedirection \$MaxRedirects/);
+  assert.match(windows, /function DownloadReleaseAsset/);
+  assert.match(windows, /AllowAutoRedirect = \$false/);
+  assert.match(windows, /Uri.Scheme -cne 'https'/);
+  assert.match(windows, /DownloadReleaseAsset \$File \$Downloaded/);
+  assert.match(windows, /release-public-key\.pem/);
+  assert.match(windows, /mcp_worker\.exe/);
 });

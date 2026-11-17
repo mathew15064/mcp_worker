@@ -763,6 +763,7 @@ Usage:
   mcp_worker config show         Redacted local configuration
   mcp_worker connection test     Test HTTPS health/readiness (not WSS auth)
   mcp_worker start|stop|restart|status|logs|run|uninstall
+  mcp_worker update --version X.Y.Z --commit FULL_SHA --manifest-sha256 FULL_SHA256
   mcp_worker version
 
 Login options:
@@ -2430,6 +2431,8 @@ func main() {
 				_, err = startDetached(true)
 			}
 		}
+	case "update":
+		err = updateSignedRelease(options)
 	case "status":
 		err = printStatus()
 	case "logs":
