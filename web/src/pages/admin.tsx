@@ -11,6 +11,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { useApp } from '@/app-context';
+import { RowActions } from '@/components/row-actions';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -27,7 +28,6 @@ import {
 } from '@/components/ui/table';
 import {
   ActionForm,
-  ConfirmAction,
   CopyValue,
   DetailRow,
   EmptyState,
@@ -291,55 +291,57 @@ export function AdminUsers() {
                       {user.last_login_at ? new Date(user.last_login_at).toLocaleString() : 'Never'}
                     </TableCell>
                     <TableCell>
-                      <div className="flex min-w-56 flex-wrap justify-end gap-2">
-                        {user.status !== 'active' && (
-                          <ConfirmAction
-                            label="Approve"
-                            action={'/admin/users/' + encodeURIComponent(user.id) + '/approve'}
-                            description="Allow this account to sign in and connect OAuth clients."
-                          />
-                        )}
-                        <ConfirmAction
-                          label={user.status === 'disabled' ? 'Enable' : 'Disable'}
-                          destructive={user.status !== 'disabled'}
-                          action={
-                            '/admin/users/' +
-                            encodeURIComponent(user.id) +
-                            '/' +
-                            (user.status === 'disabled' ? 'enable' : 'disable')
-                          }
-                          description="Disabling a user revokes sessions, OAuth tokens and disconnects their Worker."
-                        />
-                        {user.status === 'pending' && (
-                          <ConfirmAction
-                            label="Reject"
-                            destructive
-                            action={'/admin/users/' + encodeURIComponent(user.id) + '/reject'}
-                          />
-                        )}
-                        <FormDialog
-                          title={'Reset password · ' + user.username}
-                          action={'/admin/users/' + encodeURIComponent(user.id) + '/reset-password'}
-                          trigger={
-                            <Button variant="outline" size="sm">
-                              Reset password
-                            </Button>
-                          }
-                          submitLabel="Reset password"
-                        >
-                          <FormInput
-                            label="New password"
-                            name="password"
-                            type="password"
-                            minLength={10}
-                            maxLength={256}
-                            required
-                          />
-                          <SecurityNote>
-                            Existing sessions and OAuth grants are revoked after reset.
-                          </SecurityNote>
-                        </FormDialog>
-                      </div>
+                      <RowActions
+                        resource={user.username}
+                        actions={[
+                          ...(user.status !== 'active'
+                            ? [{
+                                kind: 'confirm' as const,
+                                label: 'Approve',
+                                action: '/admin/users/' + encodeURIComponent(user.id) + '/approve',
+                                description: 'Allow this account to sign in and connect OAuth clients.',
+                              }]
+                            : []),
+                          {
+                            kind: 'form',
+                            label: 'Reset password',
+                            title: 'Reset password · ' + user.username,
+                            action: '/admin/users/' + encodeURIComponent(user.id) + '/reset-password',
+                            submitLabel: 'Reset password',
+                            children: (
+                              <>
+                                <FormInput
+                                  label="New password"
+                                  name="password"
+                                  type="password"
+                                  minLength={10}
+                                  maxLength={256}
+                                  required
+                                />
+                                <SecurityNote>
+                                  Existing sessions and OAuth grants are revoked after reset.
+                                </SecurityNote>
+                              </>
+                            ),
+                          },
+                          {
+                            kind: 'confirm',
+                            label: user.status === 'disabled' ? 'Enable' : 'Disable',
+                            destructive: user.status !== 'disabled',
+                            action: '/admin/users/' + encodeURIComponent(user.id) + '/' +
+                              (user.status === 'disabled' ? 'enable' : 'disable'),
+                            description: 'Disabling a user revokes sessions, OAuth tokens and disconnects their Worker.',
+                          },
+                          ...(user.status === 'pending'
+                            ? [{
+                                kind: 'confirm' as const,
+                                label: 'Reject',
+                                destructive: true,
+                                action: '/admin/users/' + encodeURIComponent(user.id) + '/reject',
+                              }]
+                            : []),
+                        ]}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}

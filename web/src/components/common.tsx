@@ -318,16 +318,25 @@ export function FormDialog({
   trigger,
   children,
   submitLabel = 'Save',
+  open: controlledOpen,
+  onOpenChange,
 }: {
   title: string;
   description?: string;
   action: string;
-  trigger: ReactNode;
+  trigger?: ReactNode;
   children: ReactNode;
   submitLabel?: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const { submit, busy } = useApp();
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = (value: boolean) => {
+    if (controlledOpen === undefined) setInternalOpen(value);
+    else onOpenChange?.(value);
+  };
   const [pending, setPending] = useState(false);
   const [dirty, setDirty] = useState(false);
   function changeOpen(nextOpen: boolean) {
@@ -353,7 +362,7 @@ export function FormDialog({
   }
   return (
     <Dialog open={open} onOpenChange={changeOpen}>
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      {trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>}
       <DialogContent className="max-h-[88vh] overflow-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
@@ -395,6 +404,9 @@ export function ConfirmAction({
   description,
   destructive = false,
   variant = 'outline',
+  open: controlledOpen,
+  onOpenChange,
+  hideTrigger = false,
 }: {
   action: string;
   label: string;
@@ -402,9 +414,17 @@ export function ConfirmAction({
   description?: string;
   destructive?: boolean;
   variant?: 'outline' | 'ghost' | 'destructive';
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
 }) {
   const { submit, busy } = useApp();
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = (value: boolean) => {
+    if (controlledOpen === undefined) setInternalOpen(value);
+    else onOpenChange?.(value);
+  };
   const [pending, setPending] = useState(false);
   return (
     <AlertDialog
@@ -414,11 +434,13 @@ export function ConfirmAction({
         setOpen(nextOpen);
       }}
     >
-      <AlertDialogTrigger asChild>
-        <Button variant={variant} size="sm" disabled={busy}>
-          {label}
-        </Button>
-      </AlertDialogTrigger>
+      {!hideTrigger && (
+        <AlertDialogTrigger asChild>
+          <Button variant={variant} size="sm" disabled={busy}>
+            {label}
+          </Button>
+        </AlertDialogTrigger>
+      )}
       <AlertDialogContent className="w-[calc(100%-2rem)] max-w-md">
         <AlertDialogHeader>
           <AlertDialogTitle>{title || label + '?'}</AlertDialogTitle>

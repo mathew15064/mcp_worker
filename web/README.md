@@ -77,8 +77,11 @@ approval for the signed standalone Go Worker.
 
 ## Direct Worker targets (Hosted gateway v3)
 
-The Workers screen contains **Workers** and **Install Worker** tabs. There is no
-manual Execution Profiles UI; copy a Worker UUID from the Workers table and pass
+The Workers screen contains **Workers** and **Install Worker** tabs. The Workers,
+OAuth Clients (Admin/User), and Admin Users tables use a shared **Actions** dropdown
+for multi-action rows. Confirmation dialogs, password/rename forms, and
+destructive-action warnings remain unchanged; single-purpose buttons stay visible.
+There is no manual Execution Profiles UI; copy a Worker UUID from the Workers table and pass
 it to an MCP tool as `worker: "<UUID>"`. The server authorizes Worker ownership,
 enabled state, and hosted isolation before dispatching. The `profile` parameter,
 auto-generated profile records and signed standalone Worker v2.0.0 enrollment
