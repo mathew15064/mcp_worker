@@ -2,15 +2,10 @@ import { z } from 'zod';
 import { defineTool, type ToolResponse } from '../toolTypes';
 import type { TerminalToolService } from '../terminalServiceContract';
 import { assertHostedTerminalPrincipal } from '../context';
+import { executionTarget, executionTargetFields } from './executionTarget';
 import terminalMcpService from '../../services/terminalMcpService';
 const checkedTerminalService: TerminalToolService = terminalMcpService;
 
-const profileSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(100)
-  .describe('Configured Terminal Profile name');
 const pathSchema = z.string().min(1).max(2000).describe('Path on the configured remote host');
 const processIdSchema = z
   .string()
@@ -33,7 +28,7 @@ export const fileRead = defineTool({
   description:
     'Read UTF-8 text with SHA-256 metadata, optionally by line range. Use after code_search or when a file is known, and before editing existing files; prefer bounded ranges over broad reads.',
   schema: {
-    profile: profileSchema,
+    ...executionTargetFields,
     path: pathSchema,
     run_as: z
       .string()
@@ -56,7 +51,7 @@ export const fileRead = defineTool({
   async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     return textResult(
-      await service.fileRead(args.profile, args.path, {
+      await service.fileRead(executionTarget(args), args.path, {
         maxBytes: args.max_bytes || 512 * 1024,
         startLine: args.start_line ?? null,
         endLine: args.end_line ?? null,
@@ -72,7 +67,7 @@ export const fileWrite = defineTool({
   description:
     'Atomically create or fully replace a UTF-8 text file. Use for new files or intentional full-file replacement; prefer file_patch for localized edits. Use expected_sha256 when replacing an existing file from a prior read.',
   schema: {
-    profile: profileSchema,
+    ...executionTargetFields,
     path: pathSchema,
     run_as: z
       .string()
@@ -93,7 +88,7 @@ export const fileWrite = defineTool({
     const principal = terminalPrincipal();
     return textResult({
       success: true,
-      ...(await service.fileWrite(args.profile, args.path, args.content, {
+      ...(await service.fileWrite(executionTarget(args), args.path, args.content, {
         createDirs: args.create_dirs === true,
         expectedSha256: args.expected_sha256 || null,
         runAs: args.run_as || null,
@@ -108,7 +103,7 @@ export const filePatch = defineTool({
   description:
     'Apply a deterministic exact-text replacement to a UTF-8 file. Use for localized edits after file_read; pass file_read.sha256 as expected_sha256 whenever available so stale edits fail closed.',
   schema: {
-    profile: profileSchema,
+    ...executionTargetFields,
     path: pathSchema,
     run_as: z
       .string()
@@ -141,7 +136,7 @@ export const filePatch = defineTool({
     const principal = terminalPrincipal();
     return textResult({
       success: true,
-      ...(await service.filePatch(args.profile, args.path, args.old_text, args.new_text, {
+      ...(await service.filePatch(executionTarget(args), args.path, args.old_text, args.new_text, {
         expectedCount: args.expected_count || 1,
         expectedSha256: args.expected_sha256 || null,
         maxBytes: args.max_bytes || 2 * 1024 * 1024,
@@ -157,7 +152,7 @@ export const processStart = defineTool({
   description:
     'Start a long-running command in a managed detached tmux session. Use for servers, watchers, workers, or E2E support processes that outlive one call; use check_run or workspace_exec for finite commands.',
   schema: {
-    profile: profileSchema,
+    ...executionTargetFields,
     command: z.string().min(1).max(32000),
     cwd: z.string().max(2000).optional(),
     run_as: z
@@ -173,7 +168,7 @@ export const processStart = defineTool({
     const principal = terminalPrincipal();
     return textResult({
       success: true,
-      ...(await service.processStart(args.profile, args.command, {
+      ...(await service.processStart(executionTarget(args), args.command, {
         cwd: args.cwd,
         runAs: args.run_as || null,
         actorId: principal.actor_id,
@@ -187,7 +182,7 @@ export const processStatus = defineTool({
   description:
     'Inspect state, exit code, PID, and recent output for a process_start process. Use for lifecycle/state checks; use process_logs with a cursor for repeated incremental output reads.',
   schema: {
-    profile: profileSchema,
+    ...executionTargetFields,
     process_id: processIdSchema,
     lines: z.number().int().min(1).max(1000).optional().default(200),
   },
@@ -197,7 +192,7 @@ export const processStatus = defineTool({
   async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     return textResult(
-      await service.processStatus(args.profile, args.process_id, {
+      await service.processStatus(executionTarget(args), args.process_id, {
         lines: args.lines || 200,
         actorId: principal.actor_id,
       }),
@@ -210,7 +205,7 @@ export const processStop = defineTool({
   description:
     'Stop and clean up a managed process. Use when a process_start workload is finished or must be cancelled; sends Ctrl-C first and force-cleans after the grace period when requested.',
   schema: {
-    profile: profileSchema,
+    ...executionTargetFields,
     process_id: processIdSchema,
     force: z.boolean().optional().default(true),
     grace_ms: z.number().int().min(100).max(5000).optional().default(1000),
@@ -223,7 +218,7 @@ export const processStop = defineTool({
     const principal = terminalPrincipal();
     return textResult({
       success: true,
-      ...(await service.processStop(args.profile, args.process_id, {
+      ...(await service.processStop(executionTarget(args), args.process_id, {
         force: args.force !== false,
         graceMs: args.grace_ms || 1000,
         lines: args.lines || 200,
@@ -238,7 +233,7 @@ export const repoSnapshot = defineTool({
   description:
     'Return branch, HEAD, upstream, dirty state, ahead/behind counts, changed files, and optional merge-base in one structured call. Use near the start of a repository task before modifying source.',
   schema: {
-    profile: profileSchema,
+    ...executionTargetFields,
     repo: pathSchema,
     run_as: z
       .string()
@@ -258,7 +253,7 @@ export const repoSnapshot = defineTool({
   async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     return textResult(
-      await service.repoSnapshot(args.profile, args.repo, {
+      await service.repoSnapshot(executionTarget(args), args.repo, {
         runAs: args.run_as || null,
         base: args.base || null,
         actorId: principal.actor_id,
@@ -272,7 +267,7 @@ export const gitDiff = defineTool({
   description:
     'Return a bounded structured Git diff with changed-file status, additions/deletions, and unified diff text. Prefer this for pre/post-change review instead of workspace_exec with raw git diff.',
   schema: {
-    profile: profileSchema,
+    ...executionTargetFields,
     repo: pathSchema,
     run_as: z
       .string()
@@ -302,7 +297,7 @@ export const gitDiff = defineTool({
   async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     return textResult(
-      await service.gitDiff(args.profile, args.repo, {
+      await service.gitDiff(executionTarget(args), args.repo, {
         runAs: args.run_as || null,
         base: args.base || 'HEAD',
         paths: args.paths || [],
@@ -319,7 +314,7 @@ export const codeSearch = defineTool({
   description:
     'Search source code with ripgrep and return bounded structured file/line/column matches. Use when the relevant file or location is unknown, preferably before broad file_read calls; this is exact/regex search, not semantic similarity search.',
   schema: {
-    profile: profileSchema,
+    ...executionTargetFields,
     cwd: pathSchema,
     query: z.string().min(1).max(4000),
     run_as: z
@@ -339,7 +334,7 @@ export const codeSearch = defineTool({
   async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     return textResult(
-      await service.codeSearch(args.profile, args.cwd, args.query, {
+      await service.codeSearch(executionTarget(args), args.cwd, args.query, {
         runAs: args.run_as || null,
         glob: args.glob || null,
         regex: args.regex === true,
@@ -357,7 +352,7 @@ export const checkRun = defineTool({
   description:
     'Run a finite test, lint, typecheck, formatter-check, or build command and return compact structured results. Prefer this over workspace_exec for checks where pass/fail and bounded failure context matter.',
   schema: {
-    profile: profileSchema,
+    ...executionTargetFields,
     command: z.string().min(1).max(32000),
     cwd: z.string().max(2000).optional(),
     run_as: z
@@ -374,7 +369,7 @@ export const checkRun = defineTool({
   async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     return textResult(
-      await service.checkRun(args.profile, args.command, {
+      await service.checkRun(executionTarget(args), args.command, {
         cwd: args.cwd || null,
         runAs: args.run_as || null,
         timeoutMs: args.timeout_ms || 120000,
@@ -390,7 +385,7 @@ export const processLogs = defineTool({
   description:
     'Read only new output from a process_start process using a byte cursor. Prefer this for repeated polling so prior log output is not resent; use process_status for lifecycle/state checks.',
   schema: {
-    profile: profileSchema,
+    ...executionTargetFields,
     process_id: processIdSchema,
     cursor: z.number().int().min(0).optional().default(0),
     max_bytes: z
@@ -407,7 +402,7 @@ export const processLogs = defineTool({
   async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
     return textResult(
-      await service.processLogs(args.profile, args.process_id, {
+      await service.processLogs(executionTarget(args), args.process_id, {
         cursor: args.cursor || 0,
         maxBytes: args.max_bytes || 64 * 1024,
         actorId: principal.actor_id,

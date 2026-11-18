@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { TOOLS } from '../src/mcp/toolRegistry';
 import runtimeInfo from '../src/mcp/tools/runtimeInfo';
 import { createMcpServer } from '../src/mcp/server';
+import { executionTarget } from '../src/mcp/tools/executionTarget';
 
 const names = [
   'runtime_info',
@@ -30,7 +31,7 @@ void test('TS3 catalog preserves all 15 Worker-only tool schemas and order', () 
   );
   assert.equal(
     runtimeInfo._test.schemaFingerprint(TOOLS),
-    '8c2deb08d22abfd11a34827b461d1f22142dba368dd05ecda02db3c4a072b579',
+    'aedace47f553524f528b8f9e0330e911e37003308fe5c7dcb674c563009b86c1',
   );
   assert.ok(TOOLS.every((tool) => typeof tool.handler === 'function'));
 });
@@ -41,6 +42,15 @@ void test('typed Zod schemas reject malformed tool input and retain defaults', (
   const schema = z.object(exec.schema);
   assert.equal(schema.safeParse({ profile: 'dev2', command: '' }).success, false);
   assert.equal(schema.parse({ profile: 'dev2', command: 'pwd' }).timeout_ms, 30000);
+  const workerId = '97d0d9dc-7bcd-4fa0-96ce-aa10c3ee97d0';
+  assert.equal(schema.parse({ worker: workerId, command: 'pwd' }).worker, workerId);
+  assert.equal(schema.safeParse({ worker: 'other-client-name', command: 'pwd' }).success, false);
+  assert.equal(executionTarget({ worker: workerId }), workerId);
+  assert.equal(executionTarget({ profile: 'dev2' }), 'dev2');
+  assert.throws(() => executionTarget({}), { code: 'INVALID_EXECUTION_TARGET' });
+  assert.throws(() => executionTarget({ worker: workerId, profile: 'dev2' }), {
+    code: 'INVALID_EXECUTION_TARGET',
+  });
   assert.equal(
     schema.safeParse({ profile: 'dev2', command: 'pwd', timeout_ms: 300001 }).success,
     false,

@@ -75,7 +75,7 @@ class WorkerExecutionService {
         'WORKER_PROFILE_INVALID',
         'Worker profile has no profile identity.',
       );
-    return `profile:${profile.id}`;
+    return profile.id.startsWith('worker:') ? profile.id : `profile:${profile.id}`;
   }
 
   inspectProfile(profile: Profile) {

@@ -1,6 +1,6 @@
 {
   "name": "mcp_worker",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
   "description": "Deterministic MCP coding execution harness with outbound Worker-only execution",
   "main": "dist/src/server.js",

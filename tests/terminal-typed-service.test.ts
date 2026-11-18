@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import terminalService from '../src/services/terminalMcpService';
-import type { ExecutionProfile } from '../src/services/executionContracts';
 
 void test('typed execution helpers preserve validation and output normalization', () => {
   assert.deepEqual(terminalService.normalizeCapturedText('one\ntwo\n\n\n', 1), {
@@ -17,33 +16,25 @@ void test('typed execution helpers preserve validation and output normalization'
   });
 });
 
-void test('typed execution-profile discovery forwards the authenticated user owner', async () => {
+void test('Worker discovery forwards authenticated ownership and returns immutable Worker IDs', async () => {
   const ownerValues: (string | null | undefined)[] = [];
-  const profile: ExecutionProfile = {
-    id: 'profile-one',
-    name: 'work',
-    enabled: true,
-    transport: 'worker',
-    description: 'go Worker',
-  };
+  const id = 'c469ed74-a6ce-4d85-a6ab-5a84056fbe82';
   const service = new terminalService.TerminalMcpService({
-    profiles: {
-      findAll({ ownerUserId = null } = {}) {
-        try {
-          return Promise.resolve(
-            (() => {
-              ownerValues.push(ownerUserId);
-              return [profile];
-            })(),
-          );
-        } catch (error) {
-          return Promise.reject(error instanceof Error ? error : new Error('Mock action rejected'));
-        }
+    workers: {
+      listWorkersByOwner(ownerUserId: string) {
+        ownerValues.push(ownerUserId);
+        return Promise.resolve([{
+          id, name: 'work', enabled: true, status: 'online',
+          owner_user_id: ownerUserId, hosted_isolated: true,
+        }] as never);
       },
+      listAdminWorkers() { return Promise.resolve([]); },
+      findAdminWorkerById() { return Promise.resolve(null); },
+      findWorkerByIdForOwner() { return Promise.resolve(null); },
     },
   });
   assert.deepEqual(await service.list({ actorId: 'principal:user:sample' }), [
-    { name: 'work', description: 'go Worker', enabled: true },
+    { id, worker_id: id, name: 'work', enabled: true, status: 'online' },
   ]);
   assert.deepEqual(ownerValues, ['sample']);
 });

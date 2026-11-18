@@ -412,13 +412,17 @@ void test(
     assert.equal(runtime.tool_count, 15);
     assert.equal(
       runtime.tool_schema_hash,
-      '8c2deb08d22abfd11a34827b461d1f22142dba368dd05ecda02db3c4a072b579',
+      'aedace47f553524f528b8f9e0330e911e37003308fe5c7dcb674c563009b86c1',
     );
-    await call('terminal_list');
+    const targets = await call('terminal_list');
+    assert.ok(Array.isArray(targets.terminals));
+    assert.ok(targets.terminals.some((target: unknown) =>
+      typeof target === 'object' && target !== null && 'worker_id' in target &&
+      target.worker_id === worker.id));
     assert.equal(
       (
         await call('workspace_exec', {
-          profile,
+          worker: worker.id,
           cwd: workRoot,
           command:
             'git init -q && git add worker.txt && git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm initial',

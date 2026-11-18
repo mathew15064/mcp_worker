@@ -2,15 +2,9 @@ import { z } from 'zod';
 import { defineTool, type ToolResponse } from '../toolTypes';
 import type { TerminalToolService } from '../terminalServiceContract';
 import { assertHostedTerminalPrincipal } from '../context';
+import { executionTarget, executionTargetFields } from './executionTarget';
 import terminalMcpService from '../../services/terminalMcpService';
 const checkedTerminalService: TerminalToolService = terminalMcpService;
-
-const profileSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(100)
-  .describe('Configured Terminal Profile name, for example dev2');
 
 function textResult(value: Record<string, unknown>): ToolResponse {
   return {
@@ -26,7 +20,7 @@ function terminalPrincipal() {
 export const listTerminals = defineTool({
   name: 'terminal_list',
   description:
-    'List enrolled Worker execution target aliases. No SSH hostnames, credentials or direct connections.',
+    'List enrolled Workers by immutable ID for MCP execution. Use worker UUID with other tools; legacy profile aliases remain accepted. No SSH credentials.',
   schema: {},
   domain: 'Worker Execution',
   requiredScope: 'mcp_worker.terminal',
@@ -43,7 +37,7 @@ export const workspaceExec = defineTool({
   description:
     'Execute a deterministic one-shot shell command on an enrolled Worker over outbound WSS. Use as the generic fallback; prefer specialized file, Git, search and check tools.',
   schema: {
-    profile: profileSchema,
+    ...executionTargetFields,
     command: z
       .string()
       .min(1)
@@ -70,7 +64,7 @@ export const workspaceExec = defineTool({
   annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: true },
   async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
-    const result = await service.workspaceExec(args.profile, args.command, {
+    const result = await service.workspaceExec(executionTarget(args), args.command, {
       cwd: args.cwd,
       timeoutMs: args.timeout_ms || 30000,
       actorId: principal.actor_id,
@@ -84,7 +78,7 @@ export const artifactCollect = defineTool({
   description:
     'Collect a read-only verification artifact with size, MIME type, SHA-256, and text when applicable. Use after tests/UI/runtime checks for evidence; do not assume binary upload to another connector unless a real file reference is returned.',
   schema: {
-    profile: profileSchema,
+    ...executionTargetFields,
     path: z
       .string()
       .min(1)
@@ -106,7 +100,7 @@ export const artifactCollect = defineTool({
   annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false },
   async handler(args, service = checkedTerminalService) {
     const principal = terminalPrincipal();
-    const result = await service.artifactCollect(args.profile, args.path, {
+    const result = await service.artifactCollect(executionTarget(args), args.path, {
       maxBytes: args.max_bytes || 2 * 1024 * 1024,
       actorId: principal.actor_id,
     });
