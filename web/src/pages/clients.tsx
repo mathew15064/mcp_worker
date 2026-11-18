@@ -203,7 +203,7 @@ export function ClientsPage({ personal = false }: { personal?: boolean }) {
                         : 'Never'}
                     </TableCell>
                     <TableCell>
-                      <div className="flex min-w-56 flex-wrap justify-end gap-1">
+                      <div className="flex min-w-56 flex-wrap justify-end gap-2">
                         {!personal && (
                           <Button asChild variant="ghost" size="sm">
                             <Link

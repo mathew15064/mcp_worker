@@ -82,9 +82,9 @@ export function Section({
   className?: string;
 }) {
   return (
-    <Card className={cn('gap-4 border-border/90 shadow-none', className)}>
+    <Card className={cn('gap-5 border-border/90 shadow-none [--card-spacing:--spacing(6)]', className)}>
       {(title || description || action) && (
-        <CardHeader className="flex flex-row items-start justify-between gap-3">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-1">
             {title && <h2 className="text-[0.95rem] font-semibold">{title}</h2>}
             {description && <CardDescription>{description}</CardDescription>}

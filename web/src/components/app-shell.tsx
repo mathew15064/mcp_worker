@@ -124,20 +124,21 @@ function AppNavigation({ role }: { role: Exclude<Role, null> }) {
         </Link>
       </SidebarHeader>
       <Separator className="opacity-60" />
-      <SidebarContent className="px-2" role="navigation" aria-label="Primary navigation">
+      <SidebarContent className="gap-2 px-2 py-3" role="navigation" aria-label="Primary navigation">
         {groups.map((group) => (
-          <SidebarGroup key={group.title}>
-            <SidebarGroupLabel className="text-[10px] uppercase tracking-widest">
+          <SidebarGroup key={group.title} className="px-1 py-2">
+            <SidebarGroupLabel className="mb-1 text-[10px] uppercase tracking-widest">
               {group.title}
             </SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>
+              <SidebarMenu className="gap-1.5">
                 {group.items.map((item) => (
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton
                       asChild
                       tooltip={item.label}
                       isActive={currentPath === item.href}
+                      className="h-9 rounded-lg px-3 hover:bg-sidebar-accent/60 data-[active=true]:border-s-2 data-[active=true]:border-sidebar-ring data-[active=true]:bg-sidebar-accent data-[active=true]:font-semibold data-[active=true]:hover:bg-sidebar-accent"
                     >
                       <NavLink
                         to={item.href}

@@ -182,7 +182,7 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
                         : 'Never'}
                     </TableCell>
                     <TableCell>
-                      <div className="flex flex-wrap justify-end gap-1">
+                      <div className="flex flex-wrap justify-end gap-2">
                         <Button
                           disabled={working === worker.id}
                           size="sm"

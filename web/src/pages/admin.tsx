@@ -213,7 +213,7 @@ export function AdminUsers() {
           title="Public registration"
           description="New accounts still require administrator approval."
         >
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex min-h-10 items-center justify-between gap-5">
             <span className="text-sm">Allow account requests</span>
             <Switch
               aria-label="Allow account requests"
@@ -222,7 +222,7 @@ export function AdminUsers() {
             />
           </div>
           <Button
-            className="mt-4"
+            className="mt-5"
             size="sm"
             disabled={busy}
             onClick={() => void submit('/admin/registration', { enabled: registration })}
@@ -234,7 +234,7 @@ export function AdminUsers() {
           title="Hosted execution"
           description="Terminal use requires attested, isolated per-user Workers."
         >
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex min-h-10 items-center justify-between gap-5">
             <span className="text-sm">Enable verified execution</span>
             <Switch
               aria-label="Enable verified execution"
@@ -243,7 +243,7 @@ export function AdminUsers() {
             />
           </div>
           <Button
-            className="mt-4"
+            className="mt-5"
             size="sm"
             disabled={busy}
             onClick={() => void submit('/admin/hosted', { enabled: execution })}
@@ -291,7 +291,7 @@ export function AdminUsers() {
                       {user.last_login_at ? new Date(user.last_login_at).toLocaleString() : 'Never'}
                     </TableCell>
                     <TableCell>
-                      <div className="flex min-w-56 flex-wrap justify-end gap-1">
+                      <div className="flex min-w-56 flex-wrap justify-end gap-2">
                         {user.status !== 'active' && (
                           <ConfirmAction
                             label="Approve"

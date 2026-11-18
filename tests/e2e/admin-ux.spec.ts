@@ -221,6 +221,42 @@ test('Dark/light theme persists and the unified UI has no uncaught browser error
   expect(errors).toEqual([])
 })
 
+test('Navigation spacing, card padding and Activity filters remain clearly separated', async ({ page }) => {
+  await login(page)
+  await page.setViewportSize({ width: 1650, height: 920 })
+  await page.goto('/admin/users')
+
+  const nav = page.getByRole('navigation', { name: 'Primary navigation' })
+  const users = await nav.getByRole('link', { name: 'Users' }).boundingBox()
+  const activity = await nav.getByRole('link', { name: 'Activity' }).boundingBox()
+  if (!users || !activity) throw new Error('Missing navigation geometry')
+  expect(activity.y - (users.y + users.height)).toBeGreaterThanOrEqual(5)
+
+  const registrationHeading = page.getByRole('heading', { name: 'Public registration' })
+  const card = registrationHeading.locator('xpath=ancestor::*[@data-slot="card"]')
+  const headingBox = await registrationHeading.boundingBox()
+  const cardBox = await card.boundingBox()
+  if (!headingBox || !cardBox) throw new Error('Missing card geometry')
+  expect(headingBox.x - cardBox.x).toBeGreaterThanOrEqual(22)
+
+  for (const width of [1650, 900, 390, 320]) {
+    await page.setViewportSize({ width, height: 920 })
+    await page.goto('/admin/audit')
+    const search = await page.locator('#audit-search').boundingBox()
+    const client = await page.getByRole('combobox').first().boundingBox()
+    const apply = await page.getByRole('button', { name: 'Apply' }).boundingBox()
+    if (!search || !client || !apply) throw new Error('Missing filters geometry at ' + width)
+    if (client.y < search.y + search.height - 1) {
+      expect(client.x - (search.x + search.width)).toBeGreaterThanOrEqual(16)
+    } else {
+      expect(client.y - (search.y + search.height)).toBeGreaterThanOrEqual(16)
+    }
+    expect(apply.y).toBeGreaterThan(search.y + search.height + 12)
+    const size = await measureOverflow(page)
+    expect(size.scroll, 'Activity overflows at ' + width).toBeLessThanOrEqual(size.width + 1)
+  }
+})
+
 test('Mobile sidebar, pages and tables do not create document-level horizontal overflow', async ({ page }) => {
   await login(page)
   for (const width of [390, 320]) {

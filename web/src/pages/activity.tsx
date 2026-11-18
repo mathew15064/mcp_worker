@@ -88,73 +88,74 @@ export function ActivityPage({ personal = false }: { personal?: boolean }) {
       />
       {!personal && (
         <Section className="mb-5" title="Filters">
-          <form
-            onSubmit={search}
-            className="grid items-end gap-3 md:grid-cols-[2fr_1fr_1fr_1fr_auto]"
-          >
-            <div className="space-y-1.5">
-              <Label htmlFor="audit-search">Search</Label>
-              <div className="relative">
-                <Search className="absolute start-3 top-2.5 size-4 text-muted-foreground" />
-                <Input
-                  id="audit-search"
-                  className="ps-9"
-                  placeholder="Request, method, tool..."
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  maxLength={160}
-                />
+          <form onSubmit={search} className="space-y-5">
+            <div className="grid gap-x-5 gap-y-5 sm:grid-cols-2 xl:grid-cols-[minmax(250px,2fr)_repeat(3,minmax(140px,1fr))]">
+              <div className="min-w-0 space-y-2">
+                <Label htmlFor="audit-search">Search</Label>
+                <div className="relative">
+                  <Search className="absolute start-3 top-2.5 size-4 text-muted-foreground" />
+                  <Input
+                    id="audit-search"
+                    className="ps-9"
+                    placeholder="Request, method, tool..."
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    maxLength={160}
+                  />
+                </div>
+              </div>
+              <div className="min-w-0 space-y-2">
+                <Label>Client</Label>
+                <Select value={client} onValueChange={setClient}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="All clients" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All clients</SelectItem>
+                    {(state?.data.clients || []).map((c) => (
+                      <SelectItem key={c.client_id} value={c.client_id}>
+                        {c.display_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="min-w-0 space-y-2">
+                <Label>Tool</Label>
+                <Select value={tool} onValueChange={setTool}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="All tools" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All tools</SelectItem>
+                    {(state?.data.toolNames || []).map((name) => (
+                      <SelectItem key={name} value={name}>
+                        {name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="min-w-0 space-y-2">
+                <Label>Result</Label>
+                <Select value={result} onValueChange={setResult}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All results</SelectItem>
+                    {['SUCCESS', 'DENIED', 'ERROR'].map((v) => (
+                      <SelectItem key={v} value={v}>
+                        {v}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
-            <div className="space-y-1.5">
-              <Label>Client</Label>
-              <Select value={client} onValueChange={setClient}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="All clients" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All clients</SelectItem>
-                  {(state?.data.clients || []).map((c) => (
-                    <SelectItem key={c.client_id} value={c.client_id}>
-                      {c.display_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="flex justify-end border-t border-border/60 pt-4">
+              <Button type="submit" className="min-w-24">Apply</Button>
             </div>
-            <div className="space-y-1.5">
-              <Label>Tool</Label>
-              <Select value={tool} onValueChange={setTool}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="All tools" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All tools</SelectItem>
-                  {(state?.data.toolNames || []).map((name) => (
-                    <SelectItem key={name} value={name}>
-                      {name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Result</Label>
-              <Select value={result} onValueChange={setResult}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All results</SelectItem>
-                  {['SUCCESS', 'DENIED', 'ERROR'].map((v) => (
-                    <SelectItem key={v} value={v}>
-                      {v}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <Button type="submit">Apply</Button>
           </form>
         </Section>
       )}
