@@ -7,6 +7,7 @@ export function isMachineEndpoint(req: Request) {
   return (
     req.path === '/mcp' ||
     req.path.startsWith('/mcp/') ||
+    req.path === '/oauth/register' ||
     req.path === '/oauth/token' ||
     req.path === '/oauth/revoke' ||
     req.path.startsWith('/.well-known/') ||

@@ -4,6 +4,9 @@
 
 # Host Dependencies
 node_modules
+web/node_modules/
+web/dist/
+/src/public/ui/
 npm-debug.log*
 
 # Environment and Secrets

@@ -16,6 +16,8 @@ const DEFAULTS = Object.freeze({
   ),
   'mcp.auth_code_ttl_seconds': String(parseInt(process.env.MCP_AUTH_CODE_TTL_SECONDS || '300', 10)),
   'mcp.rate_limit_per_minute': String(parseInt(process.env.MCP_RATE_LIMIT_PER_MINUTE || '120', 10)),
+  'registration.enabled': 'true',
+  'hosted.execution.enabled': 'false',
   'telegram.enabled': 'false',
   'telegram.chat_id': '',
   'telegram.bot_token': '',

@@ -1,8 +1,7 @@
 import { z } from 'zod';
 import { defineTool, type ToolResponse } from '../toolTypes';
 import type { TerminalToolService } from '../terminalServiceContract';
-import { assertPrincipal } from '../context';
-import { SCOPES } from '../../auth/principal';
+import { assertHostedTerminalPrincipal } from '../context';
 import terminalMcpService from '../../services/terminalMcpService';
 const checkedTerminalService: TerminalToolService = terminalMcpService;
 
@@ -26,9 +25,7 @@ function textResult(value: Record<string, unknown>): ToolResponse {
 }
 
 function terminalPrincipal() {
-  const principal = assertPrincipal();
-  principal.assertScope(SCOPES.TERMINAL);
-  return principal;
+  return assertHostedTerminalPrincipal();
 }
 
 export const fileRead = defineTool({

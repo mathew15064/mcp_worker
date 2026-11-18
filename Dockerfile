@@ -21,6 +21,9 @@ COPY package.json package-lock.json ./
 # Install only production dependencies (better-sqlite3 compiled against Alpine musl)
 RUN npm ci
 COPY tsconfig.json ./
+COPY web/package*.json ./web/
+RUN npm --prefix web ci
+COPY web/ ./web/
 COPY src/ ./src/
 COPY scripts/ ./scripts/
 COPY tests/ ./tests/

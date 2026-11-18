@@ -10,6 +10,8 @@ interface ClientRow {
   principal_id: string;
   profile_id: string | null;
   owner_user_id: string | null;
+  is_public?: number;
+  last_authorized_at?: string | null;
   status: string;
 }
 interface TokenRow {
@@ -27,6 +29,7 @@ interface TokenRow {
   client_name?: string | null;
 }
 interface AuthCodeRow extends TokenRow {
+  user_id: string;
   used_at: string | null;
   redirect_uri: string;
   code_challenge: string;
@@ -43,6 +46,7 @@ interface TokenInput {
   resource: string;
   scopes?: Strings;
   expiresAt: string;
+  ownerUserId?: string | null;
 }
 interface RefreshInput extends TokenInput {
   tokenFamilyId: string;
@@ -55,6 +59,7 @@ interface ClientInput {
   principalId: string;
   profileId: string | null;
   ownerUserId?: string | null;
+  isPublic?: boolean;
   redirectUris?: Strings;
   allowedScopes?: Strings;
   status?: string;
@@ -156,6 +161,7 @@ class McpOAuthRepository {
     principalId,
     profileId,
     ownerUserId = null,
+    isPublic = false,
     redirectUris = [],
     allowedScopes = [],
     status = 'active',
@@ -164,12 +170,13 @@ class McpOAuthRepository {
     const now = new Date().toISOString();
     await this.db.execute(
       `INSERT INTO mcp_oauth_clients
-      (id, client_id, client_secret_hash, display_name, principal_id, profile_id, owner_user_id, redirect_uris_json, allowed_scopes_json, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, client_id, client_secret_hash, is_public, display_name, principal_id, profile_id, owner_user_id, redirect_uris_json, allowed_scopes_json, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         recordId,
         clientId,
         clientSecretHash,
+        isPublic ? 1 : 0,
         displayName,
         principalId,
         profileId,
@@ -341,13 +348,14 @@ class McpOAuthRepository {
       const accessTokenId = accessToken.id || `at_${crypto.randomUUID()}`;
       await tx.execute(
         `INSERT INTO mcp_oauth_access_tokens
-        (id, token_hash, client_id, principal_id, resource, scopes_json, expires_at, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        (id, token_hash, client_id, principal_id, owner_user_id, resource, scopes_json, expires_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           accessTokenId,
           accessToken.tokenHash,
           accessToken.clientId,
           accessToken.principalId,
+          accessToken.ownerUserId || null,
           accessToken.resource,
           JSON.stringify(
             Array.isArray(accessToken.scopes) ? accessToken.scopes : [accessToken.scopes],
@@ -361,14 +369,15 @@ class McpOAuthRepository {
         refreshTokenId = refreshToken.id || `rt_${crypto.randomUUID()}`;
         await tx.execute(
           `INSERT INTO mcp_oauth_refresh_tokens
-          (id, token_hash, token_family_id, client_id, principal_id, resource, scopes_json, expires_at, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, token_hash, token_family_id, client_id, principal_id, owner_user_id, resource, scopes_json, expires_at, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             refreshTokenId,
             refreshToken.tokenHash,
             refreshToken.tokenFamilyId,
             refreshToken.clientId,
             refreshToken.principalId,
+            refreshToken.ownerUserId || null,
             refreshToken.resource,
             JSON.stringify(
               Array.isArray(refreshToken.scopes) ? refreshToken.scopes : [refreshToken.scopes],
@@ -387,6 +396,7 @@ class McpOAuthRepository {
     tokenHash,
     clientId,
     principalId,
+    ownerUserId = null,
     resource,
     scopes = [],
     expiresAt,
@@ -395,13 +405,14 @@ class McpOAuthRepository {
     const now = new Date().toISOString();
     await this.db.execute(
       `INSERT INTO mcp_oauth_access_tokens
-      (id, token_hash, client_id, principal_id, resource, scopes_json, expires_at, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, token_hash, client_id, principal_id, owner_user_id, resource, scopes_json, expires_at, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         recordId,
         tokenHash,
         clientId,
         principalId,
+        ownerUserId,
         resource,
         JSON.stringify(Array.isArray(scopes) ? scopes : [scopes]),
         expiresAt,
@@ -416,10 +427,10 @@ class McpOAuthRepository {
     return hydrateScopes(
       await this.db.queryOne<TokenRow>(
         `SELECT t.*, c.status AS client_status, c.profile_id, c.display_name AS client_name,
-      c.owner_user_id, u.status AS owner_user_status
+      COALESCE(t.owner_user_id, c.owner_user_id) AS owner_user_id, u.status AS owner_user_status
       FROM mcp_oauth_access_tokens t
       JOIN mcp_oauth_clients c ON t.client_id = c.client_id
-      LEFT JOIN users u ON u.id = c.owner_user_id
+      LEFT JOIN users u ON u.id = COALESCE(t.owner_user_id, c.owner_user_id)
       WHERE t.token_hash = ?`,
         [tokenHash],
       ),
@@ -465,6 +476,30 @@ class McpOAuthRepository {
     });
   }
 
+  async revokeAllTokensByOwner(ownerUserId: string) {
+    if (!ownerUserId) return {access_revoked:0,refresh_revoked:0};
+    return this.db.transaction(async tx => {
+      const now = new Date().toISOString();
+      // Public OAuth clients are shared, so revoke by token ownership, not client id.
+      // Include confidential clients created before the owner_user_id token column.
+      const access = await tx.execute(
+        `UPDATE mcp_oauth_access_tokens SET revoked_at = ?
+         WHERE revoked_at IS NULL AND (
+           owner_user_id = ? OR (owner_user_id IS NULL AND client_id IN
+             (SELECT client_id FROM mcp_oauth_clients WHERE owner_user_id = ?)))`,
+        [now, ownerUserId, ownerUserId],
+      );
+      const refresh = await tx.execute(
+        `UPDATE mcp_oauth_refresh_tokens SET revoked_at = ?
+         WHERE revoked_at IS NULL AND (
+           owner_user_id = ? OR (owner_user_id IS NULL AND client_id IN
+             (SELECT client_id FROM mcp_oauth_clients WHERE owner_user_id = ?)))`,
+        [now, ownerUserId, ownerUserId],
+      );
+      return {access_revoked:access.changes,refresh_revoked:refresh.changes};
+    });
+  }
+
   async recordAccessTokenUsage(id: string) {
     return this.db.execute('UPDATE mcp_oauth_access_tokens SET last_used_at = ? WHERE id = ?', [
       new Date().toISOString(),
@@ -487,6 +522,7 @@ class McpOAuthRepository {
     tokenFamilyId,
     clientId,
     principalId,
+    ownerUserId = null,
     resource,
     scopes = [],
     expiresAt,
@@ -495,14 +531,15 @@ class McpOAuthRepository {
     const now = new Date().toISOString();
     await this.db.execute(
       `INSERT INTO mcp_oauth_refresh_tokens
-      (id, token_hash, token_family_id, client_id, principal_id, resource, scopes_json, expires_at, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, token_hash, token_family_id, client_id, principal_id, owner_user_id, resource, scopes_json, expires_at, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         recordId,
         tokenHash,
         tokenFamilyId,
         clientId,
         principalId,
+        ownerUserId,
         resource,
         JSON.stringify(Array.isArray(scopes) ? scopes : [scopes]),
         expiresAt,
@@ -516,11 +553,11 @@ class McpOAuthRepository {
     if (!tokenHash) return null;
     return hydrateScopes(
       await this.db.queryOne<RefreshRow>(
-        `SELECT r.*, c.status AS client_status, c.profile_id, c.owner_user_id,
+        `SELECT r.*, c.status AS client_status, c.profile_id, COALESCE(r.owner_user_id, c.owner_user_id) AS owner_user_id,
       u.status AS owner_user_status
       FROM mcp_oauth_refresh_tokens r
       JOIN mcp_oauth_clients c ON r.client_id = c.client_id
-      LEFT JOIN users u ON u.id = c.owner_user_id
+      LEFT JOIN users u ON u.id = COALESCE(r.owner_user_id, c.owner_user_id)
       WHERE r.token_hash = ?`,
         [tokenHash],
       ),
@@ -576,14 +613,15 @@ class McpOAuthRepository {
       const refreshTokenId = replacementRefreshToken.id || `rt_${crypto.randomUUID()}`;
       await tx.execute(
         `INSERT INTO mcp_oauth_refresh_tokens
-        (id, token_hash, token_family_id, client_id, principal_id, resource, scopes_json, expires_at, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (id, token_hash, token_family_id, client_id, principal_id, owner_user_id, resource, scopes_json, expires_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           refreshTokenId,
           replacementRefreshToken.tokenHash,
           replacementRefreshToken.tokenFamilyId,
           replacementRefreshToken.clientId,
           replacementRefreshToken.principalId,
+          replacementRefreshToken.ownerUserId || null,
           replacementRefreshToken.resource,
           JSON.stringify(
             Array.isArray(replacementRefreshToken.scopes)
@@ -597,13 +635,14 @@ class McpOAuthRepository {
       const accessTokenId = accessToken.id || `at_${crypto.randomUUID()}`;
       await tx.execute(
         `INSERT INTO mcp_oauth_access_tokens
-        (id, token_hash, client_id, principal_id, resource, scopes_json, expires_at, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        (id, token_hash, client_id, principal_id, owner_user_id, resource, scopes_json, expires_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           accessTokenId,
           accessToken.tokenHash,
           accessToken.clientId,
           accessToken.principalId,
+          accessToken.ownerUserId || null,
           accessToken.resource,
           JSON.stringify(
             Array.isArray(accessToken.scopes) ? accessToken.scopes : [accessToken.scopes],
@@ -707,6 +746,19 @@ class McpOAuthRepository {
       FROM mcp_request_audit a LEFT JOIN mcp_oauth_clients c ON c.client_id = a.client_id
       ${filter.where} ORDER BY a.created_at DESC LIMIT ${safeLimit} OFFSET ${safeOffset}`,
       filter.params,
+    );
+  }
+
+  async listAuditLogsForOwner(ownerUserId: string, limit = 50) {
+    if (!ownerUserId) return [];
+    return this.db.queryAll<{
+      created_at: string; mcp_method: string; tool_name: string | null;
+      result: string; http_status: number;
+    }>(
+      `SELECT a.created_at, a.mcp_method, a.tool_name, a.result, a.http_status
+       FROM mcp_request_audit a
+       WHERE a.principal_id = ? ORDER BY a.created_at DESC LIMIT ?`,
+      [`principal:user:${ownerUserId}`, Math.max(1, Math.min(200, limit))],
     );
   }
 

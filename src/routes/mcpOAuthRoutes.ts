@@ -11,9 +11,11 @@ const { oauthConsentPage, errorPage } = pages;
 interface OAuthIdentity {
   id: string;
   role: string;
+  principal_id?: string;
 }
 interface OwnedClient {
   owner_user_id: string | null;
+  is_public?: number;
 }
 function queryString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
@@ -89,6 +91,7 @@ async function isSafeErrorRedirect(clientId: unknown, redirectUri: unknown) {
 function canAuthorizeClient(identity: OAuthIdentity | null, client: OwnedClient | null) {
   if (!identity || !client) return false;
   if (client.owner_user_id) return identity.role === 'user' && identity.id === client.owner_user_id;
+  if (client.is_public) return identity.role === 'user' && typeof identity.principal_id === 'string';
   return identity.role === 'admin';
 }
 
@@ -131,13 +134,12 @@ function extractClientCredentials(req: Request) {
   const clientSecret = body.client_secret;
   if (
     typeof clientId === 'string' &&
-    typeof clientSecret === 'string' &&
-    clientId &&
-    clientSecret
+    (clientSecret === undefined || typeof clientSecret === 'string') &&
+    clientId
   ) {
     return {
       clientId: String(clientId).trim(),
-      clientSecret: String(clientSecret).trim(),
+      clientSecret: typeof clientSecret === 'string' ? clientSecret.trim() : '',
     };
   }
 
@@ -189,12 +191,49 @@ router.get('/.well-known/oauth-authorization-server', (req, res) => {
 
     code_challenge_methods_supported: ['S256'],
 
-    token_endpoint_auth_methods_supported: ['client_secret_basic', 'client_secret_post'],
+    token_endpoint_auth_methods_supported: ['client_secret_basic', 'client_secret_post', 'none'],
+    registration_endpoint: `${mcpConfig.publicBaseUrl}/oauth/register`,
+    client_id_metadata_document_supported: false,
 
     scopes_supported: mcpConfig.supportedScopes,
 
     authorization_response_iss_parameter_supported: true,
   });
+});
+
+// ============================================================================
+// Dynamic registration: public clients, PKCE mandatory, no terminal scope
+// ============================================================================
+const registrationLimiter = rateLimit({windowMs: 60 * 60 * 1000, limit: 10, standardHeaders:true, legacyHeaders:false});
+router.post('/oauth/register', registrationLimiter, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!req.is('application/json')) return res.status(415).json({error:'invalid_client_metadata'});
+  const body = readBody(req.body);
+  const allowed = ['authorization_code', 'refresh_token'];
+  if ((body.token_endpoint_auth_method && body.token_endpoint_auth_method !== 'none') ||
+    (body.response_types && (!Array.isArray(body.response_types) || body.response_types.some(v => v !== 'code'))) ||
+    (body.grant_types && (!Array.isArray(body.grant_types) || body.grant_types.some(v => typeof v !== 'string' || !allowed.includes(v))))) {
+    return res.status(400).json({error:'invalid_client_metadata', error_description:'Only PKCE public OAuth authorization code clients are supported.'});
+  }
+  try {
+    const created = await mcpOAuthService.registerPublicClient({
+      clientName: typeof body.client_name === 'string' ? body.client_name : '',
+      redirectUris: Array.isArray(body.redirect_uris)
+        ? (body.redirect_uris as unknown[]).map(value => typeof value === 'string' ? value : '')
+        : [],
+      scope: typeof body.scope === 'string' ? body.scope : undefined,
+    });
+    return res.status(201).json({
+      client_id:created.clientId, client_name: created.client?.display_name,
+      redirect_uris: created.client?.redirect_uris,
+      grant_types:['authorization_code','refresh_token'], response_types:['code'],
+      scope: created.scopes.join(' '), token_endpoint_auth_method:'none',
+      client_id_issued_at: Math.floor(Date.now() / 1000),
+    });
+  } catch (err) {
+    const f = oauthFailure(err);
+    return res.status(f.status).json({error:f.error,error_description:f.description});
+  }
 });
 
 // ============================================================================
@@ -300,7 +339,8 @@ router.post('/oauth/authorize', authorizeRateLimiter, async (req, res) => {
       const code = await mcpOAuthService.issueAuthorizationCode({
         clientId: validated.client.client_id,
         userId: user.id,
-        principalId: validated.client.principal_id,
+        principalId: validated.client.is_public && 'principal_id' in user && typeof user.principal_id === 'string'
+          ? user.principal_id : validated.client.principal_id,
         redirectUri: validated.redirectUri,
         resource: validated.resource,
         scopes: validated.scopes,
@@ -433,4 +473,4 @@ router.post('/oauth/revoke', async (req, res) => {
   }
 });
 
-export = router;
+export = Object.assign(router, { canAuthorizeClient });

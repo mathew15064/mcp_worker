@@ -14,6 +14,8 @@ interface WorkerRow {
   enabled: number | boolean;
   status: string;
   owner_user_id: string | null;
+  owner_username?: string | null;
+  hosted_isolated?: number | boolean;
   last_seen_at: string | null;
 }
 interface ProfileRow {
@@ -24,6 +26,7 @@ interface ProfileRow {
   enabled: number | boolean;
   worker_enabled?: number | boolean;
   owner_user_id?: string | null;
+  hosted_isolated?: number | boolean;
 }
 interface OwnerOptions {
   ownerUserId?: string | null;
@@ -104,6 +107,7 @@ class WorkerRepository {
     if (!row) return null;
     return {
       ...row,
+      hosted_isolated: row.hosted_isolated === true || row.hosted_isolated === 1,
       transport: 'worker',
       enabled:
         Boolean(row.enabled) &&
@@ -379,7 +383,7 @@ class WorkerRepository {
     return this.hydrateProfile(
       await this.db.queryOne<ProfileRow>(
         `SELECT p.*, w.name AS worker_name, w.status AS worker_status, w.enabled AS worker_enabled,
-      w.last_seen_at AS worker_last_seen_at, w.owner_user_id FROM worker_profiles p JOIN workers w ON w.id = p.worker_id WHERE p.id = ?`,
+      w.last_seen_at AS worker_last_seen_at, w.owner_user_id, w.hosted_isolated FROM worker_profiles p JOIN workers w ON w.id = p.worker_id WHERE p.id = ?`,
         [id],
       ),
     );
@@ -389,7 +393,7 @@ class WorkerRepository {
     return this.hydrateProfile(
       await this.db.queryOne<ProfileRow>(
         `SELECT p.*, w.name AS worker_name, w.status AS worker_status, w.enabled AS worker_enabled,
-      w.last_seen_at AS worker_last_seen_at, w.owner_user_id FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
+      w.last_seen_at AS worker_last_seen_at, w.owner_user_id, w.hosted_isolated FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
       WHERE p.id = ? AND w.owner_user_id = ?`,
         [id, ownerUserId],
       ),
@@ -400,7 +404,7 @@ class WorkerRepository {
     return this.hydrateProfile(
       await this.db.queryOne<ProfileRow>(
         `SELECT p.*, w.name AS worker_name, w.status AS worker_status, w.enabled AS worker_enabled,
-      w.last_seen_at AS worker_last_seen_at, w.owner_user_id FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
+      w.last_seen_at AS worker_last_seen_at, w.owner_user_id, w.hosted_isolated FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
       WHERE p.id = ? AND w.owner_user_id IS NULL`,
         [id],
       ),
@@ -411,7 +415,7 @@ class WorkerRepository {
     return this.hydrateProfile(
       await this.db.queryOne<ProfileRow>(
         `SELECT p.*, w.name AS worker_name, w.status AS worker_status, w.enabled AS worker_enabled,
-      w.last_seen_at AS worker_last_seen_at, w.owner_user_id FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
+      w.last_seen_at AS worker_last_seen_at, w.owner_user_id, w.hosted_isolated FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
       WHERE LOWER(p.name) = LOWER(?) LIMIT 1`,
         [String(name || '').trim()],
       ),
@@ -422,7 +426,7 @@ class WorkerRepository {
     return (
       await this.db
         .queryAll<ProfileRow>(`SELECT p.*, w.name AS worker_name, w.status AS worker_status, w.enabled AS worker_enabled,
-      w.last_seen_at AS worker_last_seen_at, w.owner_user_id FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
+      w.last_seen_at AS worker_last_seen_at, w.owner_user_id, w.hosted_isolated FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
       ORDER BY LOWER(p.name), p.name`)
     ).map((row) => this.hydrateProfile(row));
   }
@@ -431,7 +435,7 @@ class WorkerRepository {
     return (
       await this.db.queryAll<ProfileRow>(
         `SELECT p.*, w.name AS worker_name, w.status AS worker_status, w.enabled AS worker_enabled,
-      w.last_seen_at AS worker_last_seen_at, w.owner_user_id FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
+      w.last_seen_at AS worker_last_seen_at, w.owner_user_id, w.hosted_isolated FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
       WHERE w.owner_user_id = ? ORDER BY LOWER(p.name), p.name`,
         [ownerUserId],
       )
@@ -442,7 +446,7 @@ class WorkerRepository {
     return (
       await this.db
         .queryAll<ProfileRow>(`SELECT p.*, w.name AS worker_name, w.status AS worker_status, w.enabled AS worker_enabled,
-      w.last_seen_at AS worker_last_seen_at, w.owner_user_id FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
+      w.last_seen_at AS worker_last_seen_at, w.owner_user_id, w.hosted_isolated FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
       WHERE w.owner_user_id IS NULL ORDER BY LOWER(p.name), p.name`)
     ).map((row) => this.hydrateProfile(row));
   }

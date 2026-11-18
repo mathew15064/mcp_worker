@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import mcpConfig from '../config/mcpConfig';
 import mcpOAuthRepository from '../repositories/mcpOAuthRepository';
+import userRepository from '../repositories/userRepository';
 import type { OAuthConfig } from './contracts/oauthContracts';
 import type { OAuthRepositoryContract } from './contracts/repositoryContracts';
 
@@ -108,6 +109,37 @@ class McpOAuthService {
   // ==========================================================================
   // Client Management
   // ==========================================================================
+
+  async registerPublicClient({ clientName, redirectUris, scope }: {
+    clientName: string; redirectUris: string[]; scope?: string;
+  }) {
+    if (typeof clientName !== 'string' || !clientName.trim() || clientName.length > 100) {
+      throw new OAuthError('invalid_client_metadata', 'Client name must be 1-100 characters.');
+    }
+    if (!Array.isArray(redirectUris) || !redirectUris.length || redirectUris.length > 5 ||
+      redirectUris.some(uri => typeof uri !== 'string' || uri.length > 2048 || !this.isSafeRedirectUri(uri))) {
+      throw new OAuthError('invalid_redirect_uri', 'Between 1 and 5 valid HTTPS redirect URIs are required.');
+    }
+    if (new Set(redirectUris).size !== redirectUris.length)
+      throw new OAuthError('invalid_redirect_uri', 'Duplicate redirect URIs are not allowed.');
+    const scopes = typeof scope === 'string' && scope.trim() ? scope.trim().split(/\s+/) : ['mcp_worker.read', 'offline_access'];
+    if (scopes.some(s => !['mcp_worker.read', 'offline_access'].includes(s)))
+      throw new OAuthError('invalid_scope', 'Public clients support read and offline_access only.');
+    if (!scopes.includes('mcp_worker.read')) scopes.unshift('mcp_worker.read');
+    const id = 'br_public_' + crypto.randomBytes(16).toString('hex');
+    const client = await this.repo.createClient({
+      clientId: id,
+      clientSecretHash: this.hash(crypto.randomBytes(32)),
+      isPublic: true,
+      displayName: clientName.trim(),
+      principalId: 'principal:public:' + id,
+      profileId: 'profile:public:' + id,
+      ownerUserId: null,
+      redirectUris,
+      allowedScopes: scopes,
+    });
+    return {client, clientId:id, scopes};
+  }
 
   async registerClient({
     displayName,
@@ -221,8 +253,8 @@ class McpOAuthService {
   }
 
   async authenticateClient(clientId: string, clientSecret: string) {
-    if (!clientId || !clientSecret) {
-      throw new OAuthError('invalid_client', 'Client ID and Client Secret are required.', 401);
+    if (!clientId) {
+      throw new OAuthError('invalid_client', 'Client ID is required.', 401);
     }
 
     const client = await this.repo.findClientByClientId(clientId);
@@ -241,6 +273,11 @@ class McpOAuthService {
       );
     }
 
+    if (client.is_public) {
+      if (clientSecret) throw new OAuthError('invalid_client', 'Public clients must not send a client secret.', 401);
+      return client;
+    }
+    if (!clientSecret) throw new OAuthError('invalid_client', 'Client secret required.', 401);
     const candidateHash = this.hash(clientSecret);
     if (!this.timingSafeCompare(candidateHash, client.client_secret_hash)) {
       throw new OAuthError('invalid_client', 'Client authentication failed.', 401);
@@ -432,6 +469,13 @@ class McpOAuthService {
       throw new OAuthError('invalid_grant', 'PKCE code_verifier verification failed.');
     }
 
+    if (client.is_public) {
+      const owner = await userRepository.findById(codeRecord.user_id);
+      if (!owner || owner.status !== 'active' || owner.principal_id !== codeRecord.principal_id) {
+        throw new OAuthError('invalid_grant', 'The authorizing user is no longer active.');
+      }
+    }
+
     const rawAccessToken = `br_at_${crypto.randomBytes(32).toString('base64url')}`;
     const accessTokenHash = this.hash(rawAccessToken);
     const accessTtl = this.config.accessTokenTtlSeconds;
@@ -440,7 +484,8 @@ class McpOAuthService {
     const accessTokenData = {
       tokenHash: accessTokenHash,
       clientId: client.client_id,
-      principalId: client.principal_id,
+      principalId: client.is_public ? codeRecord.principal_id : client.principal_id,
+      ownerUserId: client.is_public ? codeRecord.user_id : client.owner_user_id,
       resource: codeRecord.resource,
       scopes: codeRecord.scopes,
       expiresAt: accessExpiresAt,
@@ -459,7 +504,8 @@ class McpOAuthService {
         tokenHash: refreshTokenHash,
         tokenFamilyId,
         clientId: client.client_id,
-        principalId: client.principal_id,
+        principalId: client.is_public ? codeRecord.principal_id : client.principal_id,
+        ownerUserId: client.is_public ? codeRecord.user_id : client.owner_user_id,
         resource: codeRecord.resource,
         scopes: codeRecord.scopes,
         expiresAt: refreshExpiresAt,
@@ -514,6 +560,9 @@ class McpOAuthService {
     if (refreshRecord.client_id !== clientId) {
       throw new OAuthError('invalid_grant', 'Refresh token was not issued to this client.');
     }
+    if (client.is_public && (!refreshRecord.owner_user_id || refreshRecord.owner_user_status !== 'active')) {
+      throw new OAuthError('invalid_grant', 'The authorizing user is no longer active.');
+    }
 
     if (refreshRecord.replaced_by_hash || refreshRecord.revoked_at) {
       await this.repo.revokeTokenFamily(refreshRecord.token_family_id);
@@ -559,7 +608,8 @@ class McpOAuthService {
           tokenHash: newRefreshTokenHash,
           tokenFamilyId: refreshRecord.token_family_id,
           clientId: client.client_id,
-          principalId: client.principal_id,
+          principalId: client.is_public ? refreshRecord.principal_id : client.principal_id,
+          ownerUserId: client.is_public ? refreshRecord.owner_user_id : client.owner_user_id,
           resource: refreshRecord.resource,
           scopes: grantedScopes,
           expiresAt: newRefreshExpiresAt,
@@ -567,7 +617,8 @@ class McpOAuthService {
         accessToken: {
           tokenHash: newAccessTokenHash,
           clientId: client.client_id,
-          principalId: client.principal_id,
+          principalId: client.is_public ? refreshRecord.principal_id : client.principal_id,
+          ownerUserId: client.is_public ? refreshRecord.owner_user_id : client.owner_user_id,
           resource: refreshRecord.resource,
           scopes: grantedScopes,
           expiresAt: newAccessExpiresAt,

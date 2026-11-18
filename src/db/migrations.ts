@@ -45,8 +45,12 @@ export function runMigrations(db: Database.Database | null = null) {
     "TEXT NOT NULL DEFAULT 'legacy_profile'",
   );
   addColumnIfMissing(database, 'mcp_oauth_clients', 'owner_user_id', 'TEXT');
+  addColumnIfMissing(database, 'mcp_oauth_clients', 'is_public', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing(database, 'mcp_oauth_access_tokens', 'owner_user_id', 'TEXT REFERENCES users(id) ON DELETE CASCADE');
+  addColumnIfMissing(database, 'mcp_oauth_refresh_tokens', 'owner_user_id', 'TEXT REFERENCES users(id) ON DELETE CASCADE');
   addColumnIfMissing(database, 'mcp_oauth_clients', 'last_authorized_at', 'TEXT');
   addColumnIfMissing(database, 'workers', 'owner_user_id', 'TEXT');
+  addColumnIfMissing(database, 'workers', 'hosted_isolated', 'INTEGER NOT NULL DEFAULT 0 CHECK(hosted_isolated IN (0,1))');
   addColumnIfMissing(database, 'worker_enrollment_tokens', 'owner_user_id', 'TEXT');
   addColumnIfMissing(database, 'mcp_oauth_access_tokens', 'last_used_at', 'TEXT');
   addColumnIfMissing(database, 'mcp_oauth_refresh_tokens', 'last_used_at', 'TEXT');

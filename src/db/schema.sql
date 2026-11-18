@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT UNIQUE,
   display_name TEXT,
   password_hash TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'admin',
+  role TEXT NOT NULL DEFAULT 'user',
   status TEXT NOT NULL DEFAULT 'active',
   principal_id TEXT UNIQUE,
   profile_id TEXT UNIQUE,
@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS workers (
   public_key TEXT NOT NULL,
   capabilities_json TEXT NOT NULL,
   owner_user_id TEXT,
+  hosted_isolated INTEGER NOT NULL DEFAULT 0 CHECK(hosted_isolated IN (0, 1)),
   enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
   status TEXT NOT NULL DEFAULT 'offline',
   last_seen_at TEXT,
@@ -100,6 +101,7 @@ CREATE TABLE IF NOT EXISTS mcp_oauth_clients (
   id TEXT PRIMARY KEY,
   client_id TEXT NOT NULL UNIQUE,
   client_secret_hash TEXT NOT NULL,
+  is_public INTEGER NOT NULL DEFAULT 0 CHECK(is_public IN (0, 1)),
   display_name TEXT NOT NULL,
   principal_id TEXT NOT NULL,
   profile_id TEXT NOT NULL,
@@ -132,6 +134,7 @@ CREATE INDEX IF NOT EXISTS idx_mcp_auth_codes_client ON mcp_oauth_authorization_
 
 CREATE TABLE IF NOT EXISTS mcp_oauth_access_tokens (
   id TEXT PRIMARY KEY,
+  owner_user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
   token_hash TEXT NOT NULL UNIQUE,
   client_id TEXT NOT NULL,
   principal_id TEXT NOT NULL,
@@ -146,6 +149,7 @@ CREATE INDEX IF NOT EXISTS idx_mcp_access_tokens_client ON mcp_oauth_access_toke
 
 CREATE TABLE IF NOT EXISTS mcp_oauth_refresh_tokens (
   id TEXT PRIMARY KEY,
+  owner_user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
   token_hash TEXT NOT NULL UNIQUE,
   token_family_id TEXT NOT NULL,
   client_id TEXT NOT NULL,

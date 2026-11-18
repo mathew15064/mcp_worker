@@ -23,6 +23,8 @@ interface UserSession {
 const USERNAME_RE = /^[A-Za-z0-9_.-]{3,64}$/;
 const STATUS_ACTIVE = 'active';
 const STATUS_DISABLED = 'disabled';
+const STATUS_PENDING = 'pending';
+const STATUS_REJECTED = 'rejected';
 
 function validationError(code: string, message: string) {
   return Object.assign(new Error(message), { code });
@@ -74,11 +76,13 @@ class UserService {
     email = null,
     displayName,
     password,
+    status = STATUS_ACTIVE,
   }: {
     username: string;
     email?: string | null;
     displayName?: string;
     password: string;
+    status?: 'active' | 'pending';
   }) {
     const normalizedUsername = String(username || '').trim();
     if (!USERNAME_RE.test(normalizedUsername))
@@ -95,7 +99,7 @@ class UserService {
       display_name: normalizeDisplayName(displayName, normalizedUsername),
       password_hash: await bcrypt.hash(validatePassword(password), 12),
       role: 'user',
-      status: STATUS_ACTIVE,
+      status,
       principal_id: `principal:user:${id}`,
       profile_id: `profile:user:${id}`,
       session_version: 1,
@@ -166,12 +170,12 @@ class UserService {
   }
 
   async setStatus(userId: string, status: string) {
-    if (![STATUS_ACTIVE, STATUS_DISABLED].includes(status))
+    if (![STATUS_ACTIVE, STATUS_DISABLED, STATUS_PENDING, STATUS_REJECTED].includes(status))
       throw validationError('INVALID_USER_STATUS', 'Invalid user status.');
     const current = await this.repo.findById(userId);
     if (!current) throw validationError('USER_NOT_FOUND', 'User not found.');
     await this.repo.setStatus(userId, status);
-    if (status === STATUS_DISABLED) this.broker.disconnectOwner(userId);
+    if (status !== STATUS_ACTIVE) this.broker.disconnectOwner(userId);
     return publicUser(await this.repo.findById(userId));
   }
 
