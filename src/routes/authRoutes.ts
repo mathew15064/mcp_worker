@@ -79,7 +79,10 @@ router.get('/register', (req, res) => {
 router.post('/register', registerLimiter, async (req, res) => {
   res.set('Cache-Control', 'no-store');
   const open = databaseManager.isOperational() && runtimeSettings.bool('registration.enabled', true);
-  if (!open) return res.status(403).type('html').send(hostedPages.registrationPage({csrfToken: req.session?.csrfToken || '',open:false}));
+  if (!open) {
+    if (req.get('accept')?.includes('application/json')) return res.status(403).json({error:'Registration is closed.'});
+    return res.status(403).type('html').send(hostedPages.registrationPage({csrfToken: req.session?.csrfToken || '',open:false}));
+  }
   try {
     await userService.createUser({
       username: formString(req.body, 'username'),
@@ -88,8 +91,10 @@ router.post('/register', registerLimiter, async (req, res) => {
       password: formString(req.body, 'password'),
       status: 'pending',
     });
+    if (req.get('accept')?.includes('application/json')) return res.status(201).json({redirectTo:'/registration-pending'});
     return res.redirect(303, '/registration-pending');
   } catch (err) {
+    if (req.get('accept')?.includes('application/json')) return res.status(400).json({error:routeError(err).message});
     return res.status(400).type('html').send(hostedPages.registrationPage({
       csrfToken: req.session?.csrfToken || '', open:true, error:routeError(err).message,
     }));
@@ -126,6 +131,7 @@ router.post('/login', loginLimiter, async (req, res, next) => {
     const result = await authService.authenticate(username, password);
     const requestedReturnTo = sanitizeReturnTo(fields.returnTo || req.session?.returnTo || '/');
     if (!result.success || !result.user) {
+      if (req.get('accept')?.includes('application/json')) return res.status(401).json({error:result.message});
       return res
         .status(401)
         .type('html')
@@ -156,6 +162,7 @@ router.post('/login', loginLimiter, async (req, res, next) => {
         err ? reject(err instanceof Error ? err : new Error('Session save failed')) : resolve(),
       ),
     );
+    if (req.get('accept')?.includes('application/json')) return res.json({redirectTo:destinationFor(result.user, requestedReturnTo)});
     return res.redirect(destinationFor(result.user, requestedReturnTo));
   } catch (error) {
     next(error);

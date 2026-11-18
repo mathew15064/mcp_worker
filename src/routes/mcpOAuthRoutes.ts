@@ -473,4 +473,4 @@ router.post('/oauth/revoke', async (req, res) => {
   }
 });
 
-export = router;
+export = Object.assign(router, { canAuthorizeClient });

@@ -14,6 +14,8 @@ interface WorkerRow {
   enabled: number | boolean;
   status: string;
   owner_user_id: string | null;
+  owner_username?: string | null;
+  hosted_isolated?: number | boolean;
   last_seen_at: string | null;
 }
 interface ProfileRow {

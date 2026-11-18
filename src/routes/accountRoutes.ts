@@ -73,7 +73,7 @@ function accountReturnTo(req: Request) {
     !value.startsWith('/account/') ||
     value.startsWith('//') ||
     value.includes('\\') ||
-    value === '/account/profile'
+    value === '/account/password'
   )
     return '/account/clients';
   try {

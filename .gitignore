@@ -5,6 +5,10 @@
 
 # Node.js dependencies
 node_modules/
+/node_modules
+
+# Compiled unified UI bundle
+/src/public/ui/
 
 # Local data directories
 data/

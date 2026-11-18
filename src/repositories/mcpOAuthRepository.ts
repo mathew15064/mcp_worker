@@ -11,6 +11,7 @@ interface ClientRow {
   profile_id: string | null;
   owner_user_id: string | null;
   is_public?: number;
+  last_authorized_at?: string | null;
   status: string;
 }
 interface TokenRow {

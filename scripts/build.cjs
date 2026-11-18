@@ -5,6 +5,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
+// Build the single shadcn/React UI before the backend copies static assets.
+execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['--prefix', 'web', 'run', 'build'], {
+  cwd: root, stdio: 'inherit', shell: process.platform === 'win32',
+});
 const dist = path.join(root, 'dist');
 fs.rmSync(dist, { recursive: true, force: true });
 fs.mkdirSync(dist, { recursive: true });
