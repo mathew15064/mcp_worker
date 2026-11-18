@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/table';
 import {
   ConfirmAction,
+  CopyValue,
   EmptyState,
   Field,
   FormDialog,
@@ -69,18 +70,22 @@ export function ClientsPage({ personal = false }: { personal?: boolean }) {
             }
             submitLabel="Create client"
           >
+            <div className="space-y-2">
+              <p className="text-xs font-medium">MCP Server URL</p>
+              <CopyValue value={state?.endpoint || ''} label="Copy MCP URL" />
+            </div>
             <Field label="Display name">
-              <Input name="display_name" defaultValue="ChatGPT" required maxLength={100} />
+              <Input name="display_name" placeholder="My AI Client" required maxLength={100} />
             </Field>
             <Field
               label="Redirect URI(s)"
-              description="One HTTPS URI per line. Localhost callback URLs are allowed for local clients."
+              description="Enter each callback URL on a separate line. HTTPS is required except for localhost."
             >
               <Textarea
                 name="redirect_uris"
                 aria-label="Redirect URI(s)"
                 rows={3}
-                defaultValue="https://chatgpt.com/connector_platform_oauth_redirect"
+                placeholder="https://your-client.example/callback"
                 required
               />
             </Field>
@@ -153,36 +158,50 @@ export function ClientsPage({ personal = false }: { personal?: boolean }) {
       >
         {visible.length ? (
           <div className="overflow-x-auto">
-            <Table>
+            <Table className="min-w-[1060px] table-fixed">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Client</TableHead>
-                  {!personal && <TableHead>Principal</TableHead>}
-                  <TableHead>Status</TableHead>
-                  <TableHead>Scopes</TableHead>
-                  <TableHead>Last authorized</TableHead>
-                  <TableHead className="text-end">Actions</TableHead>
+                  <TableHead className="w-[20%]">Client</TableHead>
+                  {!personal && <TableHead className="w-[17%]">Principal</TableHead>}
+                  <TableHead className={personal ? 'w-[12%]' : 'w-[9%]'}>Status</TableHead>
+                  <TableHead className="w-[15%]">Scopes</TableHead>
+                  <TableHead className="w-[14%]">Last authorized</TableHead>
+                  <TableHead className="w-[25%] text-end">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {visible.map((client) => (
                   <TableRow key={client.id}>
-                    <TableCell>
-                      <p className="font-medium">{client.display_name}</p>
+                    <TableCell className="min-w-0">
+                      <p className="truncate font-medium" title={client.display_name}>{client.display_name}</p>
                       <button
-                        className="mt-1 flex items-center gap-1 text-left font-mono text-[11px] text-muted-foreground hover:text-foreground"
+                        className="mt-1 flex max-w-full items-center gap-1 overflow-hidden text-left font-mono text-[11px] text-muted-foreground hover:text-foreground"
                         onClick={() => {
                           void navigator.clipboard
                             .writeText(client.client_id)
                             .then(() => toast.success('Client ID copied'));
                         }}
                       >
-                        <Copy className="size-3" /> {client.client_id.slice(0, 30)}…
+                        <Copy className="size-3 shrink-0" />
+                        <span className="truncate">{client.client_id}</span>
                       </button>
                     </TableCell>
                     {!personal && (
-                      <TableCell className="max-w-48 break-all font-mono text-[11px]">
-                        {client.principal_id}
+                      <TableCell className="min-w-0">
+                        <button
+                          type="button"
+                          className="flex w-full min-w-0 items-center gap-1.5 text-left font-mono text-[11px] text-muted-foreground hover:text-foreground"
+                          title={client.principal_id}
+                          aria-label={'Copy principal ID for ' + client.display_name}
+                          onClick={() => {
+                            void navigator.clipboard.writeText(client.principal_id)
+                              .then(() => toast.success('Principal ID copied'))
+                              .catch(() => toast.error('Copy failed'));
+                          }}
+                        >
+                          <span className="min-w-0 flex-1 truncate">{client.principal_id}</span>
+                          <Copy className="size-3.5 shrink-0" />
+                        </button>
                       </TableCell>
                     )}
                     <TableCell>
@@ -203,7 +222,7 @@ export function ClientsPage({ personal = false }: { personal?: boolean }) {
                         : 'Never'}
                     </TableCell>
                     <TableCell>
-                      <div className="flex min-w-56 flex-wrap justify-end gap-2">
+                      <div className="grid grid-cols-2 gap-2">
                         {!personal && (
                           <Button asChild variant="ghost" size="sm">
                             <Link
@@ -229,12 +248,16 @@ export function ClientsPage({ personal = false }: { personal?: boolean }) {
                           }
                           label={client.status === 'active' ? 'Disable' : 'Enable'}
                         />
-                        <ConfirmAction
-                          action={base + '/clients/' + encodeURIComponent(client.id) + '/revoke'}
-                          label="Revoke"
-                          destructive
-                          description="All tokens issued to this client become invalid."
-                        />
+                        {client.status !== 'revoked' && (
+                          <ConfirmAction
+                            action={base + '/clients/' + encodeURIComponent(client.id) + '/revoke'}
+                            label="Revoke"
+                            title="Revoke OAuth client?"
+                            destructive
+                            variant="destructive"
+                            description="All existing access and refresh tokens will be invalidated. The client will be marked revoked."
+                          />
+                        )}
                         <ConfirmAction
                           action={base + '/clients/' + encodeURIComponent(client.id) + '/delete'}
                           label="Delete"
@@ -271,7 +294,7 @@ export function ClientsPage({ personal = false }: { personal?: boolean }) {
           </span>
         </SecurityNote>
       </div>
-      <SecretDialog secret={state?.secret} />
+      <SecretDialog secret={state?.secret} mcpUrl={state?.endpoint || ''} />
     </div>
   );
 }

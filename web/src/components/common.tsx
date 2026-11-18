@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '@/app-context';
 import { cn } from '@/lib/utils';
+import { WorkerInstallGuide } from '@/components/worker-install-guide';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -328,11 +329,21 @@ export function FormDialog({
   const { submit, busy } = useApp();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  function changeOpen(nextOpen: boolean) {
+    if (!nextOpen && (pending || busy)) return;
+    if (!nextOpen && dirty) {
+      toast.info('Unsaved changes. Use Cancel to discard them.');
+      return;
+    }
+    setOpen(nextOpen);
+  }
   async function run(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPending(true);
     try {
       await submit(action, new FormData(event.currentTarget));
+      setDirty(false);
       setOpen(false);
     } catch {
       /* Error is shown by submit(). */
@@ -341,17 +352,29 @@ export function FormDialog({
     }
   }
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={changeOpen}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent className="max-h-[88vh] overflow-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}
         </DialogHeader>
-        <form onSubmit={(event) => void run(event)} className="space-y-4">
+        <form
+          onSubmit={(event) => void run(event)}
+          onChangeCapture={() => setDirty(true)}
+          className="space-y-4"
+        >
           {children}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pending || busy}
+              onClick={() => {
+                setDirty(false);
+                setOpen(false);
+              }}
+            >
               Cancel
             </Button>
             <Button type="submit" disabled={pending || busy}>
@@ -382,14 +405,21 @@ export function ConfirmAction({
 }) {
   const { submit, busy } = useApp();
   const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState(false);
   return (
-    <AlertDialog open={open} onOpenChange={setOpen}>
+    <AlertDialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen && (pending || busy)) return;
+        setOpen(nextOpen);
+      }}
+    >
       <AlertDialogTrigger asChild>
         <Button variant={variant} size="sm" disabled={busy}>
           {label}
         </Button>
       </AlertDialogTrigger>
-      <AlertDialogContent>
+      <AlertDialogContent className="w-[calc(100%-2rem)] max-w-md">
         <AlertDialogHeader>
           <AlertDialogTitle>{title || label + '?'}</AlertDialogTitle>
           <AlertDialogDescription>
@@ -397,17 +427,21 @@ export function ConfirmAction({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={busy || pending}>Cancel</AlertDialogCancel>
           <AlertDialogAction
-            className={destructive ? 'bg-destructive text-white hover:bg-destructive/80' : ''}
-            disabled={busy}
+            variant={destructive ? 'destructive' : 'default'}
+            disabled={busy || pending}
             onClick={(event) => {
               event.preventDefault();
+              if (pending || busy) return;
+              setPending(true);
               void submit(action)
                 .then(() => setOpen(false))
-                .catch(() => {});
+                .catch(() => {})
+                .finally(() => setPending(false));
             }}
           >
+            {pending && <LoaderCircle className="size-4 animate-spin" />}
             Confirm {label}
           </AlertDialogAction>
         </AlertDialogFooter>
@@ -418,8 +452,10 @@ export function ConfirmAction({
 
 export function SecretDialog({
   secret,
+  mcpUrl,
 }: {
   secret: { clientId: string; clientSecret: string } | null | undefined;
+  mcpUrl: string;
 }) {
   const [open, setOpen] = useState(Boolean(secret));
   useEffect(() => {
@@ -427,14 +463,17 @@ export function SecretDialog({
   }, [secret]);
   if (!secret) return null;
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="sm:max-w-lg">
+    <Dialog open={open} onOpenChange={(nextOpen) => nextOpen && setOpen(true)}>
+      <DialogContent showCloseButton={false} className="max-h-[88vh] overflow-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>OAuth client credentials</DialogTitle>
           <DialogDescription>
             The secret is only available once. Copy it now and keep it private.
           </DialogDescription>
         </DialogHeader>
+        <Field label="MCP Server URL">
+          <CopyValue value={mcpUrl} label="Copy MCP URL" />
+        </Field>
         <Field label="Client ID">
           <CopyValue value={secret.clientId} />
         </Field>
@@ -451,8 +490,10 @@ export function SecretDialog({
 
 export function EnrollmentDialog({
   enrollment,
+  mcpEndpoint,
 }: {
   enrollment: { token: string; expires_at: string } | null | undefined;
+  mcpEndpoint: string;
 }) {
   const [open, setOpen] = useState(Boolean(enrollment));
   useEffect(() => {
@@ -460,8 +501,8 @@ export function EnrollmentDialog({
   }, [enrollment]);
   if (!enrollment) return null;
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="sm:max-w-lg">
+    <Dialog open={open} onOpenChange={(nextOpen) => nextOpen && setOpen(true)}>
+      <DialogContent showCloseButton={false} className="max-h-[88vh] overflow-auto sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>One-time Worker enrollment</DialogTitle>
           <DialogDescription>
@@ -473,6 +514,9 @@ export function EnrollmentDialog({
           <CopyValue value={enrollment.token} masked label="Copy token" />
         </Field>
         <p className="text-xs text-muted-foreground">Expires: {enrollment.expires_at}</p>
+        <div className="border-t border-border pt-4">
+          <WorkerInstallGuide mcpEndpoint={mcpEndpoint} />
+        </div>
         <DialogFooter>
           <Button onClick={() => setOpen(false)}>Done</Button>
         </DialogFooter>

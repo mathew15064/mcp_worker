@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Activity, Plus, RefreshCw, Server, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
+import { WorkerInstallGuide } from '@/components/worker-install-guide';
 import { useApp } from '@/app-context';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -111,6 +112,13 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
           </AlertDescription>
         </Alert>
       )}
+      <Section
+        className="mb-5"
+        title="Install Worker"
+        description="Choose the target operating system, install the signed standalone Worker, then enroll it using a one-time token."
+      >
+        <WorkerInstallGuide mcpEndpoint={state?.endpoint || ''} />
+      </Section>
       <Section
         title={'Workers (' + workers.length + ')'}
         description="Live connection status is verified with the Worker broker."
@@ -359,7 +367,7 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
           Docker socket.
         </SecurityNote>
       </div>
-      <EnrollmentDialog enrollment={state?.enrollment} />
+      <EnrollmentDialog enrollment={state?.enrollment} mcpEndpoint={state?.endpoint || ''} />
     </div>
   );
 }

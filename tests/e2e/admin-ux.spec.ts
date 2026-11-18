@@ -73,19 +73,37 @@ test('Admin Users offers approval, toggles, scoped management and a create form'
   await dialog.getByRole('button', { name: 'Cancel' }).click()
 })
 
-test('OAuth client form defaults read-only, creates credentials once and search respects queries', async ({ page }) => {
+test('Generic OAuth registration, MCP URL and one-time secret have safe modal dismissal', async ({ page }) => {
   await login(page)
   await page.goto('/admin/clients')
+  const stateResponse = await page.request.get('/api/ui/state?view=%2Fadmin%2Fclients')
+  const state = await stateResponse.json() as { endpoint: string }
+
   await page.getByRole('button', { name: 'New Client' }).click()
   const dialog = page.getByRole('dialog', { name: 'New OAuth Client' })
-  await expect(dialog.getByLabel('Display name')).toHaveValue('ChatGPT')
-  await expect(dialog.getByLabel('Redirect URI(s)')).toHaveValue('https://chatgpt.com/connector_platform_oauth_redirect')
+  await expect(dialog.getByLabel('Display name')).toBeEmpty()
+  await expect(dialog.getByLabel('Redirect URI(s)')).toBeEmpty()
+  await expect(dialog.getByText(state.endpoint)).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Copy MCP URL' })).toBeVisible()
   await expect(dialog.locator('[name="scopes"][value="mcp_worker.terminal"]')).not.toBeChecked()
+
+  await page.mouse.click(16, 260)
+  await expect(dialog).toHaveCount(0) // clean modal closes on outside click
+  await page.getByRole('button', { name: 'New Client' }).click()
   await dialog.getByLabel('Display name').fill('Unified UI E2E Client')
+  await page.mouse.click(16, 260)
+  await expect(dialog).toBeVisible() // unsubmitted fields are protected
+  await dialog.getByLabel('Redirect URI(s)').fill('https://example.org/oauth/callback')
   await dialog.getByRole('button', { name: 'Create client' }).click()
+
   const secret = page.getByRole('dialog', { name: 'OAuth client credentials' })
   await expect(secret).toBeVisible()
   await expect(secret.getByText('Client secret')).toBeVisible()
+  await expect(secret.getByText(state.endpoint)).toBeVisible()
+  await expect(secret.getByRole('button', { name: 'Copy MCP URL' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await page.mouse.click(16, 260)
+  await expect(secret).toBeVisible() // one-time secret cannot be dismissed accidentally
   await secret.getByRole('button', { name: "I've saved the secret" }).click()
   await expect(page.getByText('Unified UI E2E Client')).toBeVisible()
   await page.reload()
@@ -94,19 +112,81 @@ test('OAuth client form defaults read-only, creates credentials once and search 
   await expect(page.getByText('No matching clients')).toBeVisible()
 })
 
+test('Revoke dialog updates only the selected client and long principal stays inside its column', async ({ page }) => {
+  await login(page)
+  await page.goto('/admin/clients')
+
+  for (const name of ['Keep Active UI Client', 'Revoke UI Client']) {
+    await page.getByRole('button', { name: 'New Client' }).click()
+    const create = page.getByRole('dialog', { name: 'New OAuth Client' })
+    await create.getByLabel('Display name').fill(name)
+    await create.getByLabel('Redirect URI(s)').fill('https://ai.example/oauth/callback')
+    await create.getByRole('button', { name: 'Create client' }).click()
+    await page.getByRole('dialog', { name: 'OAuth client credentials' })
+      .getByRole('button', { name: "I've saved the secret" }).click()
+  }
+
+  const target = page.locator('tbody tr').filter({ hasText: 'Revoke UI Client' })
+  const other = page.locator('tbody tr').filter({ hasText: 'Keep Active UI Client' })
+  await expect(target).toBeVisible()
+  await expect(other.getByText('active', { exact: true })).toBeVisible()
+
+  const principal = target.getByRole('button', { name: 'Copy principal ID for Revoke UI Client' })
+  await principal.evaluate((button) => {
+    const text = button.querySelector('span')
+    if (text) text.textContent = 'a'.repeat(240)
+  })
+  const bounds = await principal.evaluate((button) => {
+    const cell = button.closest('td')
+    const next = cell?.nextElementSibling
+    const text = button.querySelector('span')
+    return {
+      columnEndsBeforeNext: Boolean(cell && next && cell.getBoundingClientRect().right <= next.getBoundingClientRect().left + 1),
+      textTruncated: Boolean(text && text.scrollWidth > text.clientWidth),
+    }
+  })
+  expect(bounds.columnEndsBeforeNext).toBe(true)
+  expect(bounds.textTruncated).toBe(true)
+
+  await target.getByRole('button', { name: 'Revoke', exact: true }).click()
+  const confirm = page.getByRole('alertdialog', { name: 'Revoke OAuth client?' })
+  await expect(confirm).toContainText('All existing access and refresh tokens')
+  await confirm.getByRole('button', { name: 'Cancel' }).click()
+  await expect(target.getByText('active', { exact: true })).toBeVisible()
+  await target.getByRole('button', { name: 'Revoke', exact: true }).click()
+  await page.getByRole('alertdialog', { name: 'Revoke OAuth client?' })
+    .getByRole('button', { name: 'Confirm Revoke' }).click()
+  await expect(target.getByText('revoked', { exact: true })).toBeVisible()
+  await expect(target.getByRole('button', { name: 'Revoke', exact: true })).toHaveCount(0)
+  await expect(other.getByText('active', { exact: true })).toBeVisible()
+})
+
 test('Worker UI preserves signed release gate, enrollment one-time disclosure and profile list', async ({ page }) => {
   await login(page)
   await page.goto('/admin/workers')
   await expect(page.getByRole('heading', { name: 'Workers', exact: true })).toBeVisible()
   await expect(page.getByText('Public Worker distribution gated')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Execution profiles', exact: true })).toBeVisible()
+  const guide = page.locator('[data-worker-install-guide]').first()
+  await expect(guide.getByRole('tab', { name: 'Linux' })).toBeVisible()
+  await expect(guide.locator('pre')).toContainText('install-linux.sh')
+  await expect(guide.locator('pre')).toContainText('mcp_worker setup --server')
+  await guide.getByRole('tab', { name: 'macOS' }).click()
+  await expect(guide.locator('pre')).toContainText('install-macos.sh')
+  await guide.getByRole('tab', { name: 'Windows' }).click()
+  await expect(guide.locator('pre')).toContainText('install-windows.ps1')
+  await expect(guide.locator('pre')).not.toContainText('enrollment_token=')
   await page.getByRole('button', { name: 'Enroll Worker' }).click()
   const dialog = page.getByRole('dialog', { name: 'Generate one-time Worker enrollment' })
   await expect(dialog.getByLabel('Lifetime (seconds)')).toBeVisible()
   await dialog.getByRole('button', { name: 'Generate token' }).click()
   const tokenDialog = page.getByRole('dialog', { name: 'One-time Worker enrollment' })
   await expect(tokenDialog).toBeVisible()
-  await expect(tokenDialog.getByText('Enrollment token')).toBeVisible()
+  await expect(tokenDialog.getByText('Enrollment token', { exact: true })).toBeVisible()
+  await expect(tokenDialog.getByRole('tab', { name: 'Linux' })).toBeVisible()
+  await page.mouse.click(16, 260)
+  await page.keyboard.press('Escape')
+  await expect(tokenDialog).toBeVisible()
   await tokenDialog.getByRole('button', { name: 'Done' }).click()
   await page.reload()
   await expect(page.getByRole('dialog', { name: 'One-time Worker enrollment' })).toHaveCount(0)
@@ -284,9 +364,11 @@ test('OAuth consent uses verified client, PKCE scope and explicitly denies witho
     headers: { Accept: 'application/json' },
   })
   expect(response.status()).toBe(200)
-  const state = await response.json() as { data: { clients: { client_id: string; redirect_uris: string[]; allowed_scopes: string[] }[] }; endpoint: string }
+  const state = await response.json() as { data: { clients: { client_id: string; status: string; redirect_uris: string[]; allowed_scopes: string[] }[] }; endpoint: string }
   const client = state.data.clients.find(item =>
-    item.redirect_uris.length > 0 && item.allowed_scopes.includes('mcp_worker.read'))
+    item.status === 'active' &&
+    item.redirect_uris.some(uri => uri.startsWith('http://localhost:') && uri.endsWith('/oauth/callback')) &&
+    item.allowed_scopes.includes('mcp_worker.read'))
   if (!client) throw new Error('Expected an OAuth test client with read scope.')
   const verifier = 'v'.repeat(64)
   const challenge = crypto.createHash('sha256').update(verifier).digest('base64url')
@@ -296,13 +378,19 @@ test('OAuth consent uses verified client, PKCE scope and explicitly denies witho
     state: 'ui-qa-state', resource: state.endpoint, code_challenge: challenge,
     code_challenge_method: 'S256',
   })
-  await page.route('**/oauth/callback**', async route => route.fulfill({status:200, body:'Callback received'}))
   await page.goto('/oauth/authorize?' + query.toString())
   await expect(page.getByRole('heading', { name: 'Authorize MCP access' })).toBeVisible()
   await expect(page.getByText('mcp_worker.read', { exact: true })).toBeVisible()
+  const deniedResponse = page.waitForResponse(response =>
+    response.url().endsWith('/oauth/authorize') && response.request().method() === 'POST')
   await page.getByRole('button', { name: 'Deny' }).click()
-  await page.waitForURL(/error=access_denied/)
-  const url = new URL(page.url())
-  expect(url.searchParams.get('code')).toBeNull()
-  expect(url.searchParams.get('state')).toBe('ui-qa-state')
+  const denied = await deniedResponse
+  expect(denied.status()).toBe(302)
+  const location = denied.headers()['location']
+  expect(location).toBeTruthy()
+  const callback = new URL(location)
+  expect(callback.origin + callback.pathname).toBe(new URL(client.redirect_uris[0]).origin + new URL(client.redirect_uris[0]).pathname)
+  expect(callback.searchParams.get('error')).toBe('access_denied')
+  expect(callback.searchParams.get('code')).toBeNull()
+  expect(callback.searchParams.get('state')).toBe('ui-qa-state')
 })
