@@ -213,7 +213,6 @@ router.get('/state', async (req, res, next) => {
       }
       if (pathname === '/admin/workers') {
         data.workers = await withPresence(await workerRepo.listAdminWorkers());
-        data.profiles = (await workerRepo.listAdminProfiles()).filter((p) => p !== null);
         data.release = workerSignedReleaseReadiness();
         result.enrollment = oneTimeValue(req, 'workerEnrollment');
       }
@@ -273,7 +272,6 @@ router.get('/state', async (req, res, next) => {
       }
       if (pathname === '/account/workers') {
         data.workers = await withPresence(await workerRepo.listWorkersByOwner(ownerId));
-        data.profiles = (await workerRepo.listProfilesByOwner(ownerId)).filter((p) => p !== null);
         data.release = workerSignedReleaseReadiness();
         result.enrollment = oneTimeValue(req, 'workerEnrollment');
       }

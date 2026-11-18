@@ -3,10 +3,12 @@ import path from 'node:path';
 import type { ExecutionProfile, ExecutionTransport } from './executionContracts';
 import { errorFields } from './workerProtocol';
 import executionProfileRepository from '../repositories/executionProfileRepository';
+import workerRepository from '../repositories/workerRepository';
 import runtimeSettings from './runtimeSettingsService';
 import terminalAuditRepository from '../repositories/terminalAuditRepository';
 import workerExecutionService from './workerExecutionService';
 type ProfileRepository = Pick<typeof executionProfileRepository, 'findAll'>;
+type WorkerRepository = Pick<typeof workerRepository, 'listWorkersByOwner' | 'listAdminWorkers' | 'findAdminWorkerById' | 'findWorkerByIdForOwner'>;
 type AuditRepository = Pick<typeof terminalAuditRepository, 'log'>;
 interface ActorOptions {
   actorId?: string | null;
@@ -72,6 +74,7 @@ interface LogsOptions extends ActorOptions {
 }
 interface TerminalOptions {
   profiles?: ProfileRepository;
+  workers?: WorkerRepository;
   audit?: AuditRepository;
   worker?: ExecutionTransport;
 }
@@ -260,14 +263,17 @@ function canonicalizeArtifactPath(artifactPath: unknown) {
 
 class TerminalMcpService {
   profiles: ProfileRepository;
+  workers: WorkerRepository;
   audit: AuditRepository;
   worker: ExecutionTransport;
   constructor({
     profiles = executionProfileRepository,
+    workers = workerRepository,
     audit = terminalAuditRepository,
     worker = workerExecutionService,
   }: TerminalOptions = {}) {
     this.profiles = profiles;
+    this.workers = workers;
     this.audit = audit;
     this.worker = worker;
   }
@@ -279,10 +285,15 @@ class TerminalMcpService {
 
   async list({ actorId = null }: ActorOptions = {}) {
     const ownerUserId = this.ownerUserIdForActor(actorId);
-    return (await this.profiles.findAll({ ownerUserId })).map((profile) => ({
-      name: profile.name,
-      description: profile.description || null,
-      enabled: Boolean(profile.enabled),
+    const workers = ownerUserId
+      ? await this.workers.listWorkersByOwner(ownerUserId)
+      : await this.workers.listAdminWorkers();
+    return workers.filter((worker) => worker !== null).map((worker) => ({
+      id: worker.id,
+      worker_id: worker.id,
+      name: worker.name,
+      enabled: Boolean(worker.enabled),
+      status: worker.status,
     }));
   }
 
@@ -291,23 +302,43 @@ class TerminalMcpService {
     { actorId = null }: ActorOptions = {},
   ): Promise<ExecutionProfile> {
     if (typeof name !== 'string' || !name.trim()) {
-      throw terminalServiceError('PROFILE_NOT_FOUND', 'Execution Profile not found.');
+      throw terminalServiceError('PROFILE_NOT_FOUND', 'Worker or legacy profile not found.');
     }
     const ownerUserId = this.ownerUserIdForActor(actorId);
-    const normalized = name.trim().toLowerCase();
+    const target = name.trim();
+
+    // Resolve immutable Worker IDs directly before considering historical aliases.
+    const worker = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(target)
+      ? ownerUserId
+        ? await this.workers.findWorkerByIdForOwner(target, ownerUserId)
+        : await this.workers.findAdminWorkerById(target)
+      : null;
+    if (worker) {
+      if (!worker.enabled)
+        throw terminalServiceError('WORKER_DISABLED', 'This Worker is disabled.');
+      if (ownerUserId && (!runtimeSettings.bool('hosted.execution.enabled', false) || !worker.hosted_isolated))
+        throw terminalServiceError('HOSTED_EXECUTION_DISABLED', 'Per-user isolated execution is not enabled or verified.');
+      return {
+        id: 'worker:' + worker.id,
+        name: worker.name,
+        transport: 'worker',
+        enabled: true,
+        worker_id: worker.id,
+        hosted_isolated: Boolean(worker.hosted_isolated),
+      };
+    }
+
+    // Signed Worker v2.0.0 and existing AI clients still use profile aliases.
     const matches = (await this.profiles.findAll({ ownerUserId })).filter(
-      (item) => item.name.toLowerCase() === normalized,
+      (item) => item.name.toLowerCase() === target.toLowerCase(),
     );
     if (matches.length !== 1)
-      throw terminalServiceError('PROFILE_NOT_FOUND', 'Execution Profile not found or ambiguous.');
+      throw terminalServiceError('PROFILE_NOT_FOUND', 'Worker or legacy profile not found or ambiguous.');
     const profile = matches[0];
     if (!profile.enabled)
       throw terminalServiceError('PROFILE_DISABLED', 'This Execution Profile is disabled.');
     if (profile.transport !== 'worker' || !profile.worker_id)
-      throw terminalServiceError(
-        'WORKER_ONLY',
-        'Only enrolled Worker execution targets are supported.',
-      );
+      throw terminalServiceError('WORKER_ONLY', 'Only enrolled Worker execution targets are supported.');
     if (ownerUserId && (!runtimeSettings.bool('hosted.execution.enabled', false) || !profile.hosted_isolated))
       throw terminalServiceError('HOSTED_EXECUTION_DISABLED', 'Per-user isolated execution is not enabled or verified.');
     return profile;
@@ -328,8 +359,10 @@ class TerminalMcpService {
   ) {
     Promise.resolve(
       this.audit.log({
-        profileId: profile.id,
-        profileName: profile.name,
+        profileId: profile.id.startsWith('worker:') ? null : profile.id,
+        profileName: profile.id.startsWith('worker:')
+          ? profile.name + ' (' + profile.id + ')'
+          : profile.name,
         actorId: actorId || null,
         eventType,
         outcome,

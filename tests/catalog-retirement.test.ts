@@ -81,7 +81,7 @@ void test('exact 15 Worker-only tools remain advertised and runtime_info agrees'
   assert.equal(info.result?.structuredContent?.tool_count, 15);
   assert.equal(
     info.result?.structuredContent?.tool_schema_hash,
-    '8c2deb08d22abfd11a34827b461d1f22142dba368dd05ecda02db3c4a072b579',
+    'aedace47f553524f528b8f9e0330e911e37003308fe5c7dcb674c563009b86c1',
   );
 });
 

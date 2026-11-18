@@ -18,6 +18,11 @@ flowchart TD
 - **One server, one SQLite volume:** no MySQL, Redis, external database or inbound SSH.
 - **Outbound Workers:** the Worker initiates the authenticated WSS connection; the server does not connect via SSH or store SSH passwords.
 - **15 MCP tools:** runtime info, Worker discovery, workspace commands, files, Git review, checks and managed processes.
+- **Hosted gateway v3:** `terminal_list` returns immutable Worker IDs; MCP tools accept
+  `worker: "<UUID>"` directly. Existing `profile` tool arguments remain supported
+  during migration, including aliases created by the signed standalone Worker v2.0.0.
+  The Admin/User UI no longer requires creating Execution Profiles. Sessions for new
+  Worker-ID calls use stable Worker IDs; historical alias sessions are preserved.
 - **Security boundaries:** OAuth scopes, Worker identity, owner access controls and audit records. A Worker executes with its **operating-system user's permissions**; allowed workspace paths do not sandbox arbitrary shell commands.
 
 ## Install standalone Worker v2.0.0

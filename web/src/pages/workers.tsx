@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Activity, Plus, RefreshCw, Server, ShieldCheck } from 'lucide-react';
+import { Activity, Copy, Plus, RefreshCw, Server, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { WorkerInstallGuide } from '@/components/worker-install-guide';
 import { useApp } from '@/app-context';
@@ -8,14 +8,6 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Table,
@@ -40,21 +32,17 @@ import {
 export function WorkersPage({ personal = false }: { personal?: boolean }) {
   const { state, refresh, busy } = useApp();
   const [working, setWorking] = useState<string | null>(null);
-  const [selectedWorker, setSelectedWorker] = useState<string>('');
-  const [targetEnabled, setTargetEnabled] = useState(true);
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = searchParams.get('tab');
-  const activeTab = tab === 'install' || tab === 'profiles' ? tab : 'workers';
+  const activeTab = tab === 'install' ? 'install' : 'workers';
   const selectedTabRef = useRef(activeTab);
   selectedTabRef.current = activeTab;
   const workers = state?.data.workers || [];
-  const profiles = state?.data.profiles || [];
   const base = personal ? '/account' : '/admin';
-  const available = workers.filter((w) => w.connected && w.enabled);
   const releaseApproved = state?.data.release?.productionDistributionApproved || false;
 
   function selectTab(value: string) {
-    if (value !== 'workers' && value !== 'install' && value !== 'profiles') return;
+    if (value !== 'workers' && value !== 'install') return;
     // Radix pointer + focus events can both request the same tab before navigation renders.
     if (selectedTabRef.current === value) return;
     selectedTabRef.current = value;
@@ -93,7 +81,7 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
     <div>
       <PageHeading
         title={personal ? 'My Workers' : 'Workers'}
-        description="Outbound execution agents, private workspace profiles and verified connection status."
+        description="Manage connected execution Workers and verify their status."
         action={
           <Button variant="outline" disabled={busy} onClick={() => void refresh()}>
             <RefreshCw className="size-4" />
@@ -102,15 +90,18 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
         }
       />
       <Tabs value={activeTab} onValueChange={selectTab} className="min-w-0 gap-5">
-        <div className="min-w-0 max-w-full overflow-x-auto pb-1">
-          <TabsList variant="line" aria-label="Worker sections" className="min-w-max border-b border-border/60">
-            <TabsTrigger value="workers" className="min-h-10 px-4">Workers</TabsTrigger>
-            <TabsTrigger value="install" className="min-h-10 px-4">Install Worker</TabsTrigger>
-            <TabsTrigger value="profiles" className="min-h-10 px-4">Execution Profiles</TabsTrigger>
-          </TabsList>
-        </div>
+        <TabsList aria-label="Worker sections" className="grid h-12 w-full max-w-md grid-cols-2 gap-1 rounded-xl border border-border/80 bg-muted/80 p-1 shadow-sm">
+          <TabsTrigger value="workers" className="h-full min-w-0 rounded-lg px-3 text-xs font-semibold data-active:border-border/70 data-active:bg-background data-active:shadow-sm sm:text-sm">
+            <Server className="size-4" />
+            Workers
+          </TabsTrigger>
+          <TabsTrigger value="install" className="h-full min-w-0 rounded-lg px-3 text-xs font-semibold data-active:border-border/70 data-active:bg-background data-active:shadow-sm sm:text-sm">
+            <Plus className="size-4" />
+            Install Worker
+          </TabsTrigger>
+        </TabsList>
         <TabsContent value="workers" className="min-w-0 space-y-5">
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2">
             <Section title="Enrolled Workers">
               <p className="text-2xl font-semibold">{workers.length}</p>
               <p className="mt-1 text-xs text-muted-foreground">Total known execution agents</p>
@@ -118,12 +109,6 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
             <Section title="Connected">
               <p className="text-2xl font-semibold">{workers.filter((w) => w.connected).length}</p>
               <p className="mt-1 text-xs text-muted-foreground">Authenticated outbound WSS</p>
-            </Section>
-            <Section title="Execution profiles">
-              <p className="text-2xl font-semibold">{profiles.length}</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Scoped to {personal ? 'your account' : 'Admin'}
-              </p>
             </Section>
           </div>
           <Section
@@ -174,9 +159,20 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
                             </div>
                             <div>
                               <p className="text-sm font-medium">{worker.name}</p>
-                              <p className="max-w-52 truncate font-mono text-[11px] text-muted-foreground">
-                                {worker.id}
-                              </p>
+                              <button
+                                type="button"
+                                title={worker.id}
+                                aria-label={'Copy Worker ID for ' + worker.name}
+                                className="flex max-w-52 items-center gap-1 text-left font-mono text-[11px] text-muted-foreground hover:text-foreground"
+                                onClick={() => {
+                                  void navigator.clipboard.writeText(worker.id)
+                                    .then(() => toast.success('Worker ID copied'))
+                                    .catch(() => toast.error('Copy failed'));
+                                }}
+                              >
+                                <span className="min-w-0 truncate">{worker.id}</span>
+                                <Copy className="size-3 shrink-0" />
+                              </button>
                             </div>
                           </div>
                         </TableCell>
@@ -263,7 +259,7 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
                 detail={
                   personal
                     ? 'A host operator can provision an isolated Worker for your approved account.'
-                    : 'Enroll a trusted outbound Worker, then create an execution profile.'
+                    : 'Enroll a trusted outbound Worker to make it available as an execution target.'
                 }
               />
             )}
@@ -287,106 +283,6 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
             description="Step-by-step installation for Linux, macOS and Windows, with an explanation and a separate Copy button for each command."
           >
             <WorkerInstallGuide mcpEndpoint={state?.endpoint || ''} />
-          </Section>
-        </TabsContent>
-        <TabsContent value="profiles" className="min-w-0">
-          <Section
-            title={'Execution profiles (' + profiles.length + ')'}
-            description="Only profiles owned by your account may be used."
-            action={
-              <FormDialog
-                title="Create execution profile"
-                description="A connected Worker is required."
-                action={base + '/workers/profiles'}
-                submitLabel="Create profile"
-                trigger={
-                  <Button size="sm" disabled={!available.length}>
-                    <Plus className="size-4" />
-                    New profile
-                  </Button>
-                }
-              >
-                <Field label="Name">
-                  <Input name="name" required maxLength={100} placeholder="Dev workspace" />
-                </Field>
-                <Field label="Description">
-                  <Input name="description" maxLength={500} placeholder="Optional description" />
-                </Field>
-                <Field label="Worker">
-                  <Select
-                    name="worker_id"
-                    required
-                    defaultValue={available[0]?.id || ''}
-                    value={selectedWorker || undefined}
-                    onValueChange={setSelectedWorker}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select a connected Worker" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {available.map((w) => (
-                        <SelectItem value={w.id} key={w.id}>
-                          {w.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <label className="flex items-center justify-between gap-3 text-sm">
-                  Enabled
-                  <Switch checked={targetEnabled} onCheckedChange={setTargetEnabled} />
-                </label>
-                <input type="hidden" name="enabled" value={targetEnabled ? 'true' : 'false'} />
-              </FormDialog>
-            }
-          >
-            {profiles.length ? (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Profile</TableHead>
-                      <TableHead>Worker</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-end">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {profiles.map((profile) => (
-                      <TableRow key={profile.id}>
-                        <TableCell>
-                          <p className="text-sm font-medium">{profile.name}</p>
-                          {profile.description && (
-                            <p className="text-xs text-muted-foreground">{profile.description}</p>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {profile.worker_name || profile.worker_id}
-                        </TableCell>
-                        <TableCell>
-                          <StatusBadge status={profile.enabled ? 'active' : 'disabled'} />
-                        </TableCell>
-                        <TableCell className="text-end">
-                          <ConfirmAction
-                            destructive
-                            label="Delete"
-                            action={
-                              base + '/workers/profiles/' + encodeURIComponent(profile.id) + '/delete'
-                            }
-                            description="The execution profile is removed. The Worker stays enrolled."
-                          />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            ) : (
-              <EmptyState
-                title="No execution profiles"
-                detail="Connect a Worker to create a scoped execution target."
-              />
-            )}
           </Section>
         </TabsContent>
       </Tabs>
