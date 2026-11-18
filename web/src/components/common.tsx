@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '@/app-context';
 import { cn } from '@/lib/utils';
-import { WorkerInstallGuide } from '@/components/worker-install-guide';
+import { WorkerLoginGuide } from '@/components/worker-install-guide';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -515,7 +515,7 @@ export function EnrollmentDialog({
         </Field>
         <p className="text-xs text-muted-foreground">Expires: {enrollment.expires_at}</p>
         <div className="border-t border-border pt-4">
-          <WorkerInstallGuide mcpEndpoint={mcpEndpoint} />
+          <WorkerLoginGuide mcpEndpoint={mcpEndpoint} />
         </div>
         <DialogFooter>
           <Button onClick={() => setOpen(false)}>Done</Button>

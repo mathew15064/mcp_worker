@@ -115,7 +115,7 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
       <Section
         className="mb-5"
         title="Install Worker"
-        description="Choose the target operating system, install the signed standalone Worker, then enroll it using a one-time token."
+        description="Step-by-step installation for Linux, macOS and Windows, with an explanation and a separate Copy button for each command."
       >
         <WorkerInstallGuide mcpEndpoint={state?.endpoint || ''} />
       </Section>
