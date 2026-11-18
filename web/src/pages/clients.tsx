@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
 import { Copy, Plus, Search, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp } from '@/app-context';
+import { RowActions } from '@/components/row-actions';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -18,7 +18,6 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
-  ConfirmAction,
   CopyValue,
   EmptyState,
   Field,
@@ -166,7 +165,7 @@ export function ClientsPage({ personal = false }: { personal?: boolean }) {
                   <TableHead className={personal ? 'w-[12%]' : 'w-[9%]'}>Status</TableHead>
                   <TableHead className="w-[15%]">Scopes</TableHead>
                   <TableHead className="w-[14%]">Last authorized</TableHead>
-                  <TableHead className="w-[25%] text-end">Actions</TableHead>
+                  <TableHead className="w-32 text-end">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -222,49 +221,48 @@ export function ClientsPage({ personal = false }: { personal?: boolean }) {
                         : 'Never'}
                     </TableCell>
                     <TableCell>
-                      <div className="grid grid-cols-2 gap-2">
-                        {!personal && (
-                          <Button asChild variant="ghost" size="sm">
-                            <Link
-                              to={'/admin/audit?client_id=' + encodeURIComponent(client.client_id)}
-                            >
-                              Activity
-                            </Link>
-                          </Button>
-                        )}
-                        <ConfirmAction
-                          action={base + '/clients/' + encodeURIComponent(client.id) + '/rotate'}
-                          label="Rotate"
-                          title="Rotate client secret?"
-                          description="The old secret immediately stops working."
-                        />
-                        <ConfirmAction
-                          action={
-                            base +
-                            '/clients/' +
-                            encodeURIComponent(client.id) +
-                            '/' +
-                            (client.status === 'active' ? 'disable' : 'enable')
-                          }
-                          label={client.status === 'active' ? 'Disable' : 'Enable'}
-                        />
-                        {client.status !== 'revoked' && (
-                          <ConfirmAction
-                            action={base + '/clients/' + encodeURIComponent(client.id) + '/revoke'}
-                            label="Revoke"
-                            title="Revoke OAuth client?"
-                            destructive
-                            variant="destructive"
-                            description="All existing access and refresh tokens will be invalidated. The client will be marked revoked."
-                          />
-                        )}
-                        <ConfirmAction
-                          action={base + '/clients/' + encodeURIComponent(client.id) + '/delete'}
-                          label="Delete"
-                          destructive
-                          description="Delete this client and its issued tokens. This cannot be undone."
-                        />
-                      </div>
+                      <RowActions
+                        resource={client.display_name}
+                        actions={[
+                          ...(!personal
+                            ? [{
+                                kind: 'link' as const,
+                                label: 'Activity',
+                                to: '/admin/audit?client_id=' + encodeURIComponent(client.client_id),
+                              }]
+                            : []),
+                          {
+                            kind: 'confirm',
+                            label: 'Rotate',
+                            action: base + '/clients/' + encodeURIComponent(client.id) + '/rotate',
+                            title: 'Rotate client secret?',
+                            description: 'The old secret immediately stops working.',
+                          },
+                          {
+                            kind: 'confirm',
+                            label: client.status === 'active' ? 'Disable' : 'Enable',
+                            action: base + '/clients/' + encodeURIComponent(client.id) + '/' +
+                              (client.status === 'active' ? 'disable' : 'enable'),
+                          },
+                          ...(client.status !== 'revoked'
+                            ? [{
+                                kind: 'confirm' as const,
+                                label: 'Revoke',
+                                action: base + '/clients/' + encodeURIComponent(client.id) + '/revoke',
+                                title: 'Revoke OAuth client?',
+                                destructive: true,
+                                description: 'All existing access and refresh tokens will be invalidated. The client will be marked revoked.',
+                              }]
+                            : []),
+                          {
+                            kind: 'confirm',
+                            label: 'Delete',
+                            action: base + '/clients/' + encodeURIComponent(client.id) + '/delete',
+                            destructive: true,
+                            description: 'Delete this client and its issued tokens. This cannot be undone.',
+                          },
+                        ]}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}

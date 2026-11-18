@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Activity, Copy, Plus, RefreshCw, Server, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { WorkerInstallGuide } from '@/components/worker-install-guide';
+import { RowActions } from '@/components/row-actions';
 import { useApp } from '@/app-context';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -18,7 +19,6 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
-  ConfirmAction,
   EmptyState,
   EnrollmentDialog,
   Field,
@@ -193,60 +193,55 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
                             : 'Never'}
                         </TableCell>
                         <TableCell>
-                          <div className="flex flex-wrap justify-end gap-2">
-                            <Button
-                              disabled={working === worker.id}
-                              size="sm"
-                              variant="outline"
-                              onClick={() => void probe(worker.id)}
-                            >
-                              {working === worker.id ? 'Checking…' : 'Probe'}
-                            </Button>
-                            <FormDialog
-                              title="Rename Worker"
-                              action={base + '/workers/' + encodeURIComponent(worker.id) + '/edit'}
-                              trigger={
-                                <Button size="sm" variant="outline">
-                                  Rename
-                                </Button>
-                              }
-                            >
-                              <Field label="Worker name">
-                                <Input
-                                  name="name"
-                                  defaultValue={worker.name}
-                                  required
-                                  maxLength={100}
-                                />
-                              </Field>
-                            </FormDialog>
-                            <ConfirmAction
-                              label={worker.enabled ? 'Disable' : 'Enable'}
-                              action={
-                                base +
-                                '/workers/' +
-                                encodeURIComponent(worker.id) +
-                                '/' +
-                                (worker.enabled ? 'disable' : 'enable')
-                              }
-                            />
-                            <ConfirmAction
-                              label="Remove"
-                              destructive
-                              action={base + '/workers/' + encodeURIComponent(worker.id) + '/remove'}
-                              title="Uninstall and remove Worker?"
-                              description="The Worker must be online to safely uninstall itself."
-                            />
-                            <ConfirmAction
-                              label="Force remove"
-                              destructive
-                              action={
-                                base + '/workers/' + encodeURIComponent(worker.id) + '/force-remove'
-                              }
-                              title="Force delete Worker record?"
-                              description="Remote files may remain on the Worker machine."
-                            />
-                          </div>
+                          <RowActions
+                            resource={worker.name}
+                            actions={[
+                              {
+                                kind: 'callback',
+                                label: working === worker.id ? 'Checking…' : 'Probe',
+                                disabled: working === worker.id,
+                                onSelect: () => { void probe(worker.id); },
+                              },
+                              {
+                                kind: 'form',
+                                label: 'Rename',
+                                title: 'Rename Worker',
+                                action: base + '/workers/' + encodeURIComponent(worker.id) + '/edit',
+                                children: (
+                                  <Field label="Worker name">
+                                    <Input
+                                      name="name"
+                                      defaultValue={worker.name}
+                                      required
+                                      maxLength={100}
+                                    />
+                                  </Field>
+                                ),
+                              },
+                              {
+                                kind: 'confirm',
+                                label: worker.enabled ? 'Disable' : 'Enable',
+                                action: base + '/workers/' + encodeURIComponent(worker.id) + '/' +
+                                  (worker.enabled ? 'disable' : 'enable'),
+                              },
+                              {
+                                kind: 'confirm',
+                                label: 'Remove',
+                                action: base + '/workers/' + encodeURIComponent(worker.id) + '/remove',
+                                title: 'Uninstall and remove Worker?',
+                                description: 'The Worker must be online to safely uninstall itself.',
+                                destructive: true,
+                              },
+                              {
+                                kind: 'confirm',
+                                label: 'Force remove',
+                                action: base + '/workers/' + encodeURIComponent(worker.id) + '/force-remove',
+                                title: 'Force delete Worker record?',
+                                description: 'Remote files may remain on the Worker machine.',
+                                destructive: true,
+                              },
+                            ]}
+                          />
                         </TableCell>
                       </TableRow>
                     ))}
