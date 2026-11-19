@@ -1,6 +1,6 @@
 import { Fragment, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronDown, MoreHorizontal } from 'lucide-react';
+import { ChevronDown, MoreHorizontal, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ConfirmAction, FormDialog } from '@/components/common';
 
-type BaseAction = { label: string; disabled?: boolean };
+type BaseAction = { label: string; icon: LucideIcon; disabled?: boolean };
 export type RowAction =
   | (BaseAction & { kind: 'link'; to: string })
   | (BaseAction & { kind: 'callback'; onSelect: () => void })
@@ -69,27 +69,35 @@ export function RowActions({
             if (selected !== null) event.preventDefault();
           }}
         >
-          {actions.map((item, index) => (
-            <Fragment key={item.label + ':' + index}>
-              {index === firstDestructive && index > 0 && <DropdownMenuSeparator />}
-              {item.kind === 'link' ? (
-                <DropdownMenuItem asChild disabled={item.disabled}>
-                  <Link to={item.to}>{item.label}</Link>
-                </DropdownMenuItem>
-              ) : (
-                <DropdownMenuItem
-                  disabled={item.disabled}
-                  variant={item.kind === 'confirm' && item.destructive ? 'destructive' : 'default'}
-                  onSelect={() => {
-                    if (item.kind === 'callback') item.onSelect();
-                    else setSelected(index);
-                  }}
-                >
-                  {item.label}
-                </DropdownMenuItem>
-              )}
-            </Fragment>
-          ))}
+          {actions.map((item, index) => {
+            const Icon = item.icon;
+            return (
+              <Fragment key={item.label + ':' + index}>
+                {index === firstDestructive && index > 0 && <DropdownMenuSeparator />}
+                {item.kind === 'link' ? (
+                  <DropdownMenuItem asChild disabled={item.disabled} className="gap-2">
+                    <Link to={item.to}>
+                      <Icon className="size-4" aria-hidden="true" />
+                      {item.label}
+                    </Link>
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem
+                    className="gap-2"
+                    disabled={item.disabled}
+                    variant={item.kind === 'confirm' && item.destructive ? 'destructive' : 'default'}
+                    onSelect={() => {
+                      if (item.kind === 'callback') item.onSelect();
+                      else setSelected(index);
+                    }}
+                  >
+                    <Icon className="size-4" aria-hidden="true" />
+                    {item.label}
+                  </DropdownMenuItem>
+                )}
+              </Fragment>
+            );
+          })}
         </DropdownMenuContent>
       </DropdownMenu>
       {actions.map((item, index) => {

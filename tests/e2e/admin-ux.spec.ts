@@ -83,6 +83,7 @@ test('Admin Users offers approval, toggles, scoped management and a create form'
   await expect(row.getByText('active', { exact: true })).toBeVisible()
   await row.getByRole('button', { name: 'Actions for ' + username }).click()
   await expect(page.getByRole('menuitem', { name: 'Disable' })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: 'Disable' }).locator('svg[aria-hidden="true"]')).toHaveCount(1)
   await page.getByRole('menuitem', { name: 'Reset password' }).click()
   const reset = page.getByRole('dialog', { name: 'Reset password · ' + username })
   await expect(reset.getByLabel('New password')).toBeVisible()
@@ -172,6 +173,7 @@ test('Revoke dialog updates only the selected client and long principal stays in
   expect(bounds.textTruncated).toBe(true)
 
   await target.getByRole('button', { name: 'Actions for Revoke UI Client' }).click()
+  await expect(page.getByRole('menuitem', { name: 'Revoke' }).locator('svg[aria-hidden="true"]')).toHaveCount(1)
   await page.getByRole('menuitem', { name: 'Revoke' }).click()
   const confirm = page.getByRole('alertdialog', { name: 'Revoke OAuth client?' })
   await expect(confirm).toContainText('All existing access and refresh tokens')
@@ -198,6 +200,7 @@ test('Worker action picker keeps probe and guarded destructive/form actions acce
   const menu = page.getByRole('menu')
   for (const action of ['Probe', 'Rename', 'Disable', 'Remove', 'Force remove']) {
     await expect(menu.getByRole('menuitem', { name: action, exact: true })).toBeVisible()
+    await expect(menu.getByRole('menuitem', { name: action, exact: true }).locator('svg[aria-hidden="true"]')).toHaveCount(1)
   }
   await menu.getByRole('menuitem', { name: 'Rename' }).click()
   const rename = page.getByRole('dialog', { name: 'Rename Worker' })

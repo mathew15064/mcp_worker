@@ -2,13 +2,17 @@ import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   ArrowRight,
+  Ban,
   CheckCircle2,
+  CircleCheck,
   CircleHelp,
   Database,
   KeyRound,
   Plus,
   Server,
   ShieldCheck,
+  UserCheck,
+  UserX,
 } from 'lucide-react';
 import { useApp } from '@/app-context';
 import { RowActions } from '@/components/row-actions';
@@ -298,6 +302,7 @@ export function AdminUsers() {
                             ? [{
                                 kind: 'confirm' as const,
                                 label: 'Approve',
+                                icon: UserCheck,
                                 action: '/admin/users/' + encodeURIComponent(user.id) + '/approve',
                                 description: 'Allow this account to sign in and connect OAuth clients.',
                               }]
@@ -305,6 +310,7 @@ export function AdminUsers() {
                           {
                             kind: 'form',
                             label: 'Reset password',
+                            icon: KeyRound,
                             title: 'Reset password · ' + user.username,
                             action: '/admin/users/' + encodeURIComponent(user.id) + '/reset-password',
                             submitLabel: 'Reset password',
@@ -327,6 +333,7 @@ export function AdminUsers() {
                           {
                             kind: 'confirm',
                             label: user.status === 'disabled' ? 'Enable' : 'Disable',
+                            icon: user.status === 'disabled' ? CircleCheck : Ban,
                             destructive: user.status !== 'disabled',
                             action: '/admin/users/' + encodeURIComponent(user.id) + '/' +
                               (user.status === 'disabled' ? 'enable' : 'disable'),
@@ -336,6 +343,7 @@ export function AdminUsers() {
                             ? [{
                                 kind: 'confirm' as const,
                                 label: 'Reject',
+                                icon: UserX,
                                 destructive: true,
                                 action: '/admin/users/' + encodeURIComponent(user.id) + '/reject',
                               }]

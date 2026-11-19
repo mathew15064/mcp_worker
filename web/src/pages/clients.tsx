@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Copy, Plus, Search, ShieldCheck } from 'lucide-react';
+import { Ban, CircleCheck, Copy, History, Plus, RefreshCw, Search, ShieldCheck, ShieldX, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp } from '@/app-context';
 import { RowActions } from '@/components/row-actions';
@@ -228,12 +228,14 @@ export function ClientsPage({ personal = false }: { personal?: boolean }) {
                             ? [{
                                 kind: 'link' as const,
                                 label: 'Activity',
+                                icon: History,
                                 to: '/admin/audit?client_id=' + encodeURIComponent(client.client_id),
                               }]
                             : []),
                           {
                             kind: 'confirm',
                             label: 'Rotate',
+                            icon: RefreshCw,
                             action: base + '/clients/' + encodeURIComponent(client.id) + '/rotate',
                             title: 'Rotate client secret?',
                             description: 'The old secret immediately stops working.',
@@ -241,6 +243,7 @@ export function ClientsPage({ personal = false }: { personal?: boolean }) {
                           {
                             kind: 'confirm',
                             label: client.status === 'active' ? 'Disable' : 'Enable',
+                            icon: client.status === 'active' ? Ban : CircleCheck,
                             action: base + '/clients/' + encodeURIComponent(client.id) + '/' +
                               (client.status === 'active' ? 'disable' : 'enable'),
                           },
@@ -248,6 +251,7 @@ export function ClientsPage({ personal = false }: { personal?: boolean }) {
                             ? [{
                                 kind: 'confirm' as const,
                                 label: 'Revoke',
+                                icon: ShieldX,
                                 action: base + '/clients/' + encodeURIComponent(client.id) + '/revoke',
                                 title: 'Revoke OAuth client?',
                                 destructive: true,
@@ -257,6 +261,7 @@ export function ClientsPage({ personal = false }: { personal?: boolean }) {
                           {
                             kind: 'confirm',
                             label: 'Delete',
+                            icon: Trash2,
                             action: base + '/clients/' + encodeURIComponent(client.id) + '/delete',
                             destructive: true,
                             description: 'Delete this client and its issued tokens. This cannot be undone.',
