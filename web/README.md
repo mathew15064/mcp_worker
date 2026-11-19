@@ -79,8 +79,15 @@ approval for the signed standalone Go Worker.
 
 The Workers screen contains **Workers** and **Install Worker** tabs. The Workers,
 OAuth Clients (Admin/User), and Admin Users tables use a shared **Actions** dropdown
-for multi-action rows. Confirmation dialogs, password/rename forms, and
-destructive-action warnings remain unchanged; single-purpose buttons stay visible.
+for multi-action rows. Each action must supply a semantic icon from the existing
+`lucide-react` set via the required `RowAction.icon` property; render icons at
+`size-4`, `aria-hidden`, with consistent spacing and a readable text label.
+Choose the icon by action semantics (e.g. History for Activity, RefreshCw for
+Rotate, Ban/CircleCheck for Disable/Enable, ShieldX for Revoke, Trash2 for
+Delete). Never use emoji, mixed icon libraries, or icon-only row menu entries.
+Apply the same icon-and-label convention to any future Actions dropdown.
+Confirmation dialogs, password/rename forms, and destructive-action warnings
+remain unchanged; single-purpose buttons stay visible.
 There is no manual Execution Profiles UI; copy a Worker UUID from the Workers table and pass
 it to an MCP tool as `worker: "<UUID>"`. The server authorizes Worker ownership,
 enabled state, and hosted isolation before dispatching. The `profile` parameter,

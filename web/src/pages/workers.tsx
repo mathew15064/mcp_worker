@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Activity, Copy, Plus, RefreshCw, Server, ShieldCheck } from 'lucide-react';
+import { Activity, Ban, CircleCheck, Copy, Pencil, Plus, RefreshCw, ScanSearch, Server, ShieldCheck, ShieldX, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { WorkerInstallGuide } from '@/components/worker-install-guide';
 import { RowActions } from '@/components/row-actions';
@@ -199,12 +199,14 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
                               {
                                 kind: 'callback',
                                 label: working === worker.id ? 'Checking…' : 'Probe',
+                                icon: ScanSearch,
                                 disabled: working === worker.id,
                                 onSelect: () => { void probe(worker.id); },
                               },
                               {
                                 kind: 'form',
                                 label: 'Rename',
+                                icon: Pencil,
                                 title: 'Rename Worker',
                                 action: base + '/workers/' + encodeURIComponent(worker.id) + '/edit',
                                 children: (
@@ -221,12 +223,14 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
                               {
                                 kind: 'confirm',
                                 label: worker.enabled ? 'Disable' : 'Enable',
+                                icon: worker.enabled ? Ban : CircleCheck,
                                 action: base + '/workers/' + encodeURIComponent(worker.id) + '/' +
                                   (worker.enabled ? 'disable' : 'enable'),
                               },
                               {
                                 kind: 'confirm',
                                 label: 'Remove',
+                                icon: Trash2,
                                 action: base + '/workers/' + encodeURIComponent(worker.id) + '/remove',
                                 title: 'Uninstall and remove Worker?',
                                 description: 'The Worker must be online to safely uninstall itself.',
@@ -235,6 +239,7 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
                               {
                                 kind: 'confirm',
                                 label: 'Force remove',
+                                icon: ShieldX,
                                 action: base + '/workers/' + encodeURIComponent(worker.id) + '/force-remove',
                                 title: 'Force delete Worker record?',
                                 description: 'Remote files may remain on the Worker machine.',
