@@ -22,6 +22,7 @@ interface TokenRow {
   resource: string;
   expires_at: string;
   revoked_at?: string | null;
+  last_used_at?: string | null;
   client_status?: string;
   owner_user_id?: string | null;
   owner_user_status?: string | null;
@@ -472,7 +473,7 @@ class McpOAuthRepository {
         'UPDATE mcp_oauth_refresh_tokens SET revoked_at = ? WHERE client_id = ? AND revoked_at IS NULL',
         [now, clientId],
       );
-      return { access_revoked: access.changes, refresh_revoked: refresh.changes };
+      return {access_revoked:access.changes,refresh_revoked:refresh.changes};
     });
   }
 

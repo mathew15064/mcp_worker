@@ -82,10 +82,20 @@ function schemaFingerprint(
   return sha256(JSON.stringify(normalized));
 }
 
+// A running process serves a fixed build and tool catalog. Rehashing the source
+// tree on every MCP call adds filesystem I/O without improving runtime provenance.
+let runtimeFingerprints: { source: string; schema: string } | null = null;
+
 async function handleRuntimeInfo(): Promise<ToolResponse> {
   const principal = assertPrincipal();
   principal.assertScope(SCOPES.READ);
   const { TOOLS } = await import('../toolRegistry.js');
+  if (!runtimeFingerprints) {
+    runtimeFingerprints = {
+      source: sourceFingerprint(),
+      schema: schemaFingerprint(TOOLS),
+    };
+  }
   const value = {
     app_name: packageIdentity.name,
     app_version: packageIdentity.version,
@@ -97,8 +107,8 @@ async function handleRuntimeInfo(): Promise<ToolResponse> {
       process.env.MCP_WORKER_BUILD_TIME && process.env.MCP_WORKER_BUILD_TIME !== 'unknown'
         ? process.env.MCP_WORKER_BUILD_TIME
         : null,
-    source_fingerprint: sourceFingerprint(),
-    tool_schema_hash: schemaFingerprint(TOOLS),
+    source_fingerprint: runtimeFingerprints.source,
+    tool_schema_hash: runtimeFingerprints.schema,
     tool_count: TOOLS.length,
     started_at: PROCESS_STARTED_AT,
     runtime_id: os.hostname(),

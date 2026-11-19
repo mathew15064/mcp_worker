@@ -111,9 +111,15 @@ class OAuthResourceServer {
       );
     }
 
-    try {
-      await this.repository().recordAccessTokenUsage(record.id);
-    } catch {}
+    // Authorization is still read and validated on EVERY call. Only the
+    // last-seen bookkeeping write is coalesced to at most once per minute per
+    // sequential client, avoiding a SQLite write on each MCP request.
+    const lastUsedMs = record.last_used_at ? Date.parse(record.last_used_at) : NaN;
+    if (!Number.isFinite(lastUsedMs) || Date.now() - lastUsedMs >= 60_000) {
+      try {
+        await this.repository().recordAccessTokenUsage(record.id);
+      } catch {}
+    }
 
     const principal = new AuthenticatedPrincipal({
       principalId: record.principal_id,
