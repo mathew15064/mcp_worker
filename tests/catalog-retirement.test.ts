@@ -78,6 +78,15 @@ void test('exact 15 Worker-only tools remain advertised and runtime_info agrees'
     expected,
   );
   const info = await rpc('tools/call', { name: 'runtime_info', arguments: {} });
+  const repeated = await rpc('tools/call', { name: 'runtime_info', arguments: {} });
+  assert.equal(
+    repeated.result?.structuredContent?.source_fingerprint,
+    info.result?.structuredContent?.source_fingerprint,
+  );
+  assert.equal(
+    repeated.result?.structuredContent?.tool_schema_hash,
+    info.result?.structuredContent?.tool_schema_hash,
+  );
   assert.equal(info.result?.structuredContent?.tool_count, 15);
   assert.equal(
     info.result?.structuredContent?.tool_schema_hash,
