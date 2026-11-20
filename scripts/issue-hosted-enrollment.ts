@@ -11,7 +11,7 @@ async function main() {
   const user = await userRepo.findById(userId);
   if (!user || user.role !== 'user' || user.status !== 'active')
     throw new Error('Hosted enrollment requires an active user account.');
-  const issued = await workerRepo.createEnrollmentToken({ ownerUserId: userId, ttlSeconds: 600 });
+  const issued = await workerRepo.createEnrollmentToken({ ownerUserId: userId, ttlSeconds: 600, enrollmentType: 'hosted' });
   // stdout is a secret-only pipe consumed by a trusted host operator script.
   process.stdout.write(issued.token);
   await databaseManager.close();

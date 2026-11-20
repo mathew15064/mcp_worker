@@ -165,31 +165,20 @@ void test(
     const workerRepo = (await import('../src/repositories/workerRepository.js')).default;
     const aliceWorkersPage = await pageWithCsrf(base, '/account/workers', aliceLogin.cookie);
     assert.equal(aliceWorkersPage.response.status, 200);
-    assert.match(aliceWorkersPage.html, /Signed Worker release approval pending/);
-    assert.doesNotMatch(aliceWorkersPage.html, /Generate Enrollment Token/);
+    assert.match(aliceWorkersPage.html, /Install \/ Connect Worker/);
     const createEnrollment = await fetch(`${base}/account/workers/enrollment`, {
       method: 'POST',
       redirect: 'manual',
       headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: aliceLogin.cookie },
       body: new URLSearchParams({ _csrf: aliceWorkersPage.csrf, ttl_seconds: '600' }).toString(),
     });
-    assert.equal(
-      createEnrollment.status,
-      503,
-      'No public enrollment while signed release is pending',
-    );
-    assert.equal(createEnrollment.headers.get('cache-control'), 'no-store');
+    assert.equal(createEnrollment.status, 302, 'Approved user may enroll a Personal Worker');
     const enrollmentPage = await pageWithCsrf(base, '/account/workers', aliceLogin.cookie);
-    assert.doesNotMatch(enrollmentPage.html, /br_enroll_[A-Za-z0-9_-]+/);
+    const enrollmentToken = enrollmentPage.html.match(/br_enroll_[A-Za-z0-9_-]+/)?.[0];
+    assert.ok(enrollmentToken, 'One-time token is disclosed to its owner');
+    assert.doesNotMatch((await pageWithCsrf(base, '/account/workers', aliceLogin.cookie)).html,
+      /br_enroll_[A-Za-z0-9_-]+/);
 
-    // The local integration fixture creates a token directly in its disposable
-    // database, so the existing Worker ownership tests remain independent of
-    // the protected public enrollment-creation endpoint.
-    const fixtureEnrollment = await workerRepo.createEnrollmentToken({
-      ttlSeconds: 600,
-      ownerUserId: alice.id,
-    });
-    const enrollmentToken = fixtureEnrollment.token;
     const identity = crypto.generateKeyPairSync('ed25519');
     const publicKey = identity.publicKey.export({ type: 'spki', format: 'pem' }).toString();
     const enrollWorker = await fetch(`${base}/worker/v1/enroll`, {
@@ -217,10 +206,17 @@ void test(
         typeof enrolled.profile.name === 'string',
     );
     assert.equal((await workerRepo.listWorkersByOwner(alice.id)).length, 1);
+    assert.equal((await workerRepo.listWorkersByOwner(alice.id))[0]?.execution_mode, 'personal');
     assert.equal((await workerRepo.listWorkersByOwner(bob.id)).length, 0);
     const aliceProfile = (await workerRepo.listProfilesByOwner(alice.id))[0];
     assert.ok(aliceProfile);
     assert.equal(aliceProfile.name, enrolled.profile.name);
+    const replay = await fetch(`${base}/worker/v1/enroll`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: enrollmentToken, name: 'Replay Worker', public_key: publicKey }),
+    });
+    assert.equal(replay.status, 401, 'Consumed token cannot be replayed');
 
     const globalWorker = await workerRepo.createWorker({
       name: 'Admin Global Worker',
@@ -271,6 +267,84 @@ void test(
 
     const bobLogin = await login(base, 'bob', 'BobPassword2026!');
     assert.equal(bobLogin.response.status, 302);
+    // Two accounts can enroll Workers with identical display names, but never share identities.
+    const bobWorkersPage = await pageWithCsrf(base, '/account/workers', bobLogin.cookie);
+    const bobIssue = await fetch(`${base}/account/workers/enrollment`, {
+      method: 'POST', redirect: 'manual',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: bobLogin.cookie },
+      body: new URLSearchParams({ _csrf: bobWorkersPage.csrf, ttl_seconds: '600' }).toString(),
+    });
+    assert.equal(bobIssue.status, 302);
+    const bobToken = (await pageWithCsrf(base, '/account/workers', bobLogin.cookie))
+      .html.match(/br_enroll_[A-Za-z0-9_-]+/)?.[0];
+    assert.ok(bobToken);
+    const bobPair = crypto.generateKeyPairSync('ed25519');
+    const bobEnroll = await fetch(`${base}/worker/v1/enroll`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        token: bobToken, name: 'Alice Worker',
+        public_key: bobPair.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+        capabilities: ['workspace.exec'], create_profile: true, profile_name: 'Alice Worker',
+      }),
+    });
+    assert.equal(bobEnroll.status, 201, 'Worker names only need to be unique per owner');
+    const bobWorker = (await workerRepo.listWorkersByOwner(bob.id))[0];
+    assert.ok(bobWorker);
+    assert.equal(bobWorker.execution_mode, 'personal');
+    assert.equal(bobWorker.name, 'Alice Worker');
+    const issuanceLogs = await oauthRepo.listAuditLogsForOwner(bob.id);
+    assert.ok(issuanceLogs.some((row) => row.mcp_method === 'worker/enrollment' && row.result === 'SUCCESS'));
+    const privateTokens = await Promise.all(Array.from({ length: 3 }, () =>
+      workerRepo.createEnrollmentToken({ ownerUserId: bob.id, enrollmentType: 'personal' })));
+    await assert.rejects(
+      () => workerRepo.createEnrollmentToken({ ownerUserId: bob.id, enrollmentType: 'personal' }),
+      (error: unknown) => error instanceof Error && 'code' in error && error.code === 'WORKER_ENROLLMENT_LIMIT',
+    );
+    await workerRepo.db.execute('UPDATE worker_enrollment_tokens SET expires_at = ? WHERE id = ?',
+      ['2000-01-01T00:00:00.000Z', privateTokens[0].id]);
+    const expiredToken = await fetch(`${base}/worker/v1/enroll`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: privateTokens[0].token, name: 'Expired Worker',
+        public_key: bobPair.publicKey.export({ type: 'spki', format: 'pem' }).toString() }),
+    });
+    assert.equal(expiredToken.status, 401);
+
+    assert.equal((await workerRepo.listWorkersByOwner(alice.id))[0]?.owner_user_id, alice.id);
+    assert.equal((await workerRepo.listWorkersByOwner(bob.id))[0]?.owner_user_id, bob.id);
+    assert.equal((await terminalMcpService.findProfile(bobWorker.id, { actorId: bob.principal_id })).worker_id, bobWorker.id);
+    const alicePersonalWorker = (await workerRepo.listWorkersByOwner(alice.id))[0];
+    assert.ok(alicePersonalWorker);
+    assert.equal((await terminalMcpService.findProfile(alicePersonalWorker.id,
+      { actorId: alice.principal_id })).worker_id, alicePersonalWorker.id);
+    await assert.rejects(
+      () => terminalMcpService.findProfile(bobWorker.id, { actorId: alice.principal_id }),
+      (error: unknown) => error instanceof Error && 'code' in error && error.code === 'PROFILE_NOT_FOUND',
+    );
+    const aliceWorkerId = alicePersonalWorker.id;
+    await assert.rejects(
+      () => terminalMcpService.findProfile(aliceWorkerId, { actorId: bob.principal_id }),
+      (error: unknown) => error instanceof Error && 'code' in error && error.code === 'PROFILE_NOT_FOUND',
+    );
+    const adminUsersForToggle = await pageWithCsrf(base, '/admin/users', adminLogin.cookie);
+    const disableEnrollment = await fetch(`${base}/admin/personal-enrollment`, {
+      method: 'POST', redirect: 'manual',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: adminLogin.cookie },
+      body: new URLSearchParams({ _csrf: adminUsersForToggle.csrf }).toString(),
+    });
+    assert.equal(disableEnrollment.status, 303);
+    const deniedIssue = await fetch(`${base}/account/workers/enrollment`, {
+      method: 'POST', redirect: 'manual',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: bobLogin.cookie },
+      body: new URLSearchParams({ _csrf: bobWorkersPage.csrf }).toString(),
+    });
+    assert.equal(deniedIssue.status, 403, 'Admin policy rejects self-issuance at the server');
+    const enabledAgain = await fetch(`${base}/admin/personal-enrollment`, {
+      method: 'POST', redirect: 'manual',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: adminLogin.cookie },
+      body: new URLSearchParams({ _csrf: adminUsersForToggle.csrf, enabled: 'true' }).toString(),
+    });
+    assert.equal(enabledAgain.status, 303);
+
     const bobClientsPage = await pageWithCsrf(base, '/account/clients', bobLogin.cookie);
     const createBobClient = await fetch(`${base}/account/clients`, {
       method: 'POST',
@@ -336,6 +410,7 @@ void test(
     );
     assert.equal(bobCannotRemoveAliceWorker.status, 404);
     assert.equal((await workerRepo.listWorkersByOwner(alice.id)).length, 1);
+    assert.equal((await workerRepo.listWorkersByOwner(alice.id))[0]?.execution_mode, 'personal');
 
     const aliceRemovesOwnWorker = await fetch(`${base}/account/workers/${aliceWorker.id}/remove`, {
       method: 'POST',
@@ -346,6 +421,7 @@ void test(
     assert.equal(aliceRemovesOwnWorker.status, 302);
     // Offline Workers cannot acknowledge remote uninstall; preserve their record.
     assert.equal((await workerRepo.listWorkersByOwner(alice.id)).length, 1);
+    assert.equal((await workerRepo.listWorkersByOwner(alice.id))[0]?.execution_mode, 'personal');
     const bobCannotForceRemoveAliceWorker = await fetch(
       `${base}/account/workers/${aliceWorker.id}/force-remove`,
       {
@@ -370,8 +446,18 @@ void test(
     assert.equal((await workerRepo.listProfilesByOwner(alice.id)).length, 0);
     assert.ok(await workerRepo.findWorkerById(globalWorker.id));
 
+    // Enrollment issued before suspension cannot be redeemed after suspension.
+    const staleToken = await workerRepo.createEnrollmentToken({
+      ownerUserId: alice.id, enrollmentType: 'personal', ttlSeconds: 600,
+    });
     const disabledAlice = await userService.setStatus(alice.id, 'disabled');
     assert.equal(disabledAlice?.status, 'disabled');
+    const deniedDisabledOwner = await fetch(`${base}/worker/v1/enroll`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({token: staleToken.token, name: 'Disabled Alice Worker', public_key: publicKey}),
+    });
+    assert.equal(deniedDisabledOwner.status, 403);
+
     const revokedSession = await fetch(`${base}/account/clients`, {
       redirect: 'manual',
       headers: { cookie: aliceLogin.cookie },

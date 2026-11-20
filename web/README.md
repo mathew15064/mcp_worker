@@ -77,8 +77,22 @@ approval for the signed standalone Go Worker.
 
 ## Direct Worker targets (Hosted gateway v3)
 
-The Workers screen contains **Workers** and **Install Worker** tabs. The Workers,
-OAuth Clients (Admin/User), and Admin Users tables use a shared **Actions** dropdown
+The Workers screen contains **Workers** and **Install Worker** tabs. Install Worker
+shows a one-time enrollment token entry point before the platform-specific
+steps. Admins can generate and copy the token there (or via Enroll Worker on
+the Workers tab). Generation returns to the Install tab, and the secret is
+only disclosed once in a masked dialog; it is never embedded in CLI commands.
+Approved account users can issue a one-time **Personal Worker** token while the Admin's
+`workers.personal_enrollment.enabled` policy allows it (default true); the token
+belongs to the authenticated account, not to the caller-supplied form fields.
+Admins can disable issuance via Users → Personal Worker enrollment without disabling
+existing Worker connections. The server-hosted signed binary distribution gate
+remains closed (HTTP 503); the independent GitHub-signed release is used for local
+installation. Personal Workers require an owned OAuth client with terminal scope.
+Hosted Workers still require operator-controlled attestation; old Workers do not
+inherit Personal execution privileges.
+
+The Workers, OAuth Clients (Admin/User), and Admin Users tables use a shared **Actions** dropdown
 for multi-action rows. Each action must supply a semantic icon from the existing
 `lucide-react` set via the required `RowAction.icon` property; render icons at
 `size-4`, `aria-hidden`, with consistent spacing and a readable text label.
@@ -90,7 +104,7 @@ Confirmation dialogs, password/rename forms, and destructive-action warnings
 remain unchanged; single-purpose buttons stay visible.
 There is no manual Execution Profiles UI; copy a Worker UUID from the Workers table and pass
 it to an MCP tool as `worker: "<UUID>"`. The server authorizes Worker ownership,
-enabled state, and hosted isolation before dispatching. The `profile` parameter,
+enabled state, and either Personal Worker mode or attested Hosted isolation before dispatching. The `profile` parameter,
 auto-generated profile records and signed standalone Worker v2.0.0 enrollment
 response remain supported for existing clients; no SQLite data is deleted.
 A Worker ID stays stable across Worker name changes. The server-hosted public

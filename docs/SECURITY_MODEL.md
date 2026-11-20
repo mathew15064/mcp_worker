@@ -18,6 +18,12 @@ Worker identities within a trust boundary you control.
 - A Worker initiates outbound WSS (loopback HTTP/WS only for explicit local
   development). Its local Ed25519 key signs authentication challenges;
   enrollment tokens are short-lived and one-use. Do not share Worker state.
+  User-issued Personal tokens are account-bound, limited and distinct from
+  operator-issued Hosted tokens. The Worker mode is fixed by the server-issued
+  token; it is not a client claim. A Personal Worker runs on the user's own OS
+  and is **not** equivalent to an attested, isolated Hosted container.
+  Old Worker identities retain legacy privileges; only independently verified
+  Hosted isolation or explicit Personal mode can authorize user execution.
 - Allowed roots constrain path-bearing operations, not arbitrary shell
   commands. Shell opt-in grants the OS user's command authority. Use a
   dedicated unprivileged account, restricted filesystem/network access
@@ -33,8 +39,9 @@ Worker identities within a trust boundary you control.
   substitute for securing a compromised host.
 
 Checksums detect corruption; independently trusted manifest signatures
-verify artifact authenticity. Official release keys have not been
-approved. Do not treat an unsigned local artifact as an authenticated
+verify artifact authenticity. The separately distributed GitHub signed Worker
+v2.0.0 is documented independently of the still-gated server-hosted download
+routes. Do not treat an unsigned local artifact as an authenticated
 public release. See [Worker lifecycle](../worker/README.md) and
 [release engineering](RELEASE_ENGINEERING.md).
 

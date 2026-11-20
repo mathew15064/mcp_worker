@@ -39,7 +39,7 @@ sh install-linux.sh
 ~/.local/bin/mcp_worker --help
 ```
 
-Enroll using a **one-time token** created in Admin → Workers on your existing, trusted MCP Server. The CLI prompts for the token without echoing it. Do not pass enrollment tokens in commands or chats.
+Enroll using a **one-time token** created in **My Workers → Install Worker** for your approved account, or **Admin → Workers** for administrator-owned Workers. Personal and Hosted Workers are account-owned and cannot be selected by other users. The CLI prompts for the token without echoing it; do not put tokens in commands, URLs or chats. This enrollment does **not** unlock server-hosted binary distribution (`/worker/install*` remains HTTP 503); use only the reviewed, signed GitHub Release.
 
 ```sh
 ~/.local/bin/mcp_worker setup --server https://YOUR_TRUSTED_MCP_SERVER

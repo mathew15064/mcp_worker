@@ -174,6 +174,7 @@ export function AdminUsers() {
   const [filter, setFilter] = useState('');
   const [registration, setRegistration] = useState(state?.data.registrationEnabled || false);
   const [execution, setExecution] = useState(state?.data.hostedExecutionEnabled || false);
+  const [personalEnrollment, setPersonalEnrollment] = useState(state?.data.personalEnrollmentEnabled ?? true);
   const visible = users.filter((u) =>
     [u.username, u.display_name, u.email, u.status]
       .join(' ')
@@ -212,7 +213,7 @@ export function AdminUsers() {
           </FormDialog>
         }
       />
-      <div className="mb-5 grid gap-5 lg:grid-cols-2">
+      <div className="mb-5 grid gap-5 lg:grid-cols-2 xl:grid-cols-3">
         <Section
           title="Public registration"
           description="New accounts still require administrator approval."
@@ -232,6 +233,27 @@ export function AdminUsers() {
             onClick={() => void submit('/admin/registration', { enabled: registration })}
           >
             Save registration policy
+          </Button>
+        </Section>
+        <Section
+          title="Personal Worker enrollment"
+          description="Allow approved accounts to install and enroll their own signed Workers."
+        >
+          <div className="flex min-h-10 items-center justify-between gap-5">
+            <span className="text-sm">Allow personal enrollment</span>
+            <Switch
+              aria-label="Allow personal enrollment"
+              checked={personalEnrollment}
+              onCheckedChange={setPersonalEnrollment}
+            />
+          </div>
+          <Button
+            className="mt-5"
+            size="sm"
+            disabled={busy}
+            onClick={() => void submit('/admin/personal-enrollment', { enabled: personalEnrollment })}
+          >
+            Save personal enrollment policy
           </Button>
         </Section>
         <Section

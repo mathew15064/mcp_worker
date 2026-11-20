@@ -63,6 +63,7 @@ function workerView(row: NonNullable<Awaited<ReturnType<typeof workerRepo.listWo
     last_seen_at: row.last_seen_at,
     capabilities: row.capabilities,
     hosted_isolated: Boolean(row.hosted_isolated),
+    execution_mode: row.execution_mode || 'legacy',
   };
 }
 async function withPresence(workers: Awaited<ReturnType<typeof workerRepo.listWorkers>>) {
@@ -204,6 +205,7 @@ router.get('/state', async (req, res, next) => {
         data.users = await userRepository.list();
         data.registrationEnabled = runtimeSettings.bool('registration.enabled', true);
         data.hostedExecutionEnabled = runtimeSettings.bool('hosted.execution.enabled', false);
+        data.personalEnrollmentEnabled = runtimeSettings.bool('workers.personal_enrollment.enabled', true);
       }
       if (pathname === '/admin/clients') {
         data.clients = (await oauthRepo.listClients())
@@ -257,9 +259,8 @@ router.get('/state', async (req, res, next) => {
         data.clientCount = (await oauthRepo.listClientsByOwner(ownerId)).length;
       if (pathname === '/account/tools') {
         const profiles = await workerRepo.listProfilesByOwner(ownerId);
-        data.hasWorker =
-          runtimeSettings.bool('hosted.execution.enabled', false) &&
-          profiles.some((p) => p !== null && p.enabled && p.hosted_isolated);
+        data.hasWorker = profiles.some((p) => p !== null && p.enabled &&
+          (p.execution_mode === 'personal' || (runtimeSettings.bool('hosted.execution.enabled', false) && p.hosted_isolated)));
         data.tools = TOOLS.map((t) => ({ name: t.name, description: t.description }));
       }
       if (pathname === '/account/activity')
@@ -273,6 +274,7 @@ router.get('/state', async (req, res, next) => {
       if (pathname === '/account/workers') {
         data.workers = await withPresence(await workerRepo.listWorkersByOwner(ownerId));
         data.release = workerSignedReleaseReadiness();
+        data.personalEnrollmentEnabled = runtimeSettings.bool('workers.personal_enrollment.enabled', true);
         result.enrollment = oneTimeValue(req, 'workerEnrollment');
       }
       if (pathname === '/account/telegram') data.telegram = await userTelegramSettings.get(ownerId);

@@ -96,6 +96,7 @@ void test('worker enrollment normalizes capabilities and signed handshake reject
       return Promise.resolve({
         id: 'fixture-enrollment',
         owner_user_id: null,
+        enrollment_type: 'legacy' as const,
         used_at: new Date().toISOString(),
       });
     },

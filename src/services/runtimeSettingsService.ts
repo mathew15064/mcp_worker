@@ -18,6 +18,8 @@ const DEFAULTS = Object.freeze({
   'mcp.rate_limit_per_minute': String(parseInt(process.env.MCP_RATE_LIMIT_PER_MINUTE || '120', 10)),
   'registration.enabled': 'true',
   'hosted.execution.enabled': 'false',
+  // Approved active users may enroll their own signed GitHub Worker without enabling server distribution.
+  'workers.personal_enrollment.enabled': 'true',
   'telegram.enabled': 'false',
   'telegram.chat_id': '',
   'telegram.bot_token': '',

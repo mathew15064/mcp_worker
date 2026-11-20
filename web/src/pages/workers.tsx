@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Activity, Ban, CircleCheck, Copy, Pencil, Plus, RefreshCw, ScanSearch, Server, ShieldCheck, ShieldX, Trash2 } from 'lucide-react';
+import { Activity, Ban, CircleCheck, Copy, KeyRound, Pencil, Plus, RefreshCw, ScanSearch, Server, ShieldCheck, ShieldX, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { WorkerInstallGuide } from '@/components/worker-install-guide';
 import { RowActions } from '@/components/row-actions';
@@ -29,6 +29,37 @@ import {
   StatusBadge,
 } from '@/components/common';
 
+function EnrollmentTokenForm({
+  action,
+  returnTo,
+}: {
+  action: string;
+  returnTo?: string;
+}) {
+  return (
+    <FormDialog
+      title="Generate one-time Worker enrollment"
+      description="Create a short-lived token and copy it when it appears. It will not be shown again."
+      action={action}
+      trigger={
+        <Button size="sm">
+          {returnTo ? <KeyRound className="size-4" /> : <Plus className="size-4" />}
+          {returnTo ? 'Get enrollment token' : 'Enroll Worker'}
+        </Button>
+      }
+      submitLabel="Generate token"
+    >
+      {returnTo && <input type="hidden" name="return_to" value={returnTo} />}
+      <Field label="Lifetime (seconds)">
+        <Input name="ttl_seconds" type="number" min={60} max={3600} defaultValue={600} />
+      </Field>
+      <SecurityNote>
+        Token can be used once. It is not an approval to publish unsigned Worker binaries.
+      </SecurityNote>
+    </FormDialog>
+  );
+}
+
 export function WorkersPage({ personal = false }: { personal?: boolean }) {
   const { state, refresh, busy } = useApp();
   const [working, setWorking] = useState<string | null>(null);
@@ -40,6 +71,7 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
   const workers = state?.data.workers || [];
   const base = personal ? '/account' : '/admin';
   const releaseApproved = state?.data.release?.productionDistributionApproved || false;
+  const canEnroll = !personal || (state?.data.personalEnrollmentEnabled ?? false);
 
   function selectTab(value: string) {
     if (value !== 'workers' && value !== 'install') return;
@@ -115,26 +147,7 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
             title={'Workers (' + workers.length + ')'}
             description="Live connection status is verified with the Worker broker."
             action={
-              !personal ? (
-                <FormDialog
-                  title="Generate one-time Worker enrollment"
-                  action="/admin/workers/enrollment"
-                  trigger={
-                    <Button size="sm">
-                      <Plus className="size-4" />
-                      Enroll Worker
-                    </Button>
-                  }
-                  submitLabel="Generate token"
-                >
-                  <Field label="Lifetime (seconds)">
-                    <Input name="ttl_seconds" type="number" min={60} max={3600} defaultValue={600} />
-                  </Field>
-                  <SecurityNote>
-                    Token can be used once. It is not an approval to publish unsigned Worker binaries.
-                  </SecurityNote>
-                </FormDialog>
-              ) : null
+              !personal ? <EnrollmentTokenForm action="/admin/workers/enrollment" /> : null
             }
           >
             {workers.length ? (
@@ -185,7 +198,7 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
                           )}
                         </TableCell>
                         <TableCell>
-                          <StatusBadge status={worker.hosted_isolated ? 'Isolated' : 'Unattested'} />
+                          <StatusBadge status={worker.hosted_isolated ? 'Isolated' : worker.execution_mode === 'personal' ? 'Personal' : 'Unattested'} />
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {worker.last_seen_at
@@ -272,12 +285,45 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
               <AlertTitle>Public Worker distribution gated</AlertTitle>
               <AlertDescription>
                 Public one-command installers are unavailable pending signed release approval.
-                {personal
-                  ? ' Hosted execution is provisioned by the host operator after your account is approved.'
-                  : ' Admin development enrollment tokens remain available for trusted manually built Workers.'}
+                {' '}This does not block enrollment with a reviewed, signed GitHub Worker release.
+                {personal ? ' Personal Workers run on your own machine.' : ' Admin development enrollment remains separate.'}
               </AlertDescription>
             </Alert>
           )}
+          <Section
+            title="Get an enrollment token"
+            description={
+              personal && !canEnroll
+                ? 'Personal Worker enrollment is disabled by the administrator.'
+                : 'Generate a one-time token here before running the Worker login command.'
+            }
+            action={
+              canEnroll ? (
+                <EnrollmentTokenForm
+                  action={base + '/workers/enrollment'}
+                  returnTo={base + '/workers?tab=install'}
+                />
+              ) : (
+                <Button size="sm" disabled aria-label="Get enrollment token unavailable">
+                  <KeyRound className="size-4" />
+                  Get enrollment token
+                </Button>
+              )
+            }
+          >
+            {personal && !canEnroll ? (
+              <p className="text-sm text-muted-foreground" role="status">
+                Personal enrollment has been disabled by your administrator. Contact your host
+                operator to request access or an isolated Hosted Worker.
+              </p>
+            ) : (
+              <SecurityNote>
+                Generate the token, copy it from the one-time dialog, and paste it at the hidden
+                prompt when you run <code className="font-mono">mcp_worker login</code>. Never put
+                the token directly in a command or share it with others. Use only the reviewed signed Worker release.
+              </SecurityNote>
+            )}
+          </Section>
           <Section
             title="Install Worker"
             description="Step-by-step installation for Linux, macOS and Windows, with an explanation and a separate Copy button for each command."

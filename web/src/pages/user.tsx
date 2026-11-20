@@ -191,7 +191,7 @@ export function MyTools() {
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
             {enabled
-              ? 'Verified isolated runtime is configured. Your OAuth client must still have terminal scope.'
+              ? 'An authorized Personal Worker or attested Hosted Worker is configured. Your OAuth client must still have terminal scope.'
               : 'Your host operator must provision and attest an isolated Worker before execution is allowed.'}
           </p>
         </Section>

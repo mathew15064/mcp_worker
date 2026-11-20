@@ -106,11 +106,20 @@ class WorkerAuthService {
     const normalizedKey = this.validatePublicKey(publicKey);
     const normalizedCapabilities = this.normalizeCapabilities(capabilities);
     const enrollment = await this.repository.consumeEnrollmentToken(token);
+    if (enrollment?.owner_user_id) {
+      let ownerStatus: string | null = null;
+      try { ownerStatus = await this.ownerStatusLookup(enrollment.owner_user_id); } catch {
+        throw workerError('WORKER_OWNER_UNAVAILABLE', 'Worker owner cannot be verified.', 503);
+      }
+      if (ownerStatus !== 'active')
+        throw workerError('WORKER_OWNER_DISABLED', 'Worker owner is not active.', 403);
+    }
     return this.repository.createWorker({
       name: normalizedName,
       publicKey: normalizedKey,
       capabilities: normalizedCapabilities,
       ownerUserId: enrollment?.owner_user_id || null,
+      executionMode: enrollment?.enrollment_type || 'legacy',
     });
   }
 
