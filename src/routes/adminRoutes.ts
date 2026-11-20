@@ -485,7 +485,11 @@ router.post('/admin/workers/enrollment', requireDataStore, async (req, res) => {
   } catch (error) {
     setFlash(req, 'error', routeError(error).message);
   }
-  return res.redirect('/admin/workers');
+  return res.redirect(
+    formString(req.body, 'return_to') === '/admin/workers?tab=install'
+      ? '/admin/workers?tab=install'
+      : '/admin/workers',
+  );
 });
 
 router.post('/admin/workers/profiles', requireDataStore, async (req, res) => {

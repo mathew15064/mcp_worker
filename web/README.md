@@ -77,7 +77,14 @@ approval for the signed standalone Go Worker.
 
 ## Direct Worker targets (Hosted gateway v3)
 
-The Workers screen contains **Workers** and **Install Worker** tabs. The Workers,
+The Workers screen contains **Workers** and **Install Worker** tabs. Install Worker
+shows a one-time enrollment token entry point before the platform-specific
+steps. Admins can generate and copy the token there (or via Enroll Worker on
+the Workers tab). Generation returns to the Install tab, and the secret is
+only disclosed once in a masked dialog; it is never embedded in CLI commands.
+Account users see the token step but cannot self-issue while the signed
+release gate is NO-GO; they must request operator-provisioned isolated Workers.
+This UI does not bypass the server-side enrollment or distribution gates. The Workers,
 OAuth Clients (Admin/User), and Admin Users tables use a shared **Actions** dropdown
 for multi-action rows. Each action must supply a semantic icon from the existing
 `lucide-react` set via the required `RowAction.icon` property; render icons at

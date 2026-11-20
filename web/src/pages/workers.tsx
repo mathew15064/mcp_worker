@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Activity, Ban, CircleCheck, Copy, Pencil, Plus, RefreshCw, ScanSearch, Server, ShieldCheck, ShieldX, Trash2 } from 'lucide-react';
+import { Activity, Ban, CircleCheck, Copy, KeyRound, Pencil, Plus, RefreshCw, ScanSearch, Server, ShieldCheck, ShieldX, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { WorkerInstallGuide } from '@/components/worker-install-guide';
 import { RowActions } from '@/components/row-actions';
@@ -28,6 +28,37 @@ import {
   Section,
   StatusBadge,
 } from '@/components/common';
+
+function EnrollmentTokenForm({
+  action,
+  returnTo,
+}: {
+  action: string;
+  returnTo?: string;
+}) {
+  return (
+    <FormDialog
+      title="Generate one-time Worker enrollment"
+      description="Create a short-lived token and copy it when it appears. It will not be shown again."
+      action={action}
+      trigger={
+        <Button size="sm">
+          {returnTo ? <KeyRound className="size-4" /> : <Plus className="size-4" />}
+          {returnTo ? 'Get enrollment token' : 'Enroll Worker'}
+        </Button>
+      }
+      submitLabel="Generate token"
+    >
+      {returnTo && <input type="hidden" name="return_to" value={returnTo} />}
+      <Field label="Lifetime (seconds)">
+        <Input name="ttl_seconds" type="number" min={60} max={3600} defaultValue={600} />
+      </Field>
+      <SecurityNote>
+        Token can be used once. It is not an approval to publish unsigned Worker binaries.
+      </SecurityNote>
+    </FormDialog>
+  );
+}
 
 export function WorkersPage({ personal = false }: { personal?: boolean }) {
   const { state, refresh, busy } = useApp();
@@ -115,26 +146,7 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
             title={'Workers (' + workers.length + ')'}
             description="Live connection status is verified with the Worker broker."
             action={
-              !personal ? (
-                <FormDialog
-                  title="Generate one-time Worker enrollment"
-                  action="/admin/workers/enrollment"
-                  trigger={
-                    <Button size="sm">
-                      <Plus className="size-4" />
-                      Enroll Worker
-                    </Button>
-                  }
-                  submitLabel="Generate token"
-                >
-                  <Field label="Lifetime (seconds)">
-                    <Input name="ttl_seconds" type="number" min={60} max={3600} defaultValue={600} />
-                  </Field>
-                  <SecurityNote>
-                    Token can be used once. It is not an approval to publish unsigned Worker binaries.
-                  </SecurityNote>
-                </FormDialog>
-              ) : null
+              !personal ? <EnrollmentTokenForm action="/admin/workers/enrollment" /> : null
             }
           >
             {workers.length ? (
@@ -278,6 +290,40 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
               </AlertDescription>
             </Alert>
           )}
+          <Section
+            title="Get an enrollment token"
+            description={
+              personal && !releaseApproved
+                ? 'Self-service enrollment requires an approved signed Worker release.'
+                : 'Generate a one-time token here before running the Worker login command.'
+            }
+            action={
+              !personal || releaseApproved ? (
+                <EnrollmentTokenForm
+                  action={base + '/workers/enrollment'}
+                  returnTo={base + '/workers?tab=install'}
+                />
+              ) : (
+                <Button size="sm" disabled aria-label="Get enrollment token unavailable">
+                  <KeyRound className="size-4" />
+                  Get enrollment token
+                </Button>
+              )
+            }
+          >
+            {personal && !releaseApproved ? (
+              <p className="text-sm text-muted-foreground" role="status">
+                Self-service enrollment tokens are unavailable until the signed Worker release is
+                approved. Ask your host operator to provision an isolated Worker for your account.
+              </p>
+            ) : (
+              <SecurityNote>
+                Generate the token, copy it from the one-time dialog, and paste it at the hidden
+                prompt when you run <code className="font-mono">mcp_worker login</code>. Never put
+                the token directly in a command or share it with others.
+              </SecurityNote>
+            )}
+          </Section>
           <Section
             title="Install Worker"
             description="Step-by-step installation for Linux, macOS and Windows, with an explanation and a separate Copy button for each command."
