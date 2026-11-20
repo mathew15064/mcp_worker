@@ -318,7 +318,11 @@ router.post('/account/workers/enrollment', async (req, res) => {
   } catch (error) {
     setFlash(req, 'error', routeError(error).message);
   }
-  return res.redirect('/account/workers');
+  return res.redirect(
+    formString(req.body, 'return_to') === '/account/workers?tab=install'
+      ? '/account/workers?tab=install'
+      : '/account/workers',
+  );
 });
 
 router.post('/account/workers/:id/:action', async (req, res) => {
