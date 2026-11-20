@@ -10,6 +10,7 @@ export interface ExecutionProfile {
   enabled: boolean;
   worker_id?: string | null;
   hosted_isolated?: boolean;
+  execution_mode?: 'legacy' | 'personal' | 'hosted';
 }
 export type ExecutionRecord = Record<string, unknown>;
 export type ShellInspection = ExecutionRecord & {

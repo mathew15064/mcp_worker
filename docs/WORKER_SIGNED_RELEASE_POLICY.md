@@ -1,5 +1,16 @@
 # Signed Go Worker — local-only release candidate and trust-root policy (T2)
 
+> **Historical T2 policy snapshot.** The NO-GO below applies to the
+> MCP **server-hosted** Worker binary distribution routes, which remain HTTP 503.
+> The independently published GitHub signed Worker v2.0.0 is described in
+> `worker/README.md` and is a separate distribution. The original T2 restriction
+> on *all* account-user enrollment was superseded by the reviewed Hosted v3
+> Personal Worker policy: approved users may receive hashed, short-lived,
+> one-use **account-bound** enrollment tokens through the authenticated API
+> while Admin permits it. Issuance cannot override signing, publish unsigned
+> server-hosted binaries, change a trust root, or mark a Worker Hosted/attested.
+
+
 **Status: NO-GO.** No production signing key, approved version/commit, or approved
 release artifacts exist. Public routes `/worker/install*` and `/worker/dist/*`
 must continue to return HTTP 503 `WORKER_SIGNED_RELEASE_PENDING`.

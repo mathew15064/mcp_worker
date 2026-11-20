@@ -163,6 +163,14 @@ router.post('/admin/registration', requireDataStore, async (req, res) => {
   return res.redirect(303, '/admin/users');
 });
 
+router.post('/admin/personal-enrollment', requireDataStore, async (req, res) => {
+  try {
+    await runtimeSettings.set('workers.personal_enrollment.enabled', formFlag(req.body, 'enabled') ? 'true' : 'false');
+    setFlash(req, 'success', 'Personal Worker enrollment policy updated.');
+  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+  return res.redirect(303, '/admin/users');
+});
+
 router.post('/admin/hosted', requireDataStore, async (req, res) => {
   try {
     await runtimeSettings.set('hosted.execution.enabled', formFlag(req.body, 'enabled') ? 'true' : 'false');

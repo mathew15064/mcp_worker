@@ -19,6 +19,35 @@ socket. A user does not need a VPS, Docker installation, or a personal MCP URL.
    `/account/clients` (advanced). Public DCR clients do not receive
    terminal scope.
 
+## Personal Workers — user-operated machines
+
+An approved account can open `/account/workers?tab=install`, generate its own
+one-use token (default TTL 600 seconds), and install the **independently signed
+GitHub v2.0.0 Worker** on a machine it controls. The token is shown only once;
+the Worker CLI prompts for it without echoing. Do not paste it into command-line
+arguments, URLs, shared screenshots or support logs.
+
+`workers.personal_enrollment.enabled` (Admin → Users → Personal Worker enrollment)
+controls **future issuance only**; it defaults to on for approved accounts.
+Creation is rate limited to five requests per account per hour, with at most
+three unexpired tokens and ten Personal Workers per owner. The owner identity
+is taken from the authenticated session, and each token is stored as a hash.
+Enrollment class is persisted server-side; clients cannot designate a Worker
+as Hosted/attested, and pre-existing Workers retain `legacy` mode. Different
+accounts can choose the same Worker display name; identities are still distinct.
+
+Personal Worker execution requires an owned OAuth client with
+`mcp_worker.terminal` scope and an owned, enabled Personal Worker. Personal
+Workers run with the **local OS account's permissions** and are not treated as
+isolated containers. Administrative Hosted execution remains a separate global
+policy, and no Personal token authorizes a VPS container, Docker socket or
+cross-account tool call. Disabling the owning user revokes Worker connections
+and blocks outstanding token redemption.
+
+The Gateway-hosted `/worker/install*` and `/worker/dist/*` endpoints remain
+HTTP 503; enabling account enrollment is **not** approval to publish an
+unsigned binary or change a release signing trust root.
+
 ## Operator provisioning
 
 Build the dedicated image on the Docker host:

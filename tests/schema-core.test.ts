@@ -38,6 +38,34 @@ void test('fresh compatibility database contains MCP, admin and worker support t
   );
 });
 
+void test('legacy Worker databases migrate additively to owner-scoped names and modes', () => {
+  const Database = require('better-sqlite3') as typeof import('better-sqlite3');
+  const legacy = new Database(':memory:');
+  try {
+    legacy.exec(`CREATE TABLE workers (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, public_key TEXT NOT NULL,
+      capabilities_json TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL DEFAULT 'offline', last_seen_at TEXT,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX idx_workers_name_nocase ON workers(name COLLATE NOCASE);
+    INSERT INTO workers (id, name, public_key, capabilities_json, created_at, updated_at)
+      VALUES ('legacy-1', 'Worker', 'key', '[]', '2026-01-01', '2026-01-01');`);
+    runMigrations(legacy);
+    runMigrations(legacy); // restarting an upgraded gateway must remain safe
+    const stored = legacy.prepare('SELECT name, owner_user_id, execution_mode FROM workers WHERE id = ?')
+      .get('legacy-1') as { name: string; owner_user_id: string | null; execution_mode: string };
+    assert.deepEqual(stored, { name: 'Worker', owner_user_id: null, execution_mode: 'legacy' });
+    const names = legacy.prepare('SELECT name FROM sqlite_master WHERE type = ? AND name LIKE ?')
+      .all('index', 'idx_workers_%') as { name: string }[];
+    assert.equal(names.some((item) => item.name === 'idx_workers_name_nocase'), false);
+    assert.equal(names.some((item) => item.name === 'idx_workers_owner_name_nocase'), true);
+    assert.equal(names.some((item) => item.name === 'idx_workers_admin_name_nocase'), true);
+  } finally {
+    legacy.close();
+  }
+});
+
 void test('migrations do not drop unknown legacy tables', () => {
   const db = getDb();
   db.exec('CREATE TABLE legacy_preserved (id TEXT PRIMARY KEY)');

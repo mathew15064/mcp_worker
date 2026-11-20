@@ -65,19 +65,20 @@ CREATE TABLE IF NOT EXISTS workers (
   capabilities_json TEXT NOT NULL,
   owner_user_id TEXT,
   hosted_isolated INTEGER NOT NULL DEFAULT 0 CHECK(hosted_isolated IN (0, 1)),
+  execution_mode TEXT NOT NULL DEFAULT 'legacy' CHECK(execution_mode IN ('legacy', 'personal', 'hosted')),
   enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
   status TEXT NOT NULL DEFAULT 'offline',
   last_seen_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_workers_name_nocase ON workers(name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_workers_status ON workers(status);
 
 CREATE TABLE IF NOT EXISTS worker_enrollment_tokens (
   id TEXT PRIMARY KEY,
   token_hash TEXT NOT NULL UNIQUE,
   owner_user_id TEXT,
+  enrollment_type TEXT NOT NULL DEFAULT 'legacy' CHECK(enrollment_type IN ('legacy', 'personal', 'hosted')),
   expires_at TEXT NOT NULL,
   used_at TEXT,
   created_at TEXT NOT NULL

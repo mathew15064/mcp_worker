@@ -43,6 +43,7 @@ export interface Worker {
   connected: boolean;
   capabilities?: string[];
   hosted_isolated?: boolean;
+  execution_mode?: 'legacy' | 'personal' | 'hosted';
   last_seen_at?: string | null;
 }
 export interface Profile {
@@ -53,6 +54,7 @@ export interface Profile {
   description?: string | null;
   enabled: boolean | number;
   hosted_isolated?: boolean;
+  execution_mode?: 'legacy' | 'personal' | 'hosted';
   worker_status?: string;
 }
 export interface Audit {
@@ -117,6 +119,7 @@ export interface PageData {
   telegram?: TelegramSettings;
   registrationEnabled?: boolean;
   hostedExecutionEnabled?: boolean;
+  personalEnrollmentEnabled?: boolean;
   hasWorker?: boolean;
   clientCount?: number;
   firstCall?: boolean;

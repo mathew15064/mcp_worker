@@ -1,5 +1,7 @@
 import { stringifyUnknown } from '../utils/stringifyUnknown';
+import crypto from 'node:crypto';
 import express, { type Request, type Response, type NextFunction } from 'express';
+import { rateLimit } from 'express-rate-limit';
 import { routeError } from '../http/domainErrors';
 import { formString, formFlag, formList } from '../http/requestContracts';
 import pages from '../http/pages';
@@ -22,7 +24,6 @@ import authRoutes from './authRoutes';
 const { currentIdentity } = authRoutes;
 import oauthRepo from '../repositories/mcpOAuthRepository';
 import workerRepo from '../repositories/workerRepository';
-import { workerSignedReleaseReadiness } from '../services/workerReleaseGate';
 import workerBroker from '../services/workerConnectionBroker';
 import workerLifecycle from '../services/workerLifecycleService';
 import oauthService from '../services/mcpOAuthService';
@@ -33,6 +34,14 @@ import mcpConfig from '../config/mcpConfig';
 const { accountClientsPage, accountTelegramPage, workersPage, errorPage } = pages;
 
 const router = express.Router();
+const personalEnrollmentLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 5,
+  // Account-scoped, not IP-scoped: separate users can share a network.
+  keyGenerator: (req) => req.currentUser.id,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 function csrf(req: Request) {
   return req.session?.csrfToken || '';
@@ -147,8 +156,8 @@ router.get('/account/tools', async (req, res, next) => {
     const profiles = await workerRepo.listProfilesByOwner(req.currentUser.id);
     return res.type('html').send(hostedPages.userToolsPage({
       user:{...req.currentUser,username:req.currentUser.username || '',status:'active'},
-      csrfToken:csrf(req),hasWorker: runtimeSettings.bool('hosted.execution.enabled', false) &&
-        profiles.some(p => !!p?.enabled && !!p.hosted_isolated),
+      csrfToken:csrf(req),hasWorker: profiles.some(p => !!p?.enabled &&
+        (p.execution_mode === 'personal' || (runtimeSettings.bool('hosted.execution.enabled', false) && p.hosted_isolated))),
     }));
   } catch (error) { next(error); }
 });
@@ -281,6 +290,7 @@ router.get('/account/workers', async (req, res, next) => {
           (profile): profile is NonNullable<typeof profile> => profile !== null,
         ),
         checkingWorkerId: stringifyUnknown(req.query.check || ''),
+        personalEnrollmentEnabled: runtimeSettings.bool('workers.personal_enrollment.enabled', true),
         enrollment: consumeWorkerEnrollment(req),
         workerInstallUrl: `${mcpConfig.publicBaseUrl}/worker/install.sh`,
         routeBase: '/account/workers',
@@ -294,15 +304,10 @@ router.get('/account/workers', async (req, res, next) => {
   }
 });
 
-router.post('/account/workers/enrollment', async (req, res) => {
-  if (!workerSignedReleaseReadiness().productionDistributionApproved) {
-    return res
-      .status(503)
-      .set('Cache-Control', 'no-store')
-      .type('html')
-      .send(
-        errorPage(503, 'Signed Worker release approval is pending; enrollment is unavailable.'),
-      );
+router.post('/account/workers/enrollment', personalEnrollmentLimiter, async (req, res) => {
+  if (!runtimeSettings.bool('workers.personal_enrollment.enabled', true)) {
+    return res.status(403).set('Cache-Control', 'no-store').type('html')
+      .send(errorPage(403, 'Personal Worker enrollment is disabled by the administrator.'));
   }
   try {
     const ttlSeconds = Math.max(
@@ -312,8 +317,22 @@ router.post('/account/workers/enrollment', async (req, res) => {
     const enrollment = await workerRepo.createEnrollmentToken({
       ttlSeconds,
       ownerUserId: req.currentUser.id,
+      enrollmentType: 'personal',
     });
     setWorkerEnrollment(req, enrollment);
+    // Record only event metadata. The one-time token must never enter audit logs.
+    try {
+      await oauthRepo.recordAudit({
+        requestId: crypto.randomUUID(),
+        principalId: req.currentUser.principal_id,
+        actorId: req.currentUser.principal_id,
+        mcpMethod: 'worker/enrollment',
+        result: 'SUCCESS', httpStatus: 201, durationMs: 0,
+      });
+    } catch {
+      // Issuance already succeeded: do not lose the secret due to audit-store failure.
+      console.warn('[personal-worker] Enrollment audit write failed');
+    }
     setFlash(req, 'success', 'One-time worker enrollment token created.');
   } catch (error) {
     setFlash(req, 'error', routeError(error).message);

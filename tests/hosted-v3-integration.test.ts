@@ -238,10 +238,10 @@ void test('hosted v3: registration, admin approval, public OAuth PKCE, two-user 
     actorId: alice.principal_id,
     scopes: ['mcp_worker.read', 'mcp_worker.terminal'],
   });
-  await assert.rejects(
-    () => runWithPrincipal(forgedTerminalGrant, () => listTerminals.handler({})),
-    (e: unknown) => e instanceof Error && 'code' in e && e.code === 'HOSTED_EXECUTION_DISABLED',
-  );
+  // Listing owner-scoped Workers is harmless; each executable target still needs
+  // an explicit Personal mode or verified Hosted attestation.
+  const ownedList = await runWithPrincipal(forgedTerminalGrant, () => listTerminals.handler({}));
+  assert.deepEqual((ownedList.structuredContent as { terminals: unknown[] }).terminals, []);
 
   const workerRepo = (await import('../src/repositories/workerRepository.js')).default;
   const untrustedWorker = await workerRepo.createWorker({

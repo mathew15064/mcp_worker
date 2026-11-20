@@ -316,7 +316,7 @@ class TerminalMcpService {
     if (worker) {
       if (!worker.enabled)
         throw terminalServiceError('WORKER_DISABLED', 'This Worker is disabled.');
-      if (ownerUserId && (!runtimeSettings.bool('hosted.execution.enabled', false) || !worker.hosted_isolated))
+      if (ownerUserId && !(worker.execution_mode === 'personal' || (runtimeSettings.bool('hosted.execution.enabled', false) && worker.hosted_isolated)))
         throw terminalServiceError('HOSTED_EXECUTION_DISABLED', 'Per-user isolated execution is not enabled or verified.');
       return {
         id: 'worker:' + worker.id,
@@ -325,6 +325,7 @@ class TerminalMcpService {
         enabled: true,
         worker_id: worker.id,
         hosted_isolated: Boolean(worker.hosted_isolated),
+        execution_mode: worker.execution_mode,
       };
     }
 
@@ -339,7 +340,7 @@ class TerminalMcpService {
       throw terminalServiceError('PROFILE_DISABLED', 'This Execution Profile is disabled.');
     if (profile.transport !== 'worker' || !profile.worker_id)
       throw terminalServiceError('WORKER_ONLY', 'Only enrolled Worker execution targets are supported.');
-    if (ownerUserId && (!runtimeSettings.bool('hosted.execution.enabled', false) || !profile.hosted_isolated))
+    if (ownerUserId && !(profile.execution_mode === 'personal' || (runtimeSettings.bool('hosted.execution.enabled', false) && profile.hosted_isolated)))
       throw terminalServiceError('HOSTED_EXECUTION_DISABLED', 'Per-user isolated execution is not enabled or verified.');
     return profile;
   }

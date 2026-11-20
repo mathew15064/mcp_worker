@@ -52,6 +52,8 @@ export function runMigrations(db: Database.Database | null = null) {
   addColumnIfMissing(database, 'workers', 'owner_user_id', 'TEXT');
   addColumnIfMissing(database, 'workers', 'hosted_isolated', 'INTEGER NOT NULL DEFAULT 0 CHECK(hosted_isolated IN (0,1))');
   addColumnIfMissing(database, 'worker_enrollment_tokens', 'owner_user_id', 'TEXT');
+  addColumnIfMissing(database, 'worker_enrollment_tokens', 'enrollment_type', "TEXT NOT NULL DEFAULT 'legacy' CHECK(enrollment_type IN ('legacy', 'personal', 'hosted'))");
+  addColumnIfMissing(database, 'workers', 'execution_mode', "TEXT NOT NULL DEFAULT 'legacy' CHECK(execution_mode IN ('legacy', 'personal', 'hosted'))");
   addColumnIfMissing(database, 'mcp_oauth_access_tokens', 'last_used_at', 'TEXT');
   addColumnIfMissing(database, 'mcp_oauth_refresh_tokens', 'last_used_at', 'TEXT');
   addColumnIfMissing(database, 'mcp_oauth_refresh_tokens', 'replaced_by_hash', 'TEXT');
@@ -81,6 +83,10 @@ export function runMigrations(db: Database.Database | null = null) {
   database.exec(
     'CREATE INDEX IF NOT EXISTS idx_mcp_clients_owner_user ON mcp_oauth_clients(owner_user_id)',
   );
+  // The former global name uniqueness blocked different users from choosing the same name.
+  database.exec('DROP INDEX IF EXISTS idx_workers_name_nocase');
+  database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_workers_admin_name_nocase ON workers(name COLLATE NOCASE) WHERE owner_user_id IS NULL');
+  database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_workers_owner_name_nocase ON workers(owner_user_id, name COLLATE NOCASE) WHERE owner_user_id IS NOT NULL');
   database.exec('CREATE INDEX IF NOT EXISTS idx_workers_owner_user ON workers(owner_user_id)');
   database.exec(
     'CREATE INDEX IF NOT EXISTS idx_worker_enrollment_owner_user ON worker_enrollment_tokens(owner_user_id)',

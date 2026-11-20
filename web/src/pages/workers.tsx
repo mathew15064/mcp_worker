@@ -71,6 +71,7 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
   const workers = state?.data.workers || [];
   const base = personal ? '/account' : '/admin';
   const releaseApproved = state?.data.release?.productionDistributionApproved || false;
+  const canEnroll = !personal || (state?.data.personalEnrollmentEnabled ?? false);
 
   function selectTab(value: string) {
     if (value !== 'workers' && value !== 'install') return;
@@ -197,7 +198,7 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
                           )}
                         </TableCell>
                         <TableCell>
-                          <StatusBadge status={worker.hosted_isolated ? 'Isolated' : 'Unattested'} />
+                          <StatusBadge status={worker.hosted_isolated ? 'Isolated' : worker.execution_mode === 'personal' ? 'Personal' : 'Unattested'} />
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {worker.last_seen_at
@@ -284,21 +285,20 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
               <AlertTitle>Public Worker distribution gated</AlertTitle>
               <AlertDescription>
                 Public one-command installers are unavailable pending signed release approval.
-                {personal
-                  ? ' Hosted execution is provisioned by the host operator after your account is approved.'
-                  : ' Admin development enrollment tokens remain available for trusted manually built Workers.'}
+                {' '}This does not block enrollment with a reviewed, signed GitHub Worker release.
+                {personal ? ' Personal Workers run on your own machine.' : ' Admin development enrollment remains separate.'}
               </AlertDescription>
             </Alert>
           )}
           <Section
             title="Get an enrollment token"
             description={
-              personal && !releaseApproved
-                ? 'Self-service enrollment requires an approved signed Worker release.'
+              personal && !canEnroll
+                ? 'Personal Worker enrollment is disabled by the administrator.'
                 : 'Generate a one-time token here before running the Worker login command.'
             }
             action={
-              !personal || releaseApproved ? (
+              canEnroll ? (
                 <EnrollmentTokenForm
                   action={base + '/workers/enrollment'}
                   returnTo={base + '/workers?tab=install'}
@@ -311,16 +311,16 @@ export function WorkersPage({ personal = false }: { personal?: boolean }) {
               )
             }
           >
-            {personal && !releaseApproved ? (
+            {personal && !canEnroll ? (
               <p className="text-sm text-muted-foreground" role="status">
-                Self-service enrollment tokens are unavailable until the signed Worker release is
-                approved. Ask your host operator to provision an isolated Worker for your account.
+                Personal enrollment has been disabled by your administrator. Contact your host
+                operator to request access or an isolated Hosted Worker.
               </p>
             ) : (
               <SecurityNote>
                 Generate the token, copy it from the one-time dialog, and paste it at the hidden
                 prompt when you run <code className="font-mono">mcp_worker login</code>. Never put
-                the token directly in a command or share it with others.
+                the token directly in a command or share it with others. Use only the reviewed signed Worker release.
               </SecurityNote>
             )}
           </Section>

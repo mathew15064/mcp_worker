@@ -16,6 +16,7 @@ interface WorkerRow {
   owner_user_id: string | null;
   owner_username?: string | null;
   hosted_isolated?: number | boolean;
+  execution_mode?: 'legacy' | 'personal' | 'hosted';
   last_seen_at: string | null;
 }
 interface ProfileRow {
@@ -27,7 +28,9 @@ interface ProfileRow {
   worker_enabled?: number | boolean;
   owner_user_id?: string | null;
   hosted_isolated?: number | boolean;
+  execution_mode?: 'legacy' | 'personal' | 'hosted';
 }
+type EnrollmentType = 'legacy' | 'personal' | 'hosted';
 interface OwnerOptions {
   ownerUserId?: string | null;
 }
@@ -118,18 +121,45 @@ class WorkerRepository {
   async createEnrollmentToken({
     ttlSeconds = 600,
     ownerUserId = null,
-  }: OwnerOptions & { ttlSeconds?: number } = {}) {
+    enrollmentType = 'legacy',
+  }: OwnerOptions & { ttlSeconds?: number; enrollmentType?: EnrollmentType } = {}) {
     const ttl = Math.max(60, Math.min(Number(ttlSeconds) || 600, 3600));
     const rawToken = `br_enroll_${crypto.randomBytes(32).toString('base64url')}`;
     const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
     const now = new Date();
     const id = crypto.randomUUID();
     const expiresAt = new Date(now.getTime() + ttl * 1000).toISOString();
-    await this.db.execute(
-      `INSERT INTO worker_enrollment_tokens
-      (id, token_hash, owner_user_id, expires_at, used_at, created_at) VALUES (?, ?, ?, ?, NULL, ?)`,
-      [id, tokenHash, ownerUserId || null, expiresAt, now.toISOString()],
-    );
+    if (enrollmentType !== 'legacy' && !ownerUserId)
+      throw workerError('WORKER_OWNER_REQUIRED', 'An owner is required for personal or hosted enrollment.', 400);
+    await this.db.transaction(async (tx) => {
+      if (enrollmentType === 'personal') {
+        if (!ownerUserId)
+          throw workerError('WORKER_OWNER_REQUIRED', 'A user owner is required.', 400);
+        const owner = await tx.queryOne<{ role: string; status: string }>(
+          'SELECT role, status FROM users WHERE id = ?', [ownerUserId],
+        );
+        if (owner?.role !== 'user' || owner.status !== 'active')
+          throw workerError('WORKER_OWNER_DISABLED', 'An active user is required for personal enrollment.', 403);
+        const active = await tx.queryOne<{ count: number }>(
+          'SELECT COUNT(*) AS count FROM worker_enrollment_tokens WHERE owner_user_id = ? AND enrollment_type = ? AND used_at IS NULL AND expires_at > ?',
+          [ownerUserId, 'personal', now.toISOString()],
+        );
+        if ((active?.count || 0) >= 3)
+          throw workerError('WORKER_ENROLLMENT_LIMIT', 'At most three unexpired enrollment tokens are allowed.', 429);
+        const workers = await tx.queryOne<{ count: number }>(
+          'SELECT COUNT(*) AS count FROM workers WHERE owner_user_id = ? AND execution_mode = ?',
+          [ownerUserId, 'personal'],
+        );
+        if ((workers?.count || 0) >= 10)
+          throw workerError('WORKER_PERSONAL_LIMIT', 'At most ten personal Workers are allowed.', 409);
+      }
+      await tx.execute(
+        `INSERT INTO worker_enrollment_tokens
+        (id, token_hash, owner_user_id, enrollment_type, expires_at, used_at, created_at)
+        VALUES (?, ?, ?, ?, ?, NULL, ?)`,
+        [id, tokenHash, ownerUserId || null, enrollmentType, expiresAt, now.toISOString()],
+      );
+    });
     return { id, token: rawToken, owner_user_id: ownerUserId || null, expires_at: expiresAt };
   }
 
@@ -142,10 +172,11 @@ class WorkerRepository {
       const row = await tx.queryOne<{
         id: string;
         owner_user_id: string | null;
+        enrollment_type: EnrollmentType;
         expires_at: string;
         used_at: string | null;
       }>(
-        'SELECT id, owner_user_id, expires_at, used_at FROM worker_enrollment_tokens WHERE token_hash = ?',
+        'SELECT id, owner_user_id, enrollment_type, expires_at, used_at FROM worker_enrollment_tokens WHERE token_hash = ?',
         [tokenHash],
       );
       if (!row || row.used_at)
@@ -167,7 +198,7 @@ class WorkerRepository {
           'Worker enrollment token was already consumed.',
           401,
         );
-      return { id: row.id, owner_user_id: row.owner_user_id || null, used_at: usedAt };
+      return { id: row.id, owner_user_id: row.owner_user_id || null, enrollment_type: row.enrollment_type, used_at: usedAt };
     });
   }
 
@@ -176,15 +207,16 @@ class WorkerRepository {
     publicKey,
     capabilities = [],
     ownerUserId = null,
-  }: OwnerOptions & { name: string; publicKey: string; capabilities?: unknown[] }) {
+    executionMode = 'legacy',
+  }: OwnerOptions & { name: string; publicKey: string; capabilities?: unknown[]; executionMode?: EnrollmentType }) {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     try {
       await this.db.execute(
         `INSERT INTO workers
-        (id, name, public_key, capabilities_json, owner_user_id, enabled, status, last_seen_at, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 1, 'offline', NULL, ?, ?)`,
-        [id, name, publicKey, JSON.stringify(capabilities), ownerUserId || null, now, now],
+        (id, name, public_key, capabilities_json, owner_user_id, execution_mode, enabled, status, last_seen_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 1, 'offline', NULL, ?, ?)`,
+        [id, name, publicKey, JSON.stringify(capabilities), ownerUserId || null, executionMode, now, now],
       );
     } catch (error) {
       if (
@@ -383,7 +415,7 @@ class WorkerRepository {
     return this.hydrateProfile(
       await this.db.queryOne<ProfileRow>(
         `SELECT p.*, w.name AS worker_name, w.status AS worker_status, w.enabled AS worker_enabled,
-      w.last_seen_at AS worker_last_seen_at, w.owner_user_id, w.hosted_isolated FROM worker_profiles p JOIN workers w ON w.id = p.worker_id WHERE p.id = ?`,
+      w.last_seen_at AS worker_last_seen_at, w.owner_user_id, w.hosted_isolated, w.execution_mode FROM worker_profiles p JOIN workers w ON w.id = p.worker_id WHERE p.id = ?`,
         [id],
       ),
     );
@@ -393,7 +425,7 @@ class WorkerRepository {
     return this.hydrateProfile(
       await this.db.queryOne<ProfileRow>(
         `SELECT p.*, w.name AS worker_name, w.status AS worker_status, w.enabled AS worker_enabled,
-      w.last_seen_at AS worker_last_seen_at, w.owner_user_id, w.hosted_isolated FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
+      w.last_seen_at AS worker_last_seen_at, w.owner_user_id, w.hosted_isolated, w.execution_mode FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
       WHERE p.id = ? AND w.owner_user_id = ?`,
         [id, ownerUserId],
       ),
@@ -404,7 +436,7 @@ class WorkerRepository {
     return this.hydrateProfile(
       await this.db.queryOne<ProfileRow>(
         `SELECT p.*, w.name AS worker_name, w.status AS worker_status, w.enabled AS worker_enabled,
-      w.last_seen_at AS worker_last_seen_at, w.owner_user_id, w.hosted_isolated FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
+      w.last_seen_at AS worker_last_seen_at, w.owner_user_id, w.hosted_isolated, w.execution_mode FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
       WHERE p.id = ? AND w.owner_user_id IS NULL`,
         [id],
       ),
@@ -415,7 +447,7 @@ class WorkerRepository {
     return this.hydrateProfile(
       await this.db.queryOne<ProfileRow>(
         `SELECT p.*, w.name AS worker_name, w.status AS worker_status, w.enabled AS worker_enabled,
-      w.last_seen_at AS worker_last_seen_at, w.owner_user_id, w.hosted_isolated FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
+      w.last_seen_at AS worker_last_seen_at, w.owner_user_id, w.hosted_isolated, w.execution_mode FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
       WHERE LOWER(p.name) = LOWER(?) LIMIT 1`,
         [String(name || '').trim()],
       ),
@@ -426,7 +458,7 @@ class WorkerRepository {
     return (
       await this.db
         .queryAll<ProfileRow>(`SELECT p.*, w.name AS worker_name, w.status AS worker_status, w.enabled AS worker_enabled,
-      w.last_seen_at AS worker_last_seen_at, w.owner_user_id, w.hosted_isolated FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
+      w.last_seen_at AS worker_last_seen_at, w.owner_user_id, w.hosted_isolated, w.execution_mode FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
       ORDER BY LOWER(p.name), p.name`)
     ).map((row) => this.hydrateProfile(row));
   }
@@ -435,7 +467,7 @@ class WorkerRepository {
     return (
       await this.db.queryAll<ProfileRow>(
         `SELECT p.*, w.name AS worker_name, w.status AS worker_status, w.enabled AS worker_enabled,
-      w.last_seen_at AS worker_last_seen_at, w.owner_user_id, w.hosted_isolated FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
+      w.last_seen_at AS worker_last_seen_at, w.owner_user_id, w.hosted_isolated, w.execution_mode FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
       WHERE w.owner_user_id = ? ORDER BY LOWER(p.name), p.name`,
         [ownerUserId],
       )
@@ -446,7 +478,7 @@ class WorkerRepository {
     return (
       await this.db
         .queryAll<ProfileRow>(`SELECT p.*, w.name AS worker_name, w.status AS worker_status, w.enabled AS worker_enabled,
-      w.last_seen_at AS worker_last_seen_at, w.owner_user_id, w.hosted_isolated FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
+      w.last_seen_at AS worker_last_seen_at, w.owner_user_id, w.hosted_isolated, w.execution_mode FROM worker_profiles p JOIN workers w ON w.id = p.worker_id
       WHERE w.owner_user_id IS NULL ORDER BY LOWER(p.name), p.name`)
     ).map((row) => this.hydrateProfile(row));
   }

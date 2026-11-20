@@ -135,7 +135,7 @@ void test('Worker install commands fail closed on partial or empty downloads', (
   }
 });
 
-void test('User Worker page cannot bypass signed-release enrollment gating', () => {
+void test('User Worker page honors account enrollment policy independently of signed distribution', () => {
   const html = pages.workersPage({
     workers: [],
     profiles: [],
@@ -143,7 +143,15 @@ void test('User Worker page cannot bypass signed-release enrollment gating', () 
     accountUser: { id: 'user-1' },
   });
   assert.doesNotMatch(html, /action="\/account\/workers\/enrollment"/);
-  assert.match(html, /Signed Worker release approval pending/);
+  assert.match(html, /Personal enrollment disabled by administrator/);
+  const allowed = pages.workersPage({
+    workers: [], profiles: [], csrfToken: 'test',
+    accountUser: { id: 'user-1' }, personalEnrollmentEnabled: true,
+    routeBase: '/account/workers',
+  });
+  assert.match(allowed, /action="\/account\/workers\/enrollment"/);
+  // Enrollment never advertises an unapproved server-hosted installer.
+  assert.match(allowed, /Signed one-command installation unavailable/);
 });
 
 void test('Worker Profile automatically selects its only online Worker', () => {
