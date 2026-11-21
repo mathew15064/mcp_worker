@@ -1,5 +1,9 @@
 import { test, expect, type Page } from '@playwright/test'
 import crypto from 'node:crypto'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { spawnSync } from 'node:child_process'
 // Keep the UI acceptance test typed and self-contained: the historical
 // CommonJS test fixture is not a type-safe ESM import in this suite.
 async function login(page: Page) {
@@ -288,40 +292,69 @@ test('Worker UI preserves signed release gate and one-time enrollment', async ({
   await installToken.getByRole('button', { name: 'Done' }).click()
   const guide = page.locator('[data-worker-install-guide]').first()
   await expect(guide.getByRole('tab', { name: 'Linux' })).toBeVisible()
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  const quickInstall = guide.locator('[data-worker-quick-install]')
+  await expect(quickInstall).toContainText('Quick Install — one copy')
+  let quickCommand = await quickInstall.locator('code').innerText()
+  expect(quickCommand).toContain('mktemp -d /tmp/mcp-worker-install.')
+  expect(quickCommand).toContain('install-linux.sh')
+  expect(quickCommand).toContain('trap')
+  expect(quickCommand).toContain('export PATH=')
+  expect(quickCommand).toContain('.bashrc')
+  expect(quickCommand).not.toContain('br_enroll_')
+  await quickInstall.getByRole('button', { name: 'Copy Quick Install' }).click()
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(quickCommand)
+  const advanced = guide.locator('[data-worker-advanced]')
+  await expect(advanced).not.toHaveAttribute('open', '')
+  await advanced.locator('summary').click()
   const steps = guide.locator('[data-worker-install-steps] > li')
-  await expect(steps).toHaveCount(5)
-  await expect(steps.getByRole('button', { name: 'Copy command' })).toHaveCount(5)
+  await expect(steps).toHaveCount(6)
+  await expect(steps.getByRole('button', { name: 'Copy command' })).toHaveCount(6)
   for (const [index, title] of [
     'Download the installer',
     'Review the script',
     'Install the Worker',
+    'Make the CLI available',
     'Log in and enroll',
     'Check connection',
   ].entries()) {
     await expect(steps.nth(index)).toContainText(title)
     await expect(steps.nth(index).locator('code')).toHaveCount(1)
-    expect(await steps.nth(index).locator('code').innerText()).not.toContain('\n')
   }
-  await expect(steps.nth(0).locator('code')).toContainText('install-linux.sh')
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await expect(steps.nth(0).locator('code')).toContainText('mktemp -d /tmp/')
   const downloadCommand = await steps.nth(0).locator('code').innerText()
   await steps.nth(0).getByRole('button', { name: 'Copy command' }).click()
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(downloadCommand)
-  await expect(steps.nth(3).locator('code')).toContainText('mcp_worker login --server')
-  await expect(steps.nth(4).locator('code')).toContainText('mcp_worker status')
+  await expect(steps.nth(3).locator('code')).toContainText('export PATH=')
+  await expect(steps.nth(4).locator('code')).toContainText('mcp_worker login --server')
+  await expect(steps.nth(5).locator('code')).toContainText('mcp_worker status')
+  const connect = guide.locator('[data-worker-connect]')
+  await expect(connect.getByText('Connect Worker')).toBeVisible()
+  await expect(connect.locator('code')).toHaveCount(2)
+  await expect(connect.locator('code').first()).not.toContainText('br_enroll_')
   await guide.getByRole('tab', { name: 'macOS' }).click()
-  await expect(steps.nth(0).locator('code')).toContainText('install-macos.sh')
-  await expect(steps.nth(3).locator('code')).toContainText('mcp_worker login --server')
+  quickCommand = await quickInstall.locator('code').innerText()
+  expect(quickCommand).toContain('install-macos.sh')
+  expect(quickCommand).toContain('rc_file="$HOME/.zshrc"')
+  expect(quickCommand).toContain('mktemp -d /tmp/')
+  await advanced.locator('summary').click()
+  await expect(steps.nth(4).locator('code')).toContainText('mcp_worker login --server')
   await guide.getByRole('tab', { name: 'Windows' }).click()
-  await expect(steps.nth(0).locator('code')).toContainText('install-windows.ps1')
-  await expect(steps.nth(3).locator('code')).toContainText('mcp_worker login --server')
-  await expect(steps.nth(3).locator('code')).not.toContainText('br_enroll_')
-  await expect(steps).toHaveCount(5)
+  quickCommand = await quickInstall.locator('code').innerText()
+  expect(quickCommand).toContain('install-windows.ps1')
+  expect(quickCommand).toContain('[IO.Path]::GetTempPath()')
+  expect(quickCommand).toContain("SetEnvironmentVariable('Path'")
+  expect(quickCommand).not.toContain('br_enroll_')
+  await advanced.locator('summary').click()
+  await expect(steps.nth(4).locator('code')).toContainText('mcp_worker login --server')
+  await expect(steps.nth(4).locator('code')).not.toContainText('br_enroll_')
+  await expect(steps).toHaveCount(6)
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 850 })
     const size = await measureOverflow(page)
     expect(size.scroll, 'Worker installation overflows at ' + width).toBeLessThanOrEqual(size.width + 1)
-    await expect(steps.nth(4).getByRole('button', { name: 'Copy command' })).toBeVisible()
+    await expect(quickInstall.getByRole('button', { name: 'Copy Quick Install' })).toBeVisible()
+    await expect(steps.nth(5).getByRole('button', { name: 'Copy command' })).toBeVisible()
   }
   await page.setViewportSize({ width: 1440, height: 900 })
   await sections.getByRole('tab', { name: 'Workers', exact: true }).click()
@@ -578,4 +611,79 @@ test('OAuth consent uses verified client, PKCE scope and explicitly denies witho
   expect(callback.searchParams.get('error')).toBe('access_denied')
   expect(callback.searchParams.get('code')).toBeNull()
   expect(callback.searchParams.get('state')).toBe('ui-qa-state')
+})
+
+
+test('Linux Quick Install command is executable, idempotent and cleans temporary files', async ({ page }) => {
+  await login(page)
+  await page.goto('/admin/workers?tab=install')
+  const command = await page.locator('[data-worker-quick-install] code').innerText()
+  expect(command).not.toContain('br_enroll_')
+
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-quick-fixture-'))
+  const home = path.join(fixture, 'home')
+  const mockBin = path.join(fixture, 'mock-bin')
+  fs.mkdirSync(home)
+  fs.mkdirSync(mockBin)
+  const fakeCurl = [
+    '#!/bin/sh',
+    'set -eu',
+    'if [ "${TEST_CURL_FAIL:-0}" = "1" ]; then exit 23; fi',
+    'out=""',
+    'while [ "$#" -gt 0 ]; do',
+    '  case "$1" in -fsSLo) shift; out="$1" ;; esac',
+    '  shift',
+    'done',
+    'test -n "$out"',
+    'cat > "$out" <<\'INSTALLER\'',
+    '#!/bin/sh',
+    'set -eu',
+    'mkdir -p "$HOME/.local/bin"',
+    'cat > "$HOME/.local/bin/mcp_worker" <<\'WORKER\'',
+    '#!/bin/sh',
+    'printf "%s\\n" "worker_mcp 2.0.0 test"',
+    'WORKER',
+    'chmod +x "$HOME/.local/bin/mcp_worker"',
+    'INSTALLER',
+  ].join('\n') + '\n'
+  fs.writeFileSync(path.join(mockBin, 'curl'), fakeCurl, { mode: 0o755 })
+  const environment = {
+    HOME: home,
+    PATH: mockBin + ':/usr/bin:/bin',
+  }
+  const tempDirs = () => fs.readdirSync('/tmp').filter(name => name.startsWith('mcp-worker-install.')).sort()
+  const before = tempDirs()
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = spawnSync('bash', ['-c', command + '\ncommand -v mcp_worker'], {
+        env: environment,
+        cwd: home,
+        encoding: 'utf8',
+        timeout: 15000,
+      })
+      expect(result.status, result.stderr).toBe(0)
+      expect(result.stdout).toContain('worker_mcp 2.0.0 test')
+      expect(result.stdout).toContain(home + '/.local/bin/mcp_worker')
+      expect(tempDirs()).toEqual(before)
+    }
+    const bashrc = fs.readFileSync(path.join(home, '.bashrc'), 'utf8')
+    expect(bashrc.match(/export PATH="\$HOME\/\.local\/bin:\$PATH"/g)).toHaveLength(1)
+    const freshShell = spawnSync('bash', ['-ic', 'command -v mcp_worker'], {
+      env: environment, cwd: home, encoding: 'utf8', timeout: 15000,
+    })
+    expect(freshShell.status, freshShell.stderr).toBe(0)
+    expect(freshShell.stdout.trim()).toBe(home + '/.local/bin/mcp_worker')
+
+    const failed = spawnSync('bash', ['-c', command], {
+      env: { ...environment, TEST_CURL_FAIL: '1' },
+      cwd: home,
+      encoding: 'utf8',
+      timeout: 15000,
+    })
+    expect(failed.status).not.toBe(0)
+    expect(tempDirs()).toEqual(before)
+    expect(fs.readFileSync(path.join(home, '.bashrc'), 'utf8')).toBe(bashrc)
+  } finally {
+    fs.rmSync(fixture, { recursive: true, force: true })
+  }
 })

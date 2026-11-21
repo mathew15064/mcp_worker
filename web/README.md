@@ -79,7 +79,16 @@ approval for the signed standalone Go Worker.
 
 The Workers screen contains **Workers** and **Install Worker** tabs. Install Worker
 shows a one-time enrollment token entry point before the platform-specific
-steps. Admins can generate and copy the token there (or via Enroll Worker on
+steps. The platform tabs put **Quick Install** first: a single copyable command
+runs the signed GitHub installer from a unique temp directory (Linux/macOS:
+`/tmp`; Windows: per-user temp), cleans the temp files, and refreshes PATH.
+On Linux it persists `~/.local/bin` in `~/.bashrc` without duplicate lines;
+macOS uses `~/.zshrc` for Zsh, otherwise `~/.bashrc`; Windows maintains
+the user PATH. A collapsed **Advanced** disclosure retains the separate
+download/review/install/PATH/enroll/status steps. **Connect Worker** shows
+the token-free login and status commands. Binary, symlinks and identity remain
+under persistent user directories, never `/tmp`. A no-op reinstall must still
+repair PATH. Do not embed enrollment tokens in copied commands. Admins can generate and copy the token there (or via Enroll Worker on
 the Workers tab). Generation returns to the Install tab, and the secret is
 only disclosed once in a masked dialog; it is never embedded in CLI commands.
 Approved account users can issue a one-time **Personal Worker** token while the Admin's
