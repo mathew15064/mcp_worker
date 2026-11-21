@@ -1,4 +1,4 @@
-import { Copy, ExternalLink } from 'lucide-react';
+import { ChevronDown, Copy, ExternalLink, Terminal } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -27,7 +27,7 @@ function serverBaseUrl(mcpEndpoint: string) {
 }
 
 function loginCommand(os: WorkerOS, serverUrl: string) {
-  const command = os === 'windows' ? 'mcp_worker' : '~/.local/bin/mcp_worker';
+  const command = 'mcp_worker';
   // Quote the server-configured URL for the target OS. Never include the enrollment token.
   const quotedUrl = os === 'windows'
     ? "'" + serverUrl.replace(/'/g, "''") + "'"
@@ -35,45 +35,123 @@ function loginCommand(os: WorkerOS, serverUrl: string) {
   return command + ' login --server ' + quotedUrl;
 }
 
+function shellProfile(os: WorkerOS) {
+  return os === 'macos'
+    ? 'case "${SHELL##*/}" in zsh) rc_file="$HOME/.zshrc" ;; *) rc_file="$HOME/.bashrc" ;; esac'
+    : 'rc_file="$HOME/.bashrc"';
+}
+
+function shellPathCommand(os: WorkerOS) {
+  return [
+    'case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac',
+    shellProfile(os),
+    'path_line=\'export PATH="$HOME/.local/bin:$PATH"\'',
+    'if [ -L "$rc_file" ]; then',
+    '  printf "Refusing to edit a symlinked shell profile: %s\\n" "$rc_file" >&2; false',
+    'elif ! grep -Fqx "$path_line" "$rc_file" 2>/dev/null; then',
+    '  printf \'\\n%s\\n\' "$path_line" >> "$rc_file"',
+    'fi',
+    'hash -r',
+  ].join('\n');
+}
+
+function quickInstallCommand(os: WorkerOS) {
+  if (os === 'windows') {
+    return [
+      "$ErrorActionPreference = 'Stop'",
+      "$workerTmp = Join-Path ([IO.Path]::GetTempPath()) ('mcp-worker-install-' + [guid]::NewGuid().ToString('N'))",
+      'New-Item -ItemType Directory -Path $workerTmp | Out-Null',
+      'try {',
+      "  $installer = Join-Path $workerTmp 'install-windows.ps1'",
+      "  Invoke-WebRequest -Uri '" + download + "/install-windows.ps1' -OutFile $installer",
+      "  if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw 'Installer download failed' }",
+      '  & $installer',
+      "} finally { Remove-Item -LiteralPath $workerTmp -Recurse -Force -ErrorAction SilentlyContinue }",
+      "$workerBin = Join-Path $env:LOCALAPPDATA 'BotReportWorker\\current'",
+      "$userPath = [string][Environment]::GetEnvironmentVariable('Path', 'User')",
+      "if (-not (@($userPath -split ';') | Where-Object { $_ -ieq $workerBin })) {",
+      "  [Environment]::SetEnvironmentVariable('Path', (($userPath.TrimEnd(';') + ';' + $workerBin).TrimStart(';')), 'User')",
+      '}',
+      `if (-not (@($env:Path -split ';') | Where-Object { $_ -ieq $workerBin })) { $env:Path = "$workerBin;$env:Path" }`,
+      "& (Join-Path $workerBin 'worker_mcp.exe') version",
+    ].join('\n');
+  }
+
+  const script = os === 'macos' ? 'install-macos.sh' : 'install-linux.sh';
+  return [
+    'worker_tmp="$(mktemp -d /tmp/mcp-worker-install.XXXXXX)" && (',
+    '  trap \'rm -rf -- "$worker_tmp"\' EXIT',
+    '  cd "$worker_tmp" &&',
+    "  curl --proto '=https' --proto-redir '=https' -fsSLo " + script + ' ' + download + '/' + script + ' &&',
+    '  test -s ' + script + ' &&',
+    '  sh ' + script,
+    ') && {',
+    ...shellPathCommand(os).split('\n').map((line) => '  ' + line)
+      .map((line) => line === '  fi' ? '  fi &&' : line === '  hash -r' ? '  hash -r &&' : line),
+    '  mcp_worker version',
+    '}',
+  ].join('\n');
+}
+
 function installSteps(os: WorkerOS, serverUrl: string): CommandStep[] {
   const script = os === 'linux' ? 'install-linux.sh'
     : os === 'macos' ? 'install-macos.sh' : 'install-windows.ps1';
   const windows = os === 'windows';
+  const temp = windows ? '$workerTmp' : '$worker_tmp';
+  const downloadCommand = windows
+    ? "$workerTmp = Join-Path ([IO.Path]::GetTempPath()) ('mcp-worker-install-' + [guid]::NewGuid().ToString('N'))\nNew-Item -ItemType Directory -Path $workerTmp | Out-Null\nInvoke-WebRequest -Uri '" + download + '/' + script + "' -OutFile (Join-Path $workerTmp '" + script + "')"
+    : 'worker_tmp="$(mktemp -d /tmp/mcp-worker-install.XXXXXX)" && curl --proto \'=https\' --proto-redir \'=https\' -fsSLo "$worker_tmp/' + script + '" ' + download + '/' + script;
   return [
     {
       title: 'Download the installer',
-      description: 'Download the official v2.0.0 installer from the signed GitHub release, not from this MCP server.',
-      command: windows
-        ? 'Invoke-WebRequest ' + download + '/' + script + ' -OutFile ' + script
-        : 'curl -fsSLo ' + script + ' ' + download + '/' + script,
+      description: 'Download the official signed GitHub release to an isolated temporary directory.',
+      command: downloadCommand,
     },
     {
       title: 'Review the script',
       description: 'Inspect the downloaded installer before running it on your machine.',
-      command: windows ? 'Get-Content .\\' + script : 'cat ' + script,
+      command: windows ? "Get-Content (Join-Path " + temp + " '" + script + "')"
+        : 'cat "$worker_tmp/' + script + '"',
     },
     {
       title: 'Install the Worker',
-      description: 'Run the reviewed installer. It verifies the signed release and installs the standalone Worker.',
-      command: windows ? '.\\' + script : 'sh ' + script,
+      description: 'Run the reviewed installer and remove the temporary script afterward.',
+      command: windows
+        ? "& (Join-Path $workerTmp '" + script + "')\nRemove-Item -LiteralPath $workerTmp -Recurse -Force"
+        : 'sh "$worker_tmp/' + script + '" && rm -rf -- "$worker_tmp"',
+    },
+    {
+      title: 'Make the CLI available',
+      description: windows
+        ? 'Refresh the current PowerShell PATH. The installer also configures your user PATH.'
+        : 'Export PATH now and save it once to your shell profile for future sessions.',
+      command: windows
+        ? "$env:Path = (Join-Path $env:LOCALAPPDATA 'BotReportWorker\\current') + ';' + $env:Path"
+        : shellPathCommand(os),
     },
     {
       title: 'Log in and enroll',
-      description: 'Run this command, then paste the one-time enrollment token at the hidden prompt. Never put the token in the command.',
+      description: 'Paste your one-time token at the hidden prompt. Never put the token in a command.',
       command: loginCommand(os, serverUrl),
     },
     {
       title: 'Check connection',
-      description: 'Inspect the installed Worker status after login and confirm that it appears online in this dashboard.',
-      command: windows ? 'mcp_worker status' : '~/.local/bin/mcp_worker status',
+      description: 'Check local status, then confirm the Worker is Online in this dashboard.',
+      command: windows ? 'mcp_worker status' : 'mcp_worker status',
     },
   ];
 }
 
-function CommandCopy({ command }: { command: string }) {
+function CommandCopy({
+  command,
+  label = 'Copy command',
+}: {
+  command: string;
+  label?: string;
+}) {
   return (
     <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start">
-      <pre className="min-w-0 max-w-full flex-1 overflow-x-auto whitespace-pre rounded-lg border border-border bg-secondary/40 px-3 py-2.5 font-mono text-xs leading-relaxed">
+      <pre className="max-h-64 min-w-0 max-w-full flex-1 overflow-auto whitespace-pre rounded-lg border border-border bg-secondary/40 px-3 py-2.5 font-mono text-xs leading-relaxed">
         <code>{command}</code>
       </pre>
       <Button
@@ -81,7 +159,7 @@ function CommandCopy({ command }: { command: string }) {
         size="sm"
         variant="outline"
         className="self-end sm:self-start"
-        aria-label="Copy command"
+        aria-label={label}
         onClick={() => {
           void navigator.clipboard.writeText(command)
             .then(() => toast.success('Command copied'))
@@ -130,22 +208,52 @@ function OperatingSystemTabs({
                   ? 'PowerShell · OpenSSL required'
                   : 'Terminal · curl and OpenSSL required'}
               </p>
-              <ol className="space-y-3" data-worker-install-steps>
-                {installSteps(os, serverUrl).map((step, index) => (
-                  <li key={step.title} className="min-w-0 rounded-lg border border-border/70 p-3 sm:p-4">
-                    <div className="mb-3 flex items-start gap-2.5">
-                      <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-semibold">
-                        {index + 1}
-                      </span>
-                      <div className="min-w-0 space-y-1">
-                        <p className="text-sm font-semibold">{step.title}</p>
-                        <p className="text-xs leading-relaxed text-muted-foreground">{step.description}</p>
+              <section className="min-w-0 space-y-3 rounded-xl border border-border/80 bg-secondary/15 p-3 sm:p-4" data-worker-quick-install>
+                <div className="flex items-center gap-2">
+                  <Terminal className="size-4 shrink-0 text-muted-foreground" />
+                  <p className="text-sm font-semibold">Quick Install — one copy</p>
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {os === 'windows'
+                    ? 'Download and execute the reviewed installer in a temporary PowerShell directory, then refresh PATH.'
+                    : 'Download and run the signed-release installer in /tmp, clean temporary files, and configure PATH for this shell and future sessions.'}
+                  {' '}Your Worker binary and identity stay in persistent user directories, never in /tmp.
+                </p>
+                <CommandCopy command={quickInstallCommand(os)} label="Copy Quick Install" />
+              </section>
+              <details className="min-w-0 rounded-xl border border-border/70" data-worker-advanced>
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-3 text-sm font-medium sm:px-4">
+                  Advanced — download, review and install step by step
+                  <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+                </summary>
+                <ol className="space-y-3 border-t border-border/70 p-3 sm:p-4" data-worker-install-steps>
+                  {installSteps(os, serverUrl).map((step, index) => (
+                    <li key={step.title} className="min-w-0 rounded-lg border border-border/70 p-3 sm:p-4">
+                      <div className="mb-3 flex items-start gap-2.5">
+                        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-semibold">
+                          {index + 1}
+                        </span>
+                        <div className="min-w-0 space-y-1">
+                          <p className="text-sm font-semibold">{step.title}</p>
+                          <p className="text-xs leading-relaxed text-muted-foreground">{step.description}</p>
+                        </div>
                       </div>
-                    </div>
-                    <CommandCopy command={step.command} />
-                  </li>
-                ))}
-              </ol>
+                      <CommandCopy command={step.command} />
+                    </li>
+                  ))}
+                </ol>
+              </details>
+              <div className="min-w-0 space-y-3 rounded-xl border border-border/70 p-3 sm:p-4" data-worker-connect>
+                <p className="text-sm font-semibold">Connect Worker</p>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  After installation, get a one-time token above. Run the login command, enter the token
+                  at the hidden prompt and check the Worker status. Tokens are never part of copied commands.
+                </p>
+                <p className="text-xs font-medium">Log in and enroll</p>
+                <CommandCopy command={loginCommand(os, serverUrl)} />
+                <p className="text-xs font-medium">Check connection</p>
+                <CommandCopy command="mcp_worker status" />
+              </div>
             </div>
           )}
         </TabsContent>
@@ -158,8 +266,8 @@ export function WorkerInstallGuide({ mcpEndpoint }: { mcpEndpoint: string }) {
   return (
     <div className="min-w-0 space-y-4" data-worker-install-guide>
       <p className="text-xs text-muted-foreground">
-        Follow each step in order and copy only the command you need. The one-time token is
-        entered interactively at login, never embedded in these commands.
+        Copy Quick Install once, or expand Advanced to review each step.
+        Enter the one-time token interactively when enrolling, never in a command.
       </p>
       <OperatingSystemTabs mcpEndpoint={mcpEndpoint} />
       <p className="text-xs text-muted-foreground">

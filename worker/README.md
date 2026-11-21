@@ -20,15 +20,9 @@ cleanup. Migration to Go uses the compatible identity format. Use the approved s
 
 The published [GitHub Release v2.0.0](https://github.com/mathew15064/mcp_worker/releases/tag/v2.0.0) includes signed assets for Linux (amd64, arm64, 386, armv7), macOS (amd64, arm64), and Windows (amd64, arm64), built from `165d41aa0ba0479e3b54cc5f9d6b31bb43a9f26e`. No Node.js, npm, Go, Python, or Docker is needed on the target. Linux/macOS require curl and OpenSSL; Windows requires PowerShell and OpenSSL on PATH.
 
-**Linux:**
+**Linux:** Open **Workers → Install Worker → Linux** on the MCP Server and copy **Quick Install**. Its signed-release script runs from a unique `/tmp/mcp-worker-install.XXXXXX` directory and cleans the temp files; the binary, symlinks and identity stay under your user home. It adds `~/.local/bin` to your current shell PATH and to `~/.bashrc` exactly once. Use the **Advanced** steps to inspect the script before executing it.
 
-```sh
-curl -fsSLo install-linux.sh https://github.com/mathew15064/mcp_worker/releases/download/v2.0.0/install-linux.sh
-# Read the installer before executing.
-sh install-linux.sh
-~/.local/bin/mcp_worker version
-~/.local/bin/mcp_worker --help
-```
+For an existing manual installation with `mcp_worker: command not found`, run `export PATH="$HOME/.local/bin:$PATH"`. A new Bash session reads the persistent line in `~/.bashrc`. Run the complete Quick Install directly in your shell, not via `sh -c`, so the current-session export takes effect.
 
 **macOS:**
 

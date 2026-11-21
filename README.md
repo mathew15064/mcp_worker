@@ -29,23 +29,17 @@ flowchart TD
 
 **Worker is not MCP Server.** The Worker runs on a machine that will execute tasks and initiates an outbound authenticated WebSocket connection to an existing MCP Server. A prebuilt Worker needs no Node.js, npm, Python, Go, or Docker on the target. Installers come from the [official signed GitHub Release](https://github.com/mathew15064/mcp_worker/releases/tag/v2.0.0); Linux/macOS require `curl` and `openssl`, Windows requires PowerShell and OpenSSL in PATH.
 
-**Linux amd64 (Debian/Ubuntu/VPS):**
+**Linux amd64 (Debian/Ubuntu/VPS):** Open **Workers → Install Worker → Linux** and use **Copy Quick Install**. It downloads and runs the official signed-release installer from an isolated directory in `/tmp`, removes temporary files, exports `~/.local/bin` into the current Bash shell and adds the PATH line to `~/.bashrc` once. The **Advanced** section provides separate download, review, install and PATH commands if you prefer to inspect the script first.
 
-```sh
-curl -fsSLo install-linux.sh https://github.com/mathew15064/mcp_worker/releases/download/v2.0.0/install-linux.sh
-# Review the script before running.
-sh install-linux.sh
-~/.local/bin/mcp_worker version
-~/.local/bin/mcp_worker --help
-```
+The installer stores the runtime **persistently** at `~/.local/share/worker_mcp`, the CLI in `~/.local/bin`, and the identity in `~/.worker_mcp`. Only the **download and execution workspace** uses `/tmp`; do not put the identity or live runtime there. The quick command checks `mcp_worker version` automatically. Run it in your existing shell (not as a subprocess with `sh -c`) to retain the current-session PATH change. Use a least-privileged OS account where practical.
 
 Enroll using a **one-time token** created in **My Workers → Install Worker** for your approved account, or **Admin → Workers** for administrator-owned Workers. Personal and Hosted Workers are account-owned and cannot be selected by other users. The CLI prompts for the token without echoing it; do not put tokens in commands, URLs or chats. This enrollment does **not** unlock server-hosted binary distribution (`/worker/install*` remains HTTP 503); use only the reviewed, signed GitHub Release.
 
 ```sh
-~/.local/bin/mcp_worker setup --server https://YOUR_TRUSTED_MCP_SERVER
-~/.local/bin/mcp_worker status
-~/.local/bin/mcp_worker connection test
-~/.local/bin/mcp_worker logs
+mcp_worker setup --server https://YOUR_TRUSTED_MCP_SERVER
+mcp_worker status
+mcp_worker connection test
+mcp_worker logs
 ```
 
 `connection test` checks HTTPS health/readiness only; use `status` and Admin → Workers to verify authenticated WSS. A Worker executes with its OS user's permissions, so prefer a separate least-privileged account instead of root. For upgrades rerun the reviewed installer under the same account without deleting `~/.worker_mcp`.
