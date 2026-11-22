@@ -19,6 +19,7 @@ import settingsRepo from '../repositories/settingsRepository';
 import telegramSecrets from '../services/telegramSecretService';
 import telegramService from '../services/telegramService';
 import runtimeSettings from '../services/runtimeSettingsService';
+import * as turnstile from '../services/turnstileService';
 import databaseManager from '../db/databaseManager';
 import mcpConfig from '../config/mcpConfig';
 import { TOOLS } from '../mcp/toolRegistry';
@@ -148,34 +149,56 @@ router.use('/admin', requireAdmin, (req, res, next) => {
 router.get('/admin/users', requireDataStore, async (req, res, next) => {
   try {
     const users = await userRepository.list();
-    return res.type('html').send(hostedPages.adminUsersPage({
-      users, csrfToken: csrf(req), registrationOpen: runtimeSettings.bool('registration.enabled', true),
-      hostedExecutionEnabled: runtimeSettings.bool('hosted.execution.enabled', false), ...consumeFlash(req),
-    }));
-  } catch (error) { next(error); }
+    return res.type('html').send(
+      hostedPages.adminUsersPage({
+        users,
+        csrfToken: csrf(req),
+        registrationOpen: runtimeSettings.bool('registration.enabled', true),
+        hostedExecutionEnabled: runtimeSettings.bool('hosted.execution.enabled', false),
+        ...consumeFlash(req),
+      }),
+    );
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post('/admin/registration', requireDataStore, async (req, res) => {
   try {
-    await runtimeSettings.set('registration.enabled', formFlag(req.body, 'enabled') ? 'true' : 'false');
+    await runtimeSettings.set(
+      'registration.enabled',
+      formFlag(req.body, 'enabled') ? 'true' : 'false',
+    );
     setFlash(req, 'success', 'Registration policy updated.');
-  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+  } catch (error) {
+    setFlash(req, 'error', routeError(error).message);
+  }
   return res.redirect(303, '/admin/users');
 });
 
 router.post('/admin/personal-enrollment', requireDataStore, async (req, res) => {
   try {
-    await runtimeSettings.set('workers.personal_enrollment.enabled', formFlag(req.body, 'enabled') ? 'true' : 'false');
+    await runtimeSettings.set(
+      'workers.personal_enrollment.enabled',
+      formFlag(req.body, 'enabled') ? 'true' : 'false',
+    );
     setFlash(req, 'success', 'Personal Worker enrollment policy updated.');
-  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+  } catch (error) {
+    setFlash(req, 'error', routeError(error).message);
+  }
   return res.redirect(303, '/admin/users');
 });
 
 router.post('/admin/hosted', requireDataStore, async (req, res) => {
   try {
-    await runtimeSettings.set('hosted.execution.enabled', formFlag(req.body, 'enabled') ? 'true' : 'false');
+    await runtimeSettings.set(
+      'hosted.execution.enabled',
+      formFlag(req.body, 'enabled') ? 'true' : 'false',
+    );
     setFlash(req, 'success', 'Hosted execution policy updated.');
-  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+  } catch (error) {
+    setFlash(req, 'error', routeError(error).message);
+  }
   return res.redirect(303, '/admin/users');
 });
 
@@ -188,7 +211,9 @@ router.post('/admin/users', requireDataStore, async (req, res) => {
       password: formString(req.body, 'password'),
     });
     setFlash(req, 'success', 'Active user created.');
-  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+  } catch (error) {
+    setFlash(req, 'error', routeError(error).message);
+  }
   return res.redirect(303, '/admin/users');
 });
 
@@ -200,7 +225,12 @@ router.post('/admin/users/:id/:action', requireDataStore, async (req, res) => {
       await userService.resetPassword(userId, formString(req.body, 'password'));
       await oauthRepo.revokeAllTokensByOwner(userId);
     } else {
-      const status = ({approve:'active', enable:'active', reject:'rejected', disable:'disabled'} as Record<string,string>)[action];
+      const status = (
+        { approve: 'active', enable: 'active', reject: 'rejected', disable: 'disabled' } as Record<
+          string,
+          string
+        >
+      )[action];
       if (!status) return res.status(404).type('html').send(errorPage(404, 'Unknown user action.'));
       await userService.setStatus(userId, status);
       if (status !== 'active') {
@@ -208,7 +238,9 @@ router.post('/admin/users/:id/:action', requireDataStore, async (req, res) => {
       }
     }
     setFlash(req, 'success', 'User action completed.');
-  } catch (error) { setFlash(req, 'error', routeError(error).message); }
+  } catch (error) {
+    setFlash(req, 'error', routeError(error).message);
+  }
   return res.redirect(303, '/admin/users');
 });
 
@@ -304,7 +336,7 @@ router.get('/admin/settings', (req, res) => res.redirect('/admin/settings/databa
 
 router.get('/admin/settings/:section', async (req, res, next) => {
   try {
-    if (!['database', 'mcp', 'telegram', 'runtime'].includes(req.params.section)) {
+    if (!['database', 'mcp', 'telegram', 'turnstile', 'runtime'].includes(req.params.section)) {
       return res.status(404).type('html').send(errorPage(404, 'Unknown settings section.'));
     }
     const storage = databaseManager.status();
@@ -322,6 +354,7 @@ router.get('/admin/settings/:section', async (req, res, next) => {
           rateLimitPerMinute: mcpConfig.rateLimitPerMinute,
         },
         telegram: await telegramConfig(),
+        turnstile: turnstile.monitoring(),
         runtime: {
           version: packageJson.version,
           gitSha: process.env.MCP_WORKER_GIT_SHA || null,
@@ -376,6 +409,43 @@ router.post('/admin/settings/mcp', requireDataStore, async (req, res) => {
     setFlash(req, 'error', routeError(error).message);
   }
   return res.redirect('/admin/settings/mcp');
+});
+
+router.post('/admin/settings/turnstile', requireDataStore, async (req, res) => {
+  try {
+    await turnstile.saveConfiguration({
+      siteKey: formString(req.body, 'site_key'),
+      secret: formString(req.body, 'secret_key'),
+      enabled: formFlag(req.body, 'enabled'),
+    });
+    setFlash(req, 'success', 'Cloudflare Turnstile settings saved.');
+  } catch (error) {
+    setFlash(req, 'error', routeError(error).message);
+  }
+  return res.redirect(303, '/admin/settings/turnstile');
+});
+
+router.post('/admin/settings/turnstile/test', requireDataStore, async (req, res) => {
+  try {
+    const key = formString(req.body, 'site_key').trim();
+    const secret = formString(req.body, 'secret_key');
+    if (!key || key.length > 128 || (secret && secret.length > 512))
+      throw new Error('Invalid Turnstile keys.');
+    const passed = await turnstile.validateToken(
+      formString(req.body, 'cf-turnstile-response'),
+      'config-test',
+      { siteKey: key, secret },
+    );
+    if (passed) await turnstile.markConfigurationVerified(key, secret);
+    setFlash(
+      req,
+      passed ? 'success' : 'error',
+      passed ? 'Turnstile validation succeeded.' : 'Turnstile challenge validation failed.',
+    );
+  } catch (error) {
+    setFlash(req, 'error', routeError(error).message);
+  }
+  return res.redirect(303, '/admin/settings/turnstile');
 });
 
 router.post('/admin/settings/telegram', requireDataStore, async (req, res) => {

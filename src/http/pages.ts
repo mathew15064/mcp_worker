@@ -169,6 +169,7 @@ function settingsSubnav(activeSection: string = '') {
     ['database', 'Database', 'database'],
     ['mcp', 'MCP', 'server'],
     ['telegram', 'Telegram', 'send'],
+    ['turnstile', 'Turnstile', 'settings'],
     ['runtime', 'Runtime', 'settings'],
   ];
   return `<nav class="nav-submenu" aria-label="Settings navigation">${items.map(([key, label, iconName]) => `<a class="nav-sub-link ${activeSection === key ? 'active' : ''}" href="/admin/settings/${key}" ${activeSection === key ? 'aria-current="page"' : ''}>${icon(iconName)}<span>${label}</span></a>`).join('')}</nav>`;
@@ -220,10 +221,17 @@ function loginPage({
   error = '',
   username = '',
   returnTo = '',
-}: { csrfToken?: string; error?: string; username?: string; returnTo?: string } = {}) {
+  turnstile = { enabled: false, siteKey: '' },
+}: {
+  csrfToken?: string;
+  error?: string;
+  username?: string;
+  returnTo?: string;
+  turnstile?: { enabled: boolean; siteKey: string };
+} = {}) {
   return shell(
     'mcp_worker Login',
-    `<div class="login-shell"><div class="login-card"><div class="login-brand"><div class="brand-mark">MW</div><div><strong>mcp_worker</strong><div class="hint">Secure MCP Access</div></div></div><h1>Welcome back</h1><p>Sign in with your mcp_worker account.</p>${error ? `<div class="alert alert-error" role="alert">${escapeHtml(error)}</div>` : ''}<form method="post" action="/login" class="stack" data-disable-on-submit><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><input type="hidden" name="returnTo" value="${escapeHtml(returnTo)}"><div class="field"><label for="login-username">Username</label><input id="login-username" name="username" autocomplete="username" value="${escapeHtml(username)}" required autofocus></div><div class="field"><label for="login-password">Password</label><input id="login-password" type="password" name="password" autocomplete="current-password" required></div><button class="btn btn-primary" type="submit">Sign in</button></form><p class="hint"><a href="/register">Request an account</a></p></div></div>`,
+    `<div class="login-shell"><div class="login-card"><div class="login-brand"><div class="brand-mark">MW</div><div><strong>mcp_worker</strong><div class="hint">Secure MCP Access</div></div></div><h1>Welcome back</h1><p>Sign in with your mcp_worker account.</p>${error ? `<div class="alert alert-error" role="alert">${escapeHtml(error)}</div>` : ''}<form method="post" action="/login" class="stack" data-disable-on-submit><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><input type="hidden" name="returnTo" value="${escapeHtml(returnTo)}"><div class="field"><label for="login-username">Username</label><input id="login-username" name="username" autocomplete="username" value="${escapeHtml(username)}" required autofocus></div><div class="field"><label for="login-password">Password</label><input id="login-password" type="password" name="password" autocomplete="current-password" required></div>${turnstile.enabled ? `<div class="cf-turnstile" data-sitekey="${escapeHtml(turnstile.siteKey)}" data-action="login"></div><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>` : ''}<button class="btn btn-primary" type="submit">Sign in</button></form><p class="hint"><a href="/register">Request an account</a></p></div></div>`,
   );
 }
 
@@ -955,6 +963,7 @@ function settingsPage({
   storage,
   mcp,
   telegram,
+  turnstile,
   runtime,
   csrfToken,
   success = '',
@@ -964,21 +973,39 @@ function settingsPage({
   storage: PageStorage;
   mcp: PageMcp;
   telegram: PageTelegram;
+  turnstile: {
+    enabled: boolean;
+    active: boolean;
+    siteKey: string;
+    hasSecret: boolean;
+    passed: number;
+    failed: number;
+    lastCheckedAt: string;
+    lastResult: string;
+    lastError: string;
+  };
   runtime: PageRuntime;
   csrfToken: string;
   success?: string;
   error?: string;
 }) {
-  const sections = ['database', 'mcp', 'telegram', 'runtime'];
+  const sections = ['database', 'mcp', 'telegram', 'turnstile', 'runtime'];
   const active = sections.includes(activeSection) ? activeSection : 'database';
   const stateClass = storage.state === 'READY' ? 'badge-ok' : 'badge-danger';
   const operational = Boolean(storage.operational);
   const disabled = operational ? '' : ' disabled';
-  const labels = { database: 'Database', mcp: 'MCP', telegram: 'Telegram', runtime: 'Runtime' };
+  const labels = {
+    database: 'Database',
+    mcp: 'MCP',
+    telegram: 'Telegram',
+    turnstile: 'Cloudflare Turnstile',
+    runtime: 'Runtime',
+  };
   const subtitles = {
     database: 'Inspect the SQLite database state.',
     mcp: 'Configure OAuth and MCP runtime behavior.',
     telegram: 'Configure the optional Telegram support channel.',
+    turnstile: 'Protect Login and Registration and monitor verification results.',
     runtime: 'Inspect read-only bootstrap and runtime information.',
   };
   const dbDescription = operational
@@ -1008,14 +1035,17 @@ function settingsPage({
   const telegramActions = `<button class="btn btn-primary" type="button" data-modal-open="${telegramModalId}"${disabled}>${icon('pencil')} Edit Configuration</button>`;
   const telegramSection = `${telegramSummary({ title: 'Admin Telegram', subtitle: 'Optional support notification channel for the mcp_worker administrator.', config: telegram, csrfToken, editModalId: telegramModalId, testAction: '/admin/settings/telegram/test', secondaryTitle: 'Isolation', secondarySubtitle: 'Admin and user Telegram credentials stay in separate namespaces.', secondaryRows: telegramRows, editDisabled: disabled })}${telegramModal}`;
 
+  const turnstileSection = `<section class="section settings-detail"><div class="section-header"><div><h2 class="section-title">Cloudflare Turnstile</h2><p class="section-subtitle">Anti-bot protection on Login and Registration only.</p></div><span class="badge ${turnstile.active ? 'badge-ok' : 'badge-off'}">${turnstile.active ? 'Enabled' : 'Disabled'}</span></div><div class="section-body"><form method="post" action="/admin/settings/turnstile" class="stack" data-disable-on-submit><input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}"><fieldset class="settings-fieldset"${disabled}><div class="field"><label for="turnstile-site-key">Site Key *</label><input id="turnstile-site-key" name="site_key" value="${escapeHtml(turnstile.siteKey)}" maxlength="128" autocomplete="off" placeholder="0x4AAAA..."><div class="hint">Public key sent to the browser to display the CAPTCHA.</div></div><div class="field"><label for="turnstile-secret-key">Secret Key</label><input id="turnstile-secret-key" type="password" name="secret_key" autocomplete="new-password" maxlength="512" placeholder="${turnstile.hasSecret ? 'Configured — leave blank to keep current key' : 'Enter secret key'}"><div class="hint">Stored encrypted on server. Never returned to the browser.</div></div><label class="switch-row"><span><strong>Enable Turnstile</strong><span class="hint">Apply to login and registration; OAuth/MCP/Worker APIs are unchanged.</span></span><input type="checkbox" name="enabled" value="true" ${turnstile.enabled ? 'checked' : ''}><span class="switch-control" aria-hidden="true"></span></label>${turnstile.siteKey ? `<div class="cf-turnstile" data-sitekey="${escapeHtml(turnstile.siteKey)}" data-action="config-test"></div><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>` : ''}<div class="settings-actions"><a class="btn" href="/admin">Close</a><button class="btn" type="submit" formaction="/admin/settings/turnstile/test">Test configuration</button><button class="btn btn-primary" type="submit">Save</button></div></fieldset></form></div></section><section class="section settings-detail"><div class="section-header"><div><h2 class="section-title">Turnstile Monitoring</h2><p class="section-subtitle">Aggregate verification results; challenge tokens are never stored.</p></div></div><div class="section-body"><div class="definition-grid"><div class="definition"><div class="definition-label">Successful</div><div class="definition-value">${turnstile.passed}</div></div><div class="definition"><div class="definition-label">Failed</div><div class="definition-value">${turnstile.failed}</div></div><div class="definition"><div class="definition-label">Last check</div><div class="definition-value">${escapeHtml(turnstile.lastCheckedAt || 'Not yet tested')}</div></div><div class="definition"><div class="definition-label">Last result</div><div class="definition-value">${escapeHtml(turnstile.lastResult || '—')}</div></div></div><p class="hint">Last error: ${escapeHtml(turnstile.lastError || 'None')}</p></div></section>`;
+
   const runtimeSection = `<section class="section settings-detail"><div class="section-header"><div><h2 class="section-title">Runtime</h2><p class="section-subtitle">Read-only bootstrap values that remain outside application settings.</p></div></div><div class="section-body"><div class="definition-grid"><div class="definition"><div class="definition-label">Version</div><div class="definition-value">v${escapeHtml(runtime.version)}</div></div><div class="definition"><div class="definition-label">Git SHA</div><div class="definition-value mono">${escapeHtml(runtime.gitSha || 'unknown')}</div></div><div class="definition"><div class="definition-label">Environment</div><div class="definition-value">${escapeHtml(runtime.nodeEnv)}</div></div><div class="definition"><div class="definition-label">MCP tools</div><div class="definition-value">${escapeHtml(runtime.toolCount)}</div></div></div><div class="migration-note"><strong>Bootstrap-only ENV</strong><span>ADMIN_USERNAME, ADMIN_PASSWORD, SESSION_SECRET, APP_ENCRYPTION_KEY (or legacy TERMINAL_CREDENTIAL_KEY), HOST/PORT, TRUST_PROXY and COOKIE_SECURE remain environment-level security/runtime configuration.</span></div></div></section>`;
 
   const content = {
     database: databaseSection,
     mcp: mcpSection,
     telegram: telegramSection,
+    turnstile: turnstileSection,
     runtime: runtimeSection,
-  }[active as 'database' | 'mcp' | 'telegram' | 'runtime'];
+  }[active as 'database' | 'mcp' | 'telegram' | 'turnstile' | 'runtime'];
   const pageAction =
     active === 'database'
       ? `<span class="badge ${stateClass}">${escapeHtml(storage.state)}</span>`

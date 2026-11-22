@@ -23,6 +23,15 @@ const DEFAULTS = Object.freeze({
   'telegram.enabled': 'false',
   'telegram.chat_id': '',
   'telegram.bot_token': '',
+  'turnstile.enabled': 'false',
+  'turnstile.site_key': '',
+  'turnstile.secret_key': '',
+  'turnstile.verified_fingerprint': '',
+  'turnstile.passed': '0',
+  'turnstile.failed': '0',
+  'turnstile.last_checked_at': '',
+  'turnstile.last_result': '',
+  'turnstile.last_error': '',
 });
 
 class RuntimeSettingsService {

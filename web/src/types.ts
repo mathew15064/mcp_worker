@@ -69,6 +69,17 @@ export interface Audit {
   http_status?: number;
   duration_ms?: number;
 }
+export interface TurnstileSettings {
+  enabled: boolean;
+  active: boolean;
+  siteKey: string;
+  hasSecret: boolean;
+  passed: number;
+  failed: number;
+  lastCheckedAt: string;
+  lastResult: string;
+  lastError: string;
+}
 export interface TelegramSettings {
   enabled: boolean;
   chatId: string;
@@ -117,6 +128,7 @@ export interface PageData {
   tools?: { name: string; description: string }[];
   mcp?: McpSettings;
   telegram?: TelegramSettings;
+  turnstile?: TurnstileSettings;
   registrationEnabled?: boolean;
   hostedExecutionEnabled?: boolean;
   personalEnrollmentEnabled?: boolean;
@@ -136,6 +148,7 @@ export interface UiState {
   identity: Identity | null;
   endpoint: string;
   registrationEnabled: boolean;
+  turnstile: { enabled: boolean; siteKey: string };
   runtime: Runtime;
   storage: Storage;
   data: PageData;

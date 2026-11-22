@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   ArrowRight,
@@ -7,6 +7,8 @@ import {
   CircleCheck,
   CircleHelp,
   Database,
+  Eye,
+  EyeOff,
   KeyRound,
   Plus,
   Server,
@@ -44,7 +46,16 @@ import {
   StatusBadge,
 } from '@/components/common';
 import { TelegramPanel } from '@/pages/telegram';
-import type { User } from '@/types';
+import { TurnstileWidget } from '@/components/turnstile-widget';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import type { User, TurnstileSettings as TurnstileConfig } from '@/types';
 
 export function AdminOverview() {
   const { state } = useApp();
@@ -174,7 +185,9 @@ export function AdminUsers() {
   const [filter, setFilter] = useState('');
   const [registration, setRegistration] = useState(state?.data.registrationEnabled || false);
   const [execution, setExecution] = useState(state?.data.hostedExecutionEnabled || false);
-  const [personalEnrollment, setPersonalEnrollment] = useState(state?.data.personalEnrollmentEnabled ?? true);
+  const [personalEnrollment, setPersonalEnrollment] = useState(
+    state?.data.personalEnrollmentEnabled ?? true,
+  );
   const visible = users.filter((u) =>
     [u.username, u.display_name, u.email, u.status]
       .join(' ')
@@ -251,7 +264,9 @@ export function AdminUsers() {
             className="mt-5"
             size="sm"
             disabled={busy}
-            onClick={() => void submit('/admin/personal-enrollment', { enabled: personalEnrollment })}
+            onClick={() =>
+              void submit('/admin/personal-enrollment', { enabled: personalEnrollment })
+            }
           >
             Save personal enrollment policy
           </Button>
@@ -321,20 +336,25 @@ export function AdminUsers() {
                         resource={user.username}
                         actions={[
                           ...(user.status !== 'active'
-                            ? [{
-                                kind: 'confirm' as const,
-                                label: 'Approve',
-                                icon: UserCheck,
-                                action: '/admin/users/' + encodeURIComponent(user.id) + '/approve',
-                                description: 'Allow this account to sign in and connect OAuth clients.',
-                              }]
+                            ? [
+                                {
+                                  kind: 'confirm' as const,
+                                  label: 'Approve',
+                                  icon: UserCheck,
+                                  action:
+                                    '/admin/users/' + encodeURIComponent(user.id) + '/approve',
+                                  description:
+                                    'Allow this account to sign in and connect OAuth clients.',
+                                },
+                              ]
                             : []),
                           {
                             kind: 'form',
                             label: 'Reset password',
                             icon: KeyRound,
                             title: 'Reset password · ' + user.username,
-                            action: '/admin/users/' + encodeURIComponent(user.id) + '/reset-password',
+                            action:
+                              '/admin/users/' + encodeURIComponent(user.id) + '/reset-password',
                             submitLabel: 'Reset password',
                             children: (
                               <>
@@ -357,18 +377,24 @@ export function AdminUsers() {
                             label: user.status === 'disabled' ? 'Enable' : 'Disable',
                             icon: user.status === 'disabled' ? CircleCheck : Ban,
                             destructive: user.status !== 'disabled',
-                            action: '/admin/users/' + encodeURIComponent(user.id) + '/' +
+                            action:
+                              '/admin/users/' +
+                              encodeURIComponent(user.id) +
+                              '/' +
                               (user.status === 'disabled' ? 'enable' : 'disable'),
-                            description: 'Disabling a user revokes sessions, OAuth tokens and disconnects their Worker.',
+                            description:
+                              'Disabling a user revokes sessions, OAuth tokens and disconnects their Worker.',
                           },
                           ...(user.status === 'pending'
-                            ? [{
-                                kind: 'confirm' as const,
-                                label: 'Reject',
-                                icon: UserX,
-                                destructive: true,
-                                action: '/admin/users/' + encodeURIComponent(user.id) + '/reject',
-                              }]
+                            ? [
+                                {
+                                  kind: 'confirm' as const,
+                                  label: 'Reject',
+                                  icon: UserX,
+                                  destructive: true,
+                                  action: '/admin/users/' + encodeURIComponent(user.id) + '/reject',
+                                },
+                              ]
                             : []),
                         ]}
                       />
@@ -510,6 +536,7 @@ export function AdminSettings() {
     { id: 'database', name: 'Database' },
     { id: 'mcp', name: 'MCP' },
     { id: 'telegram', name: 'Telegram' },
+    { id: 'turnstile', name: 'Turnstile' },
     { id: 'runtime', name: 'Runtime' },
   ];
   return (
@@ -623,6 +650,7 @@ export function AdminSettings() {
         </Section>
       )}
       {section === 'telegram' && <TelegramPanel config={state?.data.telegram} />}
+      {section === 'turnstile' && <TurnstileSettings config={state?.data.turnstile} />}
       {section === 'runtime' && (
         <Section title="Runtime details" description="Version and build provenance.">
           <DetailRow name="Application">mcp_worker</DetailRow>
@@ -641,6 +669,207 @@ export function AdminSettings() {
       {!tabs.some((tab) => tab.id === section) && (
         <EmptyState title="Unknown settings section" detail="Select a valid section above." />
       )}
+    </div>
+  );
+}
+
+function TurnstileSettings({ config }: { config?: TurnstileConfig }) {
+  const { submit, busy } = useApp();
+  const [open, setOpen] = useState(false);
+  const [siteKey, setSiteKey] = useState(config?.siteKey || '');
+  const [secret, setSecret] = useState('');
+  const [showSecret, setShowSecret] = useState(false);
+  const [enabled, setEnabled] = useState(config?.enabled || false);
+  const [challengeToken, setChallengeToken] = useState('');
+  const [challengeAttempt, setChallengeAttempt] = useState(0);
+  const form = useRef<HTMLFormElement>(null);
+
+  async function send(action: 'save' | 'test') {
+    if (!form.current) return;
+    const data = new FormData(form.current);
+    data.set('enabled', enabled ? 'true' : 'false');
+    if (action === 'test') data.set('cf-turnstile-response', challengeToken);
+    try {
+      await submit(
+        action === 'test' ? '/admin/settings/turnstile/test' : '/admin/settings/turnstile',
+        data,
+      );
+      if (action === 'save') {
+        setSecret('');
+        setShowSecret(false);
+        setOpen(false);
+      }
+    } finally {
+      setChallengeToken('');
+      setChallengeAttempt((value) => value + 1);
+    }
+  }
+  const testable = /^[A-Za-z0-9_-]{12,128}$/.test(siteKey);
+  return (
+    <div className="space-y-5">
+      <Section
+        title="Cloudflare Turnstile"
+        description="CAPTCHA protection for login and registration. OAuth, MCP and Worker connections remain unchanged."
+        action={
+          <Button variant="outline" onClick={() => setOpen(true)}>
+            Cấu hình Turnstile
+          </Button>
+        }
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <DetailRow name="Status">
+            <StatusBadge status={config?.active ? 'enabled' : 'disabled'} />
+          </DetailRow>
+          <DetailRow name="Secret Key">
+            {config?.hasSecret ? 'Đã cấu hình' : 'Chưa cấu hình'}
+          </DetailRow>
+          <DetailRow name="Site Key">
+            <span className="break-all font-mono text-xs">
+              {config?.siteKey || 'Chưa cấu hình'}
+            </span>
+          </DetailRow>
+        </div>
+      </Section>
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          if (!busy) setOpen(next);
+        }}
+      >
+        <DialogContent
+          className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-3xl"
+          onInteractOutside={(event) => event.preventDefault()}
+          onEscapeKeyDown={(event) => event.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle>Cấu hình Cloudflare Turnstile</DialogTitle>
+            <DialogDescription>
+              Nhập Site Key và Secret Key từ Cloudflare. Để trống Secret Key nếu muốn giữ nguyên
+              khóa.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            ref={form}
+            className="space-y-5"
+            onSubmit={(event: FormEvent) => {
+              event.preventDefault();
+              void send('save');
+            }}
+          >
+            <div className="space-y-2">
+              <label htmlFor="turnstile-site-key" className="text-sm font-medium">
+                Site Key *
+              </label>
+              <Input
+                id="turnstile-site-key"
+                name="site_key"
+                autoComplete="off"
+                maxLength={128}
+                value={siteKey}
+                onChange={(event) => {
+                  setSiteKey(event.target.value.trim());
+                  setChallengeToken('');
+                }}
+                placeholder="0x4AAAAAA..."
+              />
+              <p className="text-xs text-muted-foreground">
+                Public key được gửi đến trình duyệt để hiển thị CAPTCHA.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="turnstile-secret-key" className="text-sm font-medium">
+                Secret Key
+              </label>
+              <div className="relative">
+                <Input
+                  id="turnstile-secret-key"
+                  name="secret_key"
+                  type={showSecret ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  maxLength={512}
+                  value={secret}
+                  onChange={(event) => setSecret(event.target.value)}
+                  placeholder={
+                    config?.hasSecret ? 'Đã cấu hình — bỏ trống để giữ nguyên' : 'Nhập Secret Key'
+                  }
+                  className="pr-11"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-1 top-1/2 size-8 -translate-y-1/2"
+                  aria-label={showSecret ? 'Ẩn Secret Key' : 'Hiện Secret Key'}
+                  onClick={() => setShowSecret((value) => !value)}
+                >
+                  {showSecret ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Secret Key được mã hóa trên server và không bao giờ trả về trình duyệt.
+              </p>
+            </div>
+            <label className="flex items-center justify-between gap-3 rounded-lg border p-3 text-sm">
+              <span>Bật bảo vệ Turnstile cho Login và Register</span>
+              <Switch checked={enabled} onCheckedChange={setEnabled} />
+            </label>
+            {testable && (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Hoàn thành CAPTCHA để kiểm tra khóa với Cloudflare.
+                </p>
+                <TurnstileWidget
+                  key={siteKey + challengeAttempt}
+                  siteKey={siteKey}
+                  action="config-test"
+                  onToken={setChallengeToken}
+                />
+              </div>
+            )}
+            <DialogFooter>
+              <Button
+                variant="outline"
+                type="button"
+                onClick={() => setOpen(false)}
+                disabled={busy}
+              >
+                Đóng
+              </Button>
+              <Button
+                variant="outline"
+                type="button"
+                disabled={busy || !challengeToken}
+                onClick={() => void send('test')}
+              >
+                Test cấu hình
+              </Button>
+              <Button
+                type="submit"
+                disabled={busy || (enabled && (!siteKey || (!secret && !config?.hasSecret)))}
+              >
+                Lưu
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <Section
+        title="Turnstile Monitoring"
+        description="Aggregate verification results; challenge tokens and secrets are not stored in monitoring data."
+      >
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <MetricCard label="Status" value={config?.active ? 'Enabled' : 'Disabled'} />
+          <MetricCard label="Successful" value={config?.passed || 0} />
+          <MetricCard label="Failed" value={config?.failed || 0} />
+          <MetricCard label="Last result" value={config?.lastResult || '—'} />
+        </div>
+        <DetailRow name="Last check">{config?.lastCheckedAt || 'Not tested'}</DetailRow>
+        <DetailRow name="Last error">{config?.lastError || 'None'}</DetailRow>
+        <SecurityNote>
+          Turnstile reduces automated submissions but does not replace account security or
+          authorization.
+        </SecurityNote>
+      </Section>
     </div>
   );
 }
