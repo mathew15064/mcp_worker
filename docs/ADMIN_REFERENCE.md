@@ -23,7 +23,7 @@ The installer creates `.env.setup` with the project/port and **three generated s
 
 ## Admin application
 
-Use `/admin` for the overall runtime status, `/admin/onboarding` for Getting Started, `/admin/settings/database` for SQLite state, and `/admin/settings/mcp`, `/admin/settings/telegram`, `/admin/settings/runtime` for configuration. OAuth clients, Workers, terminal profiles and request audit are protected by the existing Admin and user-scoped authorization checks.
+Use `/admin` for the overall runtime status, `/admin/onboarding` for Getting Started, `/admin/settings/database` for SQLite state, and `/admin/settings/mcp`, `/admin/settings/telegram`, `/admin/settings/turnstile`, `/admin/settings/runtime` for configuration. OAuth clients, Workers, terminal profiles and request audit are protected by the existing Admin and user-scoped authorization checks.
 
 OAuth uses authorization code with PKCE and exact redirect URIs; access/refresh tokens have expiry and revocation. Worker enrollment is short-lived, single-use and ownership-aware. The Go Worker uses outbound WSS signed challenge authentication.
 
@@ -49,3 +49,11 @@ Tests use disposable SQLite databases; any skipped Docker/native Worker/remote i
 `/healthz` reports process liveness and storage state. `/readyz` returns HTTP 200 only when SQLite is operational; it may return 503 while explicit initialization is pending or database validation has failed. A healthy process does not imply that an OAuth client or Worker has authenticated.
 
 For consistent WAL snapshots and independent restore drills see [Backup and restore](BACKUP_RESTORE.md). For local installation see [Quickstart](QUICKSTART.md), and for remote HTTPS endpoints see [Remote MCP](REMOTE_MCP.md). A new Docker image, deployment, migration of real data or modification to existing Worker trust roots requires separate owner approval.
+
+## Cloudflare Turnstile
+
+Admin → Settings → Turnstile accepts a public Site Key and AES-256-GCM encrypted Secret Key. The secret is never read back into the browser; leaving its field blank keeps the current encrypted credential. CAPTCHA is off by default and can be enabled **only after** the real Test configuration challenge passes for that exact Site/Secret pair; a keyed SHA-256 fingerprint prevents accidental activation with changed or unverified keys. Test configuration is a **real widget challenge** verified by Cloudflare Siteverify, not a check that a key is syntactically plausible. Monitoring stores only bounded aggregate pass/fail counters, timestamp and sanitized error identifiers, not captcha response tokens.
+
+When enabled, both the React and legacy HTML Login and Registration flows must submit a freshly generated single-use Turnstile token. The backend validates Siteverify success, hostname (except Cloudflare's official test keys, which are prohibited in production), and action. Missing, expired, duplicate, and unavailable checks fail closed. Existing login and registration rate limits and CSRF checks remain effective. OAuth authorization/token endpoints, MCP, and Go Worker WSS are unchanged. Turnstile reduces bot form submissions but does not protect an already stolen Admin session or replace MFA.
+
+For local tests, use Cloudflare's official dummy site/secret keys. Never place a production Secret Key into a test fixture or Git repository. Rotating an application encryption key without migrating stored credentials makes them unreadable.

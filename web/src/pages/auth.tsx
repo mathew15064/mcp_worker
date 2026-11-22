@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card';
 import { FormInput, CopyValue } from '@/components/common';
+import { TurnstileWidget } from '@/components/turnstile-widget';
 
 function AuthLayout({
   title,
@@ -50,6 +51,8 @@ export function LoginPage() {
   const { state } = useApp();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [turnstileToken, setTurnstileToken] = useState('');
+  const [turnstileAttempt, setTurnstileAttempt] = useState(0);
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!state) return;
@@ -63,12 +66,15 @@ export function LoginPage() {
           username: String(form.get('username') || ''),
           password: String(form.get('password') || ''),
           returnTo: params.get('returnTo') || '',
+          'cf-turnstile-response': turnstileToken,
         },
         state.csrfToken,
       );
       navigate(target, { replace: true });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Sign in failed.');
+      setTurnstileToken('');
+      setTurnstileAttempt((value) => value + 1);
     } finally {
       setBusy(false);
     }
@@ -110,7 +116,19 @@ export function LoginPage() {
           autoComplete="current-password"
           required
         />
-        <Button disabled={busy} className="w-full" type="submit">
+        {state?.turnstile?.enabled && (
+          <TurnstileWidget
+            key={turnstileAttempt}
+            siteKey={state.turnstile.siteKey}
+            action="login"
+            onToken={setTurnstileToken}
+          />
+        )}
+        <Button
+          disabled={busy || (Boolean(state?.turnstile?.enabled) && !turnstileToken)}
+          className="w-full"
+          type="submit"
+        >
           <LockKeyhole className="size-4" />
           {busy ? 'Signing in…' : 'Sign in'}
           <ArrowRight className="ms-auto size-4" />
@@ -131,6 +149,8 @@ export function RegisterPage() {
   const { state } = useApp();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [turnstileToken, setTurnstileToken] = useState('');
+  const [turnstileAttempt, setTurnstileAttempt] = useState(0);
   async function register(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!state) return;
@@ -145,12 +165,15 @@ export function RegisterPage() {
           email: String(values.email || ''),
           display_name: String(values.display_name || ''),
           password: String(values.password || ''),
+          'cf-turnstile-response': turnstileToken,
         },
         state.csrfToken,
       );
       navigate(target);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Registration failed.');
+      setTurnstileToken('');
+      setTurnstileAttempt((value) => value + 1);
     } finally {
       setBusy(false);
     }
@@ -194,7 +217,19 @@ export function RegisterPage() {
             maxLength={256}
             required
           />
-          <Button disabled={busy} className="w-full" type="submit">
+          {state?.turnstile?.enabled && (
+            <TurnstileWidget
+              key={turnstileAttempt}
+              siteKey={state.turnstile.siteKey}
+              action="register"
+              onToken={setTurnstileToken}
+            />
+          )}
+          <Button
+            disabled={busy || (Boolean(state?.turnstile?.enabled) && !turnstileToken)}
+            className="w-full"
+            type="submit"
+          >
             {busy ? 'Submitting…' : 'Request access'}
             <ArrowRight className="ms-auto size-4" />
           </Button>

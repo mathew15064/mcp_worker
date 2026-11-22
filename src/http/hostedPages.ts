@@ -23,11 +23,13 @@ function registrationPage({
   open,
   error = '',
   success = '',
+  turnstile = { enabled: false, siteKey: '' },
 }: {
   csrfToken: string;
   open: boolean;
   error?: string;
   success?: string;
+  turnstile?: { enabled: boolean; siteKey: string };
 }) {
   const fields = open
     ? `<form method="post" action="/register" class="stack" data-disable-on-submit>
@@ -36,7 +38,7 @@ function registrationPage({
         <div class="field"><label for="reg-email">Email</label><input id="reg-email" type="email" name="email" autocomplete="email" maxlength="254" required></div>
         <div class="field"><label for="reg-name">Display name</label><input id="reg-name" name="display_name" maxlength="120" required></div>
         <div class="field"><label for="reg-password">Password (10+ characters)</label><input id="reg-password" name="password" type="password" autocomplete="new-password" minlength="10" maxlength="256" required></div>
-        <button class="btn btn-primary" type="submit">Request access</button>
+        ${turnstile.enabled ? `<div class="cf-turnstile" data-sitekey="${esc(turnstile.siteKey)}" data-action="register"></div><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>` : ''}<button class="btn btn-primary" type="submit">Request access</button>
       </form>`
     : '<div class="alert">Registration is currently closed by the administrator.</div>';
   return pages.shell(

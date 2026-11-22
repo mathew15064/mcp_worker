@@ -8,6 +8,7 @@ import oauthRoutes from './mcpOAuthRoutes';
 import workerRepo from '../repositories/workerRepository';
 import workerBroker from '../services/workerConnectionBroker';
 import runtimeSettings from '../services/runtimeSettingsService';
+import * as turnstile from '../services/turnstileService';
 import userTelegramSettings from '../services/userTelegramSettingsService';
 import mcpConfig from '../config/mcpConfig';
 import { workerSignedReleaseReadiness } from '../services/workerReleaseGate';
@@ -151,6 +152,7 @@ router.get('/state', async (req, res, next) => {
           }
         : null,
       registrationEnabled: runtimeSettings.bool('registration.enabled', true),
+      turnstile: turnstile.publicChallenge(),
       endpoint: mcpConfig.resourceUrl,
       storage: databaseManager.status(),
       runtime: runtimeView(),
@@ -205,7 +207,10 @@ router.get('/state', async (req, res, next) => {
         data.users = await userRepository.list();
         data.registrationEnabled = runtimeSettings.bool('registration.enabled', true);
         data.hostedExecutionEnabled = runtimeSettings.bool('hosted.execution.enabled', false);
-        data.personalEnrollmentEnabled = runtimeSettings.bool('workers.personal_enrollment.enabled', true);
+        data.personalEnrollmentEnabled = runtimeSettings.bool(
+          'workers.personal_enrollment.enabled',
+          true,
+        );
       }
       if (pathname === '/admin/clients') {
         data.clients = (await oauthRepo.listClients())
@@ -250,6 +255,7 @@ router.get('/state', async (req, res, next) => {
       if (pathname.startsWith('/admin/settings') || pathname === '/admin/telegram') {
         data.telegram = telegramView();
         data.mcp = mcpView();
+        data.turnstile = turnstile.monitoring();
       }
     }
 
@@ -259,8 +265,13 @@ router.get('/state', async (req, res, next) => {
         data.clientCount = (await oauthRepo.listClientsByOwner(ownerId)).length;
       if (pathname === '/account/tools') {
         const profiles = await workerRepo.listProfilesByOwner(ownerId);
-        data.hasWorker = profiles.some((p) => p !== null && p.enabled &&
-          (p.execution_mode === 'personal' || (runtimeSettings.bool('hosted.execution.enabled', false) && p.hosted_isolated)));
+        data.hasWorker = profiles.some(
+          (p) =>
+            p !== null &&
+            p.enabled &&
+            (p.execution_mode === 'personal' ||
+              (runtimeSettings.bool('hosted.execution.enabled', false) && p.hosted_isolated)),
+        );
         data.tools = TOOLS.map((t) => ({ name: t.name, description: t.description }));
       }
       if (pathname === '/account/activity')
@@ -274,7 +285,10 @@ router.get('/state', async (req, res, next) => {
       if (pathname === '/account/workers') {
         data.workers = await withPresence(await workerRepo.listWorkersByOwner(ownerId));
         data.release = workerSignedReleaseReadiness();
-        data.personalEnrollmentEnabled = runtimeSettings.bool('workers.personal_enrollment.enabled', true);
+        data.personalEnrollmentEnabled = runtimeSettings.bool(
+          'workers.personal_enrollment.enabled',
+          true,
+        );
         result.enrollment = oneTimeValue(req, 'workerEnrollment');
       }
       if (pathname === '/account/telegram') data.telegram = await userTelegramSettings.get(ownerId);
