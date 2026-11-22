@@ -179,11 +179,17 @@ func parseArgs(args []string) (string, cliOptions, error) {
 		return "help", cliOptions{}, nil
 	}
 	command := args[0]
+	if (command == "config" || command == "connection") && len(args) > 1 && !strings.HasPrefix(args[1], "--") {
+		if len(args) != 2 {
+			return "", nil, fail("CLI_ARGUMENT_INVALID", "Unexpected arguments after subcommand.")
+		}
+		return command, cliOptions{"subcommand": args[1]}, nil
+	}
 	if strings.HasPrefix(command, "-") {
-		return "", nil, fail("CLI_COMMAND_UNKNOWN", fmt.Sprintf("Unknown command '%s'. Run worker_mcp help.", command))
+		return "", nil, fail("CLI_COMMAND_UNKNOWN", fmt.Sprintf("Unknown command '%s'. Run mcp_worker help.", command))
 	}
 	options := cliOptions{}
-	flags := map[string]bool{"allow-shell": true, "no-start": true, "insecure-http": true}
+	flags := map[string]bool{"allow-shell": true, "no-start": true, "insecure-http": true, "confirm": true}
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
 		if !strings.HasPrefix(arg, "--") {
@@ -205,11 +211,13 @@ func parseArgs(args []string) (string, cliOptions, error) {
 
 func validateServerURL(value string, allowInsecure bool) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(value))
-	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+	if err != nil || u.Host == "" || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return "", fail("WORKER_SERVER_URL_INVALID", "Server URL must be a valid HTTP(S) URL.")
 	}
-	if u.Scheme != "https" && !allowInsecure {
-		return "", fail("WORKER_TLS_REQUIRED", "HTTPS is required. Use --insecure-http only for trusted local development.")
+	if u.Scheme != "https" {
+		if !allowInsecure || !(u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1") {
+			return "", fail("WORKER_TLS_REQUIRED", "HTTPS is required for remote servers; insecure HTTP is restricted to local loopback development.")
+		}
 	}
 	u.Path, u.RawQuery, u.Fragment = "", "", ""
 	return strings.TrimRight(u.String(), "/"), nil
@@ -685,22 +693,81 @@ func printStatus() error {
 	return nil
 }
 
+func showConfig() error {
+	var cfg Config
+	ok, err := readJSON(configPath(), &cfg)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		fmt.Println("configuration: NOT_CONFIGURED")
+		return nil
+	}
+	// Explicit allowlist: never print the enrollment token, signing key, private key, or state.json.
+	fmt.Println("server:", cfg.ServerURL)
+	fmt.Println("worker_name:", cfg.WorkerName)
+	fmt.Println("profile:", cfg.ProfileName)
+	fmt.Println("roots:", strings.Join(cfg.AllowedRoots, ","))
+	fmt.Println("shell:", cfg.AllowShell)
+	fmt.Println("insecure_http:", cfg.AllowInsecureHTTP)
+	fmt.Println("updated_at:", cfg.UpdatedAt)
+	return nil
+}
+
+func testConnection() error {
+	var cfg Config
+	ok, err := readJSON(configPath(), &cfg)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fail("WORKER_NOT_CONFIGURED", "Run mcp_worker setup first.")
+	}
+	serverURL, err := validateServerURL(cfg.ServerURL, cfg.AllowInsecureHTTP)
+	if err != nil {
+		return err
+	}
+	client := &http.Client{
+		Timeout: 8 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return fail("WORKER_CONNECTION_REDIRECT", "Health probe redirects are not followed.")
+		},
+	}
+	for _, endpoint := range []string{"/healthz", "/readyz"} {
+		req, err := http.NewRequest(http.MethodGet, serverURL+endpoint, nil)
+		if err != nil {
+			return err
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return fail("WORKER_CONNECTION_FAILED", fmt.Sprintf("%s: %v", endpoint, err))
+		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return fail("WORKER_CONNECTION_FAILED", fmt.Sprintf("%s: HTTP %d", endpoint, resp.StatusCode))
+		}
+		fmt.Printf("%s: reachable (HTTP %d)\n", endpoint, resp.StatusCode)
+	}
+	fmt.Println("server: reachable; Worker WSS authentication and online state NOT verified")
+	return nil
+}
+
 func printHelp() {
 	fmt.Printf(`mcp_worker System Task Daemon %s (standalone Go runtime)
 
 Usage:
-  worker_mcp login [options]
-  worker_mcp start
-  worker_mcp stop
-  worker_mcp restart
-  worker_mcp status
-  worker_mcp logs
-  worker_mcp run
-  worker_mcp uninstall
-  worker_mcp version
+  mcp_worker setup [options]     Enroll with a one-time token
+  mcp_worker login [options]     Compatibility alias for setup
+  mcp_worker re-enroll --confirm [options]   Staged identity replacement (stopped Worker only)
+  mcp_worker config show         Redacted local configuration
+  mcp_worker connection test     Test HTTPS health/readiness (not WSS auth)
+  mcp_worker start|stop|restart|status|logs|run|uninstall
+  mcp_worker update --version X.Y.Z --commit FULL_SHA --manifest-sha256 FULL_SHA256
+  mcp_worker version
 
 Login options:
-  --server <url>       mcp_worker base URL (installer provides a default)
+  --server <url>       mcp_worker base URL (prompted when missing)
   --token <token>      One-time enrollment token; omitted = hidden prompt
   --roots <paths>      Optional restricted roots (default: any path allowed by OS)
   --name <name>        Worker display name; default = hostname
@@ -2326,8 +2393,22 @@ func main() {
 	case "version":
 		fmt.Printf("worker_mcp %s commit=%s runtime=%s %s/%s\n", version, commit, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		return
-	case "login":
+	case "login", "setup":
 		err = login(options)
+	case "re-enroll":
+		err = reEnroll(options)
+	case "config":
+		if options["subcommand"] != "show" {
+			err = fail("CLI_ARGUMENT_INVALID", "Use mcp_worker config show.")
+		} else {
+			err = showConfig()
+		}
+	case "connection":
+		if options["subcommand"] != "test" {
+			err = fail("CLI_ARGUMENT_INVALID", "Use mcp_worker connection test.")
+		} else {
+			err = testConnection()
+		}
 	case "start":
 		if serviceManaged() {
 			err = platformStartManagedService()
@@ -2350,6 +2431,8 @@ func main() {
 				_, err = startDetached(true)
 			}
 		}
+	case "update":
+		err = updateSignedRelease(options)
 	case "status":
 		err = printStatus()
 	case "logs":
@@ -2360,7 +2443,7 @@ func main() {
 	case "uninstall":
 		err = uninstallLocal()
 	default:
-		err = fail("CLI_COMMAND_UNKNOWN", fmt.Sprintf("Unknown command '%s'. Run worker_mcp help.", command))
+		err = fail("CLI_COMMAND_UNKNOWN", fmt.Sprintf("Unknown command '%s'. Run mcp_worker help.", command))
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[worker_mcp] %s: %s\n", errorCode(err), err.Error())
