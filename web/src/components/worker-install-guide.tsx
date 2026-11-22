@@ -84,7 +84,7 @@ function quickInstallCommand(os: WorkerOS) {
     '  cd "$worker_tmp" &&',
     "  curl --proto '=https' --proto-redir '=https' -fsSLo " + script + ' ' + download + '/' + script + ' &&',
     '  test -s ' + script + ' &&',
-    '  sh ' + script,
+    os === 'linux' ? '  MCP_WORKER_WORKER_SYSTEMD=1 sh ' + script : '  sh ' + script,
     ') && {',
     ...shellPathCommand(os).split('\n').map((line) => '  ' + line)
       .map((line) => line === '  fi' ? '  fi &&' : line === '  hash -r' ? '  hash -r &&' : line),
@@ -115,10 +115,12 @@ function installSteps(os: WorkerOS, serverUrl: string): CommandStep[] {
     },
     {
       title: 'Install the Worker',
-      description: 'Run the reviewed installer and remove the temporary script afterward.',
+      description: os === 'linux'
+        ? 'Install the verified Linux Worker as a systemd service (requires root or passwordless sudo); clean temporary files afterward.'
+        : 'Run the reviewed installer and remove the temporary script afterward.',
       command: windows
         ? "& (Join-Path $workerTmp '" + script + "')\nRemove-Item -LiteralPath $workerTmp -Recurse -Force"
-        : 'sh "$worker_tmp/' + script + '" && rm -rf -- "$worker_tmp"',
+        : (os === 'linux' ? 'MCP_WORKER_WORKER_SYSTEMD=1 sh ' : 'sh ') + '"$worker_tmp/' + script + '" && rm -rf -- "$worker_tmp"',
     },
     {
       title: 'Make the CLI available',
@@ -137,7 +139,7 @@ function installSteps(os: WorkerOS, serverUrl: string): CommandStep[] {
     {
       title: 'Check connection',
       description: 'Check local status, then confirm the Worker is Online in this dashboard.',
-      command: windows ? 'mcp_worker status' : 'mcp_worker status',
+      command: os === 'linux' ? 'mcp_worker status && systemctl status worker_mcp.service --no-pager' : 'mcp_worker status',
     },
   ];
 }
@@ -216,7 +218,9 @@ function OperatingSystemTabs({
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   {os === 'windows'
                     ? 'Download and execute the reviewed installer in a temporary PowerShell directory, then refresh PATH.'
-                    : 'Download and run the signed-release installer in /tmp, clean temporary files, and configure PATH for this shell and future sessions.'}
+                    : os === 'linux'
+                      ? 'Install the signed-release Linux Worker as a boot-enabled systemd service (root or passwordless sudo required). Download in /tmp, clean up and persist PATH. Do not install on an untrusted VPS.'
+                      : 'Download and run the signed-release installer in /tmp, clean temporary files, and configure PATH for this shell and future sessions.'}
                   {' '}Your Worker binary and identity stay in persistent user directories, never in /tmp.
                 </p>
                 <CommandCopy command={quickInstallCommand(os)} label="Copy Quick Install" />
@@ -252,7 +256,7 @@ function OperatingSystemTabs({
                 <p className="text-xs font-medium">Log in and enroll</p>
                 <CommandCopy command={loginCommand(os, serverUrl)} />
                 <p className="text-xs font-medium">Check connection</p>
-                <CommandCopy command="mcp_worker status" />
+                <CommandCopy command={os === 'linux' ? 'mcp_worker status && systemctl status worker_mcp.service --no-pager' : 'mcp_worker status'} />
               </div>
             </div>
           )}

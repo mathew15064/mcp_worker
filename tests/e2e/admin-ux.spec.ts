@@ -298,6 +298,7 @@ test('Worker UI preserves signed release gate and one-time enrollment', async ({
   let quickCommand = await quickInstall.locator('code').innerText()
   expect(quickCommand).toContain('mktemp -d /tmp/mcp-worker-install.')
   expect(quickCommand).toContain('install-linux.sh')
+  expect(quickCommand).toContain('MCP_WORKER_WORKER_SYSTEMD=1 sh install-linux.sh')
   expect(quickCommand).toContain('trap')
   expect(quickCommand).toContain('export PATH=')
   expect(quickCommand).toContain('.bashrc')
@@ -325,9 +326,11 @@ test('Worker UI preserves signed release gate and one-time enrollment', async ({
   const downloadCommand = await steps.nth(0).locator('code').innerText()
   await steps.nth(0).getByRole('button', { name: 'Copy command' }).click()
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(downloadCommand)
+  await expect(steps.nth(2).locator('code')).toContainText('MCP_WORKER_WORKER_SYSTEMD=1')
   await expect(steps.nth(3).locator('code')).toContainText('export PATH=')
   await expect(steps.nth(4).locator('code')).toContainText('mcp_worker login --server')
   await expect(steps.nth(5).locator('code')).toContainText('mcp_worker status')
+  await expect(steps.nth(5).locator('code')).toContainText('systemctl status worker_mcp.service')
   const connect = guide.locator('[data-worker-connect]')
   await expect(connect.getByText('Connect Worker')).toBeVisible()
   await expect(connect.locator('code')).toHaveCount(2)
@@ -638,6 +641,7 @@ test('Linux Quick Install command is executable, idempotent and cleans temporary
     'cat > "$out" <<\'INSTALLER\'',
     '#!/bin/sh',
     'set -eu',
+    'test "${MCP_WORKER_WORKER_SYSTEMD:-}" = "1" || exit 12',
     'mkdir -p "$HOME/.local/bin"',
     'cat > "$HOME/.local/bin/mcp_worker" <<\'WORKER\'',
     '#!/bin/sh',

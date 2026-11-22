@@ -9,3 +9,7 @@ func platformStartManagedService() error {
 func platformRestartManagedService() error {
 	return fail("WORKER_SERVICE_UNSUPPORTED", "Managed service restart is not enabled for this build yet.")
 }
+
+func platformManageService(action string) error {
+	return fail("WORKER_SERVICE_UNSUPPORTED", "systemd-managed Worker services are supported on Linux only.")
+}

@@ -1114,14 +1114,16 @@ void test(
         publicKeyBase64: key.publicKeyBase64,
         publicKeySha256: key.fingerprint,
       });
-      async function install(version: string, commit: string) {
+      async function install(version: string, commit: string, managed = true) {
         const script = workerRoutes.installerScript(base, approval(version, commit), {
           binary: serviceBinary,
           unit: serviceUnit,
         });
         const filename = path.join(root, 'install.sh');
         fs.writeFileSync(filename, script);
-        return execute('sh', [filename], env, root);
+        return execute('sh', [filename], {
+          ...env, MCP_WORKER_WORKER_SYSTEMD: managed ? '1' : '0',
+        }, root);
       }
       function signedState(expected: Package, version: string, commit: string, isActive: boolean) {
         assert.deepEqual(fs.readFileSync(target), expected.binary, 'local verified runtime');
@@ -1145,11 +1147,21 @@ void test(
         assert.equal(fs.existsSync(path.join(mockState, 'active')), isActive);
         assert.equal(fs.readlinkSync(path.join(aliasBin, 'worker_mcp')), target);
       }
+      // Migrate a verified manual installation to the system service without
+      // deleting the signed runtime or generating a second Worker identity.
+      const manual = await install(VERSION_A, COMMIT_A, false);
+      assert.equal(manual.code, 0, 'fresh manual installation: ' + manual.output);
+      assert.equal(fs.existsSync(serviceUnit), false);
+      assert.equal(fs.existsSync(path.join(workerHome, 'service-mode')), false);
       const first = await install(VERSION_A, COMMIT_A);
-      assert.equal(first.code, 0, 'fresh managed installation: ' + first.output);
+      assert.equal(first.code, 0, 'manual-to-systemd migration: ' + first.output);
       signedState(packageA, VERSION_A, COMMIT_A, false);
       fs.writeFileSync(path.join(workerHome, 'state.json'), 'test-only-enrollment');
       const initialUnit = fs.readFileSync(serviceUnit);
+      assert.match(initialUnit.toString('utf8'), /ConditionPathExists=.*\/state\.json/);
+      assert.match(initialUnit.toString('utf8'), /Restart=on-failure/);
+      assert.match(initialUnit.toString('utf8'), /NoNewPrivileges=true/);
+      assert.match(initialUnit.toString('utf8'), /WantedBy=multi-user\.target/);
       const initialRecords = metadataPaths.map((name) =>
         fs.readFileSync(path.join(workerHome, name)),
       );
