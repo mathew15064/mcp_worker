@@ -118,3 +118,7 @@ auto-generated profile records and signed standalone Worker v2.0.0 enrollment
 response remain supported for existing clients; no SQLite data is deleted.
 A Worker ID stays stable across Worker name changes. The server-hosted public
 Worker installer release gate remains disabled until independently approved.
+
+### Linux Worker auto-start
+
+The Install Worker tab uses the signed Linux release's existing `MCP_WORKER_WORKER_SYSTEMD=1` switch so Linux Workers are managed by `worker_mcp.service`. It requires root or passwordless sudo, and refuses to switch silently to detached mode on hosts without systemd. The macOS and Windows commands are unchanged. The installed signed v2.0.0 runtime remains the release source; updating the server UI or Go source does **not** publish a new signed Worker release.

@@ -436,18 +436,22 @@ if [ "$OS" = linux ] && [ "$SERVICE" = 1 ]; then
 Description=mcp_worker System Task Daemon
 After=network-online.target
 Wants=network-online.target
+# Do not exhaust the start limit if the machine reboots before first enrollment.
+ConditionPathExists=$WORKER_HOME/state.json
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
-StartLimitInterval=60
-StartLimitBurst=5
 User=$RUN_USER
 Group=$RUN_GROUP
 Environment="HOME=$RUN_HOME"
 Environment="MCP_WORKER_WORKER_HOME=$WORKER_HOME"
 ExecStart=$SYSTEM_BIN run
-Restart=always
-RestartSec=3
+NoNewPrivileges=true
+# Do not restart a Worker that deliberately exited after authorization revocation.
+Restart=on-failure
+RestartSec=5
 TimeoutStopSec=10
 $MEMORY_DIRECTIVE=512M
 TasksMax=128

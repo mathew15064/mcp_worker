@@ -179,10 +179,23 @@ func parseArgs(args []string) (string, cliOptions, error) {
 		return "help", cliOptions{}, nil
 	}
 	command := args[0]
+	// The service subcommand is the only CLI command accepting a positional action.
+	// Keep every other command's strict argument validation unchanged.
+	serviceAction := ""
+	if command == "service" && len(args) > 1 && !strings.HasPrefix(args[1], "--") {
+		serviceAction = args[1]
+		args = append([]string{args[0]}, args[2:]...)
+	}
 	if strings.HasPrefix(command, "-") {
 		return "", nil, fail("CLI_COMMAND_UNKNOWN", fmt.Sprintf("Unknown command '%s'. Run worker_mcp help.", command))
 	}
+	if command == "service" && len(args) != 1 {
+		return "", nil, fail("CLI_ARGUMENT_INVALID", "Service requires one action: status, start, stop, restart or logs.")
+	}
 	options := cliOptions{}
+	if command == "service" {
+		options["action"] = serviceAction
+	}
 	flags := map[string]bool{"allow-shell": true, "no-start": true, "insecure-http": true}
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
@@ -696,6 +709,7 @@ Usage:
   worker_mcp status
   worker_mcp logs
   worker_mcp run
+  worker_mcp service <status|start|stop|restart|logs>
   worker_mcp uninstall
   worker_mcp version
 
@@ -2285,6 +2299,10 @@ func runForeground(detached bool) (runErr error) {
 		}
 		defer logFile.Close()
 		logger = logFile
+		// Journald can capture service logs while the existing rotating file stays usable.
+		if serviceManaged() {
+			logger = io.MultiWriter(logFile, os.Stderr)
+		}
 		defer func() {
 			if runErr != nil {
 				fmt.Fprintf(logger, "[WORKER] startup/runtime error: %v\n", runErr)
@@ -2352,6 +2370,8 @@ func main() {
 		}
 	case "status":
 		err = printStatus()
+	case "service":
+		err = platformManageService(options["action"])
 	case "logs":
 		fmt.Print(tailLog(64 * 1024))
 		return

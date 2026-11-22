@@ -38,7 +38,7 @@ Invoke-WebRequest https://github.com/mathew15064/mcp_worker/releases/download/v2
 .\install-windows.ps1
 ```
 
-The installers pin release version, source commit and RSA public key, and verify the signed nine-entry manifest and platform binary checksum before replacement. They expose `mcp_worker` as the standalone alias alongside compatible `worker_mcp`. Default install is user-mode without systemd.
+The installers pin release version, source commit and RSA public key, and verify the signed nine-entry manifest and platform binary checksum before replacement. They expose `mcp_worker` as the standalone alias alongside compatible `worker_mcp`. Linux Quick Install now requests the signer's existing systemd mode by default; manual Linux installation without `MCP_WORKER_WORKER_SYSTEMD=1` remains supported for environments without systemd.
 
 **Enroll:** In the existing MCP Server's Admin → Workers page generate a one-time enrollment token. Run `mcp_worker setup --server https://YOUR_TRUSTED_MCP_SERVER` and enter the token when prompted. Do not pass tokens in command arguments or logs. Check `mcp_worker status`, `mcp_worker logs`, and Admin Workers for authenticated WSS; `mcp_worker connection test` checks HTTPS health/readiness only.
 
@@ -59,8 +59,9 @@ Manual rollback using an unsigned `previous/SHA256SUMS` file is
 older signed release requires a separately reviewed release/pin change.
 A stale .install-lock after interruption requires manual inspection.
 
-Linux systemd is advanced opt-in:
-`MCP_WORKER_WORKER_SYSTEMD=1 sh install-linux.sh` (after downloading and reviewing the v2.0.0 GitHub installer).
+Linux Quick Install in the dashboard invokes the signed release with `MCP_WORKER_WORKER_SYSTEMD=1 sh install-linux.sh`. This installs `worker_mcp.service` as a **system** service: `systemctl enable` survives reboots, the signed v2.0.0 unit supervises process exits with `Restart=always`, and the Worker retains its existing enrollment/identity on reinstall. The installer requires root or `sudo -n` permission; it fails closed if systemd is unavailable. It does not silently fall back to a detached process. The service inherits the **installing account's** privileges: use a dedicated unprivileged Linux account, not root, and do not enable it on an untrusted/compromised host.
+
+To upgrade an already installed *manual* Worker, download and review the same signed installer and rerun it under **the same Linux account**, setting `MCP_WORKER_WORKER_SYSTEMD=1`. The installer must verify that the previous identity and unit belong to this installation; never force-remove identity files to bypass a safety guard. On the signed v2.0.0 binary, `worker_mcp start`, `restart`, `status`, and `logs` remain available, while explicitly stopping or uninstalling managed services is restricted. On the next signed Go release, `worker_mcp service <status|start|stop|restart|logs>` adds explicit lifecycle operations; `service install` is intentionally not exposed because only the signed installer can safely create the unit. Until that release is signed and native-tested, use `systemctl status|start|stop|restart worker_mcp.service` and `journalctl -u worker_mcp.service -f` for service management.
 For a managed upgrade, the installer saves the previous installed binary,
 root-owned unit, active/enabled status, local aliases, and signed release records
 before changing the service. It installs the verified replacement, reloads the
@@ -248,3 +249,5 @@ max_job_ms             local job timeout ceiling, max 300000
 ```
 
 The owner selected unrestricted OS-account access for newly enrolled Workers. No `--roots` or `--allow-shell` flags are required: paths are governed by OS permissions and local shell execution is enabled. To intentionally restrict a Worker, supply `--roots` at enrollment; `MCP_WORKER_WORKER_ALLOW_SHELL=false` disables local shell execution. Existing installed Workers retain their saved settings until explicitly changed: set `allowed_roots` to `[]` and `allow_shell` to `true` in the local `config.json`, then restart the Worker. Running as Administrator/root grants that account's authority, including the ability to modify sensitive OS files. This choice does **not** disable owner authentication, Worker capabilities, OAuth scopes, key verification, or revocation.
+
+**Next signed Worker release:** the source installer template now uses `ConditionPathExists=<worker-home>/state.json` (so boot before enrollment does not exhaust start limits) and `Restart=on-failure` (so deliberate authorization-revocation shutdowns are not retried). Those changes do **not** retroactively alter the already-published signed v2.0.0 installer. Do not publish unsigned Worker artifacts or bypass the signed distribution gate.
