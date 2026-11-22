@@ -108,7 +108,9 @@ class WorkerAuthService {
     const enrollment = await this.repository.consumeEnrollmentToken(token);
     if (enrollment?.owner_user_id) {
       let ownerStatus: string | null = null;
-      try { ownerStatus = await this.ownerStatusLookup(enrollment.owner_user_id); } catch {
+      try {
+        ownerStatus = await this.ownerStatusLookup(enrollment.owner_user_id);
+      } catch {
         throw workerError('WORKER_OWNER_UNAVAILABLE', 'Worker owner cannot be verified.', 503);
       }
       if (ownerStatus !== 'active')
@@ -153,7 +155,13 @@ class WorkerAuthService {
     if (this.seenNonces.has(replayKey))
       throw workerError('WORKER_AUTH_REPLAY', 'Worker authentication nonce was already used.', 401);
 
-    const worker = await this.repository.findWorkerById(workerId);
+    let worker;
+    try {
+      worker = await this.repository.findWorkerById(workerId);
+    } catch {
+      // Unavailable identity storage must deny the handshake without revoking a valid Worker.
+      throw workerError('WORKER_STATUS_UNAVAILABLE', 'Worker identity cannot be verified.', 503);
+    }
     if (!worker) throw workerError('WORKER_AUTH_INVALID', 'Unknown worker.', 401);
     if (!worker.enabled) throw workerError('WORKER_DISABLED', 'Worker identity is disabled.', 403);
 

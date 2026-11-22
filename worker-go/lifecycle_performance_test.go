@@ -194,22 +194,23 @@ func TestWorkerShutdownStopsWorkspaceAndManagedProcess(t *testing.T) {
 	}
 }
 
-func TestServerRevocationStopsManagedWorkloadsWithoutRetry(t *testing.T) {
+func TestServerAuthorityLossStopsWorkloadsWithCorrectRetryPolicy(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix process-group fixture; Windows requires native test")
 	}
 	for _, tc := range []struct {
-		name string
-		code int
-		text string
+		name  string
+		code  int
+		text  string
+		retry bool
 	}{
-		{"owner-disabled", 4003, "owner-disabled"},
-		{"worker-disabled", 4003, "worker-disabled"},
-		{"owner-db-unavailable", 4003, "owner-status-unavailable"},
-		{"worker-db-unavailable", 4003, "worker-status-unavailable"},
-		{"worker-capability-revoked", 4003, "worker-capability-revoked"},
-		{"worker-identity-changed", 4003, "worker-identity-changed"},
-		{"worker-removed", 4004, "worker-removed"},
+		{"owner-disabled", 4003, "owner-disabled", false},
+		{"worker-disabled", 4003, "worker-disabled", false},
+		{"owner-db-unavailable", 4003, "owner-status-unavailable", true},
+		{"worker-db-unavailable", 4003, "worker-status-unavailable", true},
+		{"worker-capability-revoked", 4003, "worker-capability-revoked", false},
+		{"worker-identity-changed", 4003, "worker-identity-changed", false},
+		{"worker-removed", 4004, "worker-removed", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("TMPDIR", t.TempDir())
@@ -229,11 +230,10 @@ func TestServerRevocationStopsManagedWorkloadsWithoutRetry(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !a.stopOnAuthoritativeClose(&websocket.CloseError{Code: tc.code, Text: tc.text}) {
-				t.Fatal("revocation must stop reconnect")
-			}
-			if !a.shutting.Load() {
-				t.Fatal("revocation must shut down the agent")
+			defer a.shutdown()
+			stopped := a.stopOnAuthoritativeClose(&websocket.CloseError{Code: tc.code, Text: tc.text})
+			if stopped == tc.retry || a.shutting.Load() == tc.retry {
+				t.Fatalf("incorrect retry policy: stopped=%v shutting=%v retry=%v", stopped, a.shutting.Load(), tc.retry)
 			}
 			select {
 			case <-record.done:
