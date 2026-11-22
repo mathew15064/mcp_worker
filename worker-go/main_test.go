@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -316,21 +317,127 @@ func TestLiveWebSocketOwnerRevocationStopsWorkAndDisconnects(t *testing.T) {
 	}
 }
 
+func TestTemporaryAuthorityCloseAllowsNewAuthenticatedConnection(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MCP_WORKER_WORKER_HOME", filepath.Join(root, "worker-home"))
+	t.Setenv("TMPDIR", t.TempDir())
+	privatePEM, publicPEM, err := generateIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var connections atomic.Int32
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, upgradeErr := upgrader.Upgrade(w, r, nil)
+		if upgradeErr != nil {
+			return
+		}
+		defer conn.Close()
+		reason := "worker-status-unavailable"
+		if connections.Add(1) == 2 {
+			reason = "worker-disabled"
+		}
+		_ = conn.WriteControl(websocket.CloseMessage,
+			websocket.FormatCloseMessage(4003, reason), time.Now().Add(time.Second))
+	}))
+	defer server.Close()
+	cfg := Config{ServerURL: server.URL, WorkerName: "Retry Worker", ProfileName: "Retry",
+		AllowedRoots: []string{root}, AllowShell: true, AllowInsecureHTTP: true, MaxJobMS: defaultMaxJobMS}
+	state := State{PrivateKey: privatePEM, PublicKey: publicPEM,
+		WorkerID: "11111111-2222-4333-8444-555555555555", Name: "Retry Worker", ServerURL: server.URL}
+	if err := writeJSONAtomic(configPath(), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSONAtomic(statePath(), &state); err != nil {
+		t.Fatal(err)
+	}
+	agent, err := newAgent()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agent.shutdown()
+	stopped, err := agent.connectOnce()
+	if err != nil || stopped || agent.shutting.Load() {
+		t.Fatalf("temporary authority loss must permit retry, stopped=%v err=%v", stopped, err)
+	}
+	stopped, err = agent.connectOnce()
+	if err != nil || !stopped || !agent.shutting.Load() {
+		t.Fatalf("explicit disable must terminate retry, stopped=%v err=%v", stopped, err)
+	}
+	if connections.Load() != 2 {
+		t.Fatalf("expected two independent WSS connections, got %d", connections.Load())
+	}
+}
+
+func TestAuthorityOutageClosesShellAndAllowsFreshSession(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PTY lifecycle fixture; Windows requires native runtime acceptance")
+	}
+	root := t.TempDir()
+	agent := &Agent{cfg: Config{AllowShell: true}, roots: []string{root},
+		maxJob: 5 * time.Second, processes: map[string]*managedProcess{},
+		commands: map[int]*exec.Cmd{}, shells: map[string]*shellSession{}}
+	defer agent.shutdown()
+	original, err := agent.getOrCreateShell("retry-shell", 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.stopWorkloadsForAuthorityLoss()
+	if !original.closed || len(agent.shells) != 0 || agent.shutting.Load() {
+		t.Fatal("authority outage must close old PTY without stopping the Worker")
+	}
+	reopened, err := agent.getOrCreateShell("retry-shell", 80, 24)
+	if err != nil || reopened == original {
+		t.Fatalf("reconnecting must allow a fresh PTY; error=%v", err)
+	}
+}
+
+func TestWorkerAuthorityCloseSeparatesTemporaryFailuresFromRevocation(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		code   int
+		reason string
+		stop   bool
+	}{
+		{"worker-status-unavailable", 4003, "worker-status-unavailable", false},
+		{"owner-status-unavailable", 4003, "owner-status-unavailable", false},
+		{"disabled-worker", 4003, "worker-disabled", true},
+		{"disabled-owner", 4003, "owner-disabled", true},
+		{"capability-revoked", 4003, "worker-capability-revoked", true},
+		{"identity-changed", 4003, "worker-identity-changed", true},
+		{"removed-worker", 4004, "worker-removed", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var log strings.Builder
+			agent := &Agent{logger: &log}
+			got := agent.stopOnAuthoritativeClose(&websocket.CloseError{Code: tc.code, Text: tc.reason})
+			if got != tc.stop || agent.shutting.Load() != tc.stop {
+				t.Fatalf("close %d %q: stopped=%v shutting=%v, expected %v", tc.code, tc.reason, got, agent.shutting.Load(), tc.stop)
+			}
+			if !strings.Contains(log.String(), tc.reason) {
+				t.Fatalf("missing diagnostic close reason %q in %q", tc.reason, log.String())
+			}
+		})
+	}
+}
+
 func TestHandshakeAuthRejectionStopsPreviouslyManagedWorkloads(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix managed-process fixture; Windows needs native runtime QA")
 	}
 	for _, tc := range []struct {
-		name    string
-		status  int
-		payload string
-		stop    bool
+		name          string
+		status        int
+		payload       string
+		stop          bool
+		stopWorkloads bool
 	}{
-		{"disabled-owner", 403, `{"code":"WORKER_OWNER_DISABLED"}`, true},
-		{"invalid-identity", 401, `{"code":"WORKER_AUTH_INVALID"}`, true},
-		{"owner-status-unavailable", 503, `{"code":"WORKER_OWNER_UNAVAILABLE"}`, true},
-		{"transient-service-error", 503, `{"code":"SERVICE_UNAVAILABLE"}`, false},
-		{"transient-upstream-error", 502, `{"code":"BAD_GATEWAY"}`, false},
+		{"disabled-owner", 403, `{"code":"WORKER_OWNER_DISABLED"}`, true, true},
+		{"invalid-identity", 401, `{"code":"WORKER_AUTH_INVALID"}`, true, true},
+		{"owner-status-unavailable", 503, `{"code":"WORKER_OWNER_UNAVAILABLE"}`, false, true},
+		{"worker-status-unavailable", 503, `{"code":"WORKER_STATUS_UNAVAILABLE"}`, false, true},
+		{"transient-service-error", 503, `{"code":"SERVICE_UNAVAILABLE"}`, false, false},
+		{"transient-upstream-error", 502, `{"code":"BAD_GATEWAY"}`, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -397,8 +504,13 @@ func TestHandshakeAuthRejectionStopsPreviouslyManagedWorkloads(t *testing.T) {
 				}
 				select {
 				case <-record.done:
-					t.Fatal("transient failure unexpectedly stopped managed process")
-				default:
+					if !tc.stopWorkloads {
+						t.Fatal("network failure unexpectedly stopped managed process")
+					}
+				case <-time.After(2 * time.Second):
+					if tc.stopWorkloads {
+						t.Fatal("authority storage failure left managed process running")
+					}
 				}
 			}
 		})

@@ -2039,22 +2039,28 @@ func (a *Agent) handleStreamClose(socket *safeSocket, message map[string]any) {
 	_ = socket.sendJSON(map[string]any{"type": "stream_closed", "stream_id": streamID, "reason": "detached"})
 }
 
-// A server-authoritative revocation must stop workloads, not only reconnect.
-// Transient network failures and normal closes keep the existing retry path.
+// Authorization uncertainty fails closed for running workloads but may recover.
+// Explicit revocation still requires a full stop and a new enrollment/approval.
 func (a *Agent) stopOnAuthoritativeClose(err error) bool {
 	var closeErr *websocket.CloseError
 	if !errors.As(err, &closeErr) {
 		return false
 	}
+	temporary := closeErr.Code == 4003 && (closeErr.Text == "owner-status-unavailable" ||
+		closeErr.Text == "worker-status-unavailable")
+	if temporary {
+		fmt.Fprintf(a.logOutput(), "[WORKER] server cannot verify Worker authority (code=%d reason=%q); stopping workloads, retrying authentication.\n", closeErr.Code, closeErr.Text)
+		a.stopWorkloadsForAuthorityLoss()
+		return false
+	}
 	removed := closeErr.Code == 4004 && closeErr.Text == "worker-removed"
 	disabled := closeErr.Code == 4003 && (closeErr.Text == "owner-disabled" ||
-		closeErr.Text == "worker-disabled" || closeErr.Text == "owner-status-unavailable" ||
-		closeErr.Text == "worker-status-unavailable" ||
-		closeErr.Text == "worker-capability-revoked" || closeErr.Text == "worker-identity-changed")
+		closeErr.Text == "worker-disabled" || closeErr.Text == "worker-capability-revoked" ||
+		closeErr.Text == "worker-identity-changed")
 	if !removed && !disabled {
 		return false
 	}
-	fmt.Fprintln(a.logOutput(), "[WORKER] server revoked Worker authority; stopping workloads.")
+	fmt.Fprintf(a.logOutput(), "[WORKER] server revoked Worker authority (code=%d reason=%q); stopping workloads.\n", closeErr.Code, closeErr.Text)
 	a.shutdown()
 	return true
 }
@@ -2072,13 +2078,17 @@ func (a *Agent) stopOnHandshakeRejection(resp *http.Response) bool {
 		_ = json.NewDecoder(io.LimitReader(resp.Body, 1024)).Decode(&response)
 		_ = resp.Body.Close()
 	}
-	rejected := resp.StatusCode == http.StatusUnauthorized ||
-		resp.StatusCode == http.StatusForbidden ||
-		(resp.StatusCode == http.StatusServiceUnavailable && response.Code == "WORKER_OWNER_UNAVAILABLE")
-	if !rejected {
+	// HTTP 503 never grants execution; retry after temporary authority storage failure.
+	if resp.StatusCode == http.StatusServiceUnavailable &&
+		(response.Code == "WORKER_OWNER_UNAVAILABLE" || response.Code == "WORKER_STATUS_UNAVAILABLE") {
+		fmt.Fprintf(a.logOutput(), "[WORKER] Worker authority unavailable (HTTP %d code=%q); stopping workloads, retrying authentication.\n", resp.StatusCode, response.Code)
+		a.stopWorkloadsForAuthorityLoss()
 		return false
 	}
-	fmt.Fprintf(a.logOutput(), "[WORKER] server rejected Worker authorization (HTTP %d); stopping workloads.\n", resp.StatusCode)
+	if resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
+		return false
+	}
+	fmt.Fprintf(a.logOutput(), "[WORKER] server rejected Worker authorization (HTTP %d code=%q); stopping workloads.\n", resp.StatusCode, response.Code)
 	a.shutdown()
 	return true
 }
@@ -2205,11 +2215,8 @@ func (a *Agent) run() error {
 	}
 	return nil
 }
-func (a *Agent) shutdown() {
-	if a.shutting.Swap(true) {
-		return
-	}
-	// Shutdown must include one-shot jobs, not only persistent process records.
+func (a *Agent) stopWorkloadsForAuthorityLoss() {
+	// On an unverifiable session, do not leave managed processes or PTYs running.
 	a.stopWorkerOwnedWorkloads()
 	a.shellMu.Lock()
 	shells := make([]*shellSession, 0, len(a.shells))
@@ -2221,10 +2228,17 @@ func (a *Agent) shutdown() {
 		session.mu.Lock()
 		if !session.closed {
 			_ = platformTerminateWorkload(session.cmd, false)
-			_ = session.terminal.Close()
 		}
 		session.mu.Unlock()
+		session.finish(a, "worker-authority-unavailable")
 	}
+}
+
+func (a *Agent) shutdown() {
+	if a.shutting.Swap(true) {
+		return
+	}
+	a.stopWorkloadsForAuthorityLoss()
 	a.activeMu.Lock()
 	ws := a.active
 	a.activeMu.Unlock()

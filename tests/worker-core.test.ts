@@ -181,6 +181,44 @@ void test('worker enrollment normalizes capabilities and signed handshake reject
   );
 });
 
+void test('Worker identity storage outage fails closed with a retryable 503, not an auth revocation', async () => {
+  let unavailable = true;
+  const service = new WorkerAuthService({
+    repository: {
+      findWorkerById: () =>
+        unavailable
+          ? Promise.reject(new Error('fixture database unavailable'))
+          : Promise.resolve(null),
+    } as never,
+    now: () => 1_800_000_000_000,
+  });
+  const headers = {
+    'x-br-worker-id': 'fixture-worker',
+    'x-br-worker-timestamp': '1800000000000',
+    'x-br-worker-nonce': 'nonce_storage_error_0123456',
+    'x-br-worker-signature': Buffer.alloc(64).toString('base64'),
+  };
+  await assert.rejects(
+    service.authenticateConnect(headers),
+    (error: unknown) =>
+      error instanceof Error &&
+      'code' in error &&
+      error.code === 'WORKER_STATUS_UNAVAILABLE' &&
+      'status' in error &&
+      error.status === 503,
+  );
+  unavailable = false;
+  await assert.rejects(
+    service.authenticateConnect(headers),
+    (error: unknown) =>
+      error instanceof Error &&
+      'code' in error &&
+      error.code === 'WORKER_AUTH_INVALID' &&
+      'status' in error &&
+      error.status === 401,
+  );
+});
+
 void test('signed Worker handshake rejects disabled or missing owner after signature validation', async () => {
   const pair = crypto.generateKeyPairSync('ed25519');
   const workerId = 'owned-worker-fixture';

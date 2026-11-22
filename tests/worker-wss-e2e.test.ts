@@ -84,8 +84,10 @@ void test('loopback WSS signs identity, rejects forgery, enforces capacity, and 
     enabled: true,
   };
   let heartbeatCount = 0;
+  let storageUnavailable = false;
   const repository = {
     findWorkerById(id: string) {
+      if (storageUnavailable) return Promise.reject(new Error('fixture identity storage outage'));
       return Promise.resolve(id === workerId ? record : null);
     },
     updateWorkerPresence(id: string, status: string) {
@@ -152,6 +154,35 @@ void test('loopback WSS signs identity, rejects forgery, enforces capacity, and 
     bad.on('open', () => reject(new Error('Forged signature accepted')));
   });
   assert.equal(denied, 401);
+
+  // A live WSS upgrade must report storage outages as retryable 503, not permanent 401.
+  storageUnavailable = true;
+  const unavailable = new WebSocket(url, { ca: tls.cert, headers: signedHeaders() });
+  sockets.push(unavailable);
+  const storageFailure = await new Promise<{ status: number; code: string }>((resolve, reject) => {
+    unavailable.on('unexpected-response', (_request, response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk: string) => {
+        body += chunk;
+      });
+      response.on('end', () => {
+        try {
+          resolve({
+            status: response.statusCode || 0,
+            code: (JSON.parse(body) as { code: string }).code,
+          });
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
+      response.on('error', reject);
+    });
+    unavailable.on('error', reject);
+    unavailable.on('open', () => reject(new Error('Storage outage allowed WSS handshake')));
+  });
+  storageUnavailable = false;
+  assert.deepEqual(storageFailure, { status: 503, code: 'WORKER_STATUS_UNAVAILABLE' });
 
   let autoReply = true;
   const jobs: string[] = [];
