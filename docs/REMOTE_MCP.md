@@ -1,4 +1,8 @@
-# Remote MCP and ChatGPT connector
+# Connect an MCP-compatible AI chat or agent client remotely
+
+mcp_worker is model-agnostic: it can be used from **any client that implements the required remote MCP transport and OAuth 2.0 authorization-code / PKCE flow**. ChatGPT is one example, not a required runtime or an exclusive integration. Other chat apps, agents and IDE clients need to be checked individually for remote MCP/OAuth support; a generic chat interface without MCP support cannot connect directly.
+
+**The chat client handles conversation; mcp_worker handles authorized tool routing; the lightweight Go Worker runs on your machine.** You do not need to install Codex CLI, Claude Code or another AI coding-agent runtime on the Worker host. The Worker itself is still required. For installation, see [Quick Setup](QUICKSTART.md) and [Go Worker](../worker/README.md).
 
 The default standalone endpoint is loopback HTTP; a cloud connector cannot
 reach it. Do not forward the standalone HTTP port or expose the SQLite database volume. Remote
@@ -86,7 +90,9 @@ rate limits, OAuth consent and CSRF protection intact.
 In an MCP-capable client that supports OAuth authorization code with PKCE,
 configure the HTTPS /mcp resource URL. For ChatGPT, use the custom MCP
 connector/app configuration available in your account/workspace; availability
-and interface labels may differ. Obtain the exact OAuth callback URI from
+and interface labels may differ. For other AI clients, use that client's
+remote MCP connector/settings and verify its documented OAuth support rather
+than assuming every client or account supports this connection. Obtain the exact OAuth callback URI from
 that client configuration. Create an OAuth client in Admin (global) or
 the owning user's workspace; register that exact URI, not a guessed
 callback and not the local quickstart callback. Give the client the ID and
