@@ -1,195 +1,273 @@
 # mcp_worker
 
-**A self-hosted MCP server that lets an authorized AI client use tools on your own machines through outbound Go Workers.** The server manages users, OAuth, Worker connections and audit records; the Worker performs approved file, Git, command and process operations.
+### Your AI. Your machines. Your rules.
 
-> **Status:** Signed standalone Worker [v2.0.0](https://github.com/mathew15064/mcp_worker/releases/tag/v2.0.0) is publicly available from source commit `165d41aa0ba0479e3b54cc5f9d6b31bb43a9f26e`. Its GitHub release is **separate** from the Docker MCP Server on `main`. Windows/macOS installers passed simulated QA but not complete native OS acceptance.
+**Connect an MCP-compatible AI assistant to your computers, servers, and development environments — without installing a coding agent on every machine.**
+
+mcp_worker is a self-hosted **Model Context Protocol (MCP)** gateway with a lightweight, outbound-connecting Go Worker. It turns authorized AI conversations into controlled actions on machines you own: inspect files, review Git changes, run permitted commands, check tests, and manage processes.
+
+**Bring your preferred AI client. Keep the execution infrastructure under your control.**
+
+[![MCP](https://img.shields.io/badge/Protocol-MCP-6366f1)](https://modelcontextprotocol.io/) [![Self-hosted](https://img.shields.io/badge/Deployment-Self--hosted-0f766e)](#get-started) [![Go Worker](https://img.shields.io/badge/Worker-Go-00ADD8)](#step-2-install-a-worker-on-a-machine) [![MIT](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
+
+> **AI-client compatibility:** mcp_worker is *model-agnostic*, not *universally plug-and-play*. It can connect to chat or agent applications that support a **remote MCP server** and a compatible **OAuth 2.0 authorization-code / PKCE** flow. ChatGPT is one example; other clients can work when they implement the necessary protocol and authentication features. Availability, connector setup, tool approval, and OAuth support differ by product and plan. A chat app without compatible MCP support cannot connect directly.
+
+---
+
+## Why mcp_worker?
+
+You shouldn't have to install a separate coding assistant on every VPS just to ask your AI to inspect a deployment.
+
+**Traditional approach:** connect to each machine, set up a coding-agent runtime, manage its credentials, and repeat for every host.
+
+**mcp_worker approach:** host **one MCP gateway**, install a **small Go Worker** on each trusted machine, and use compatible AI clients to call tools through centrally managed permissions.
+
+| | mcp_worker |
+| --- | --- |
+| **AI experience** | Use an MCP-capable chat/agent client you already prefer |
+| **Target-machine footprint** | Standalone Go Worker; no Codex CLI, Claude Code, Node.js, Python, or Docker required on the target |
+| **Connectivity** | Worker makes an **outbound authenticated WebSocket (WSS)** connection; no inbound SSH service required by mcp_worker |
+| **Access control** | Admin and user identities, Worker ownership, OAuth scopes, client authorization and revocation |
+| **Visibility** | Admin dashboard, Worker presence, MCP request audit and tool activity |
+| **Hosting** | Your own Docker MCP Server and persistent SQLite database |
+| **Operations** | Files, repositories, commands, test/check execution and managed processes |
+
+**This is a remote tool gateway, not another AI model or a replacement for your chat interface.** The AI client handles conversation and reasoning; mcp_worker brokers authorized tool requests; your Worker performs the action.
 
 ## How it works
 
 ```mermaid
-flowchart TD
-    A["ChatGPT / MCP client"] -->|"OAuth 2.0 + PKCE"| B["mcp_worker server"]
-    D["Admin browser"] -->|"Admin sign-in"| B
-    B <--> C[("Persistent SQLite volume")]
-    W["Go Worker on your machine"] -->|"Outbound authenticated WSS"| B
-    W --> E["Allowed workspace / local tools"]
+flowchart LR
+    AI["Your AI chat / agent\n(compatible MCP client)"] -->|"Remote MCP over HTTPS\nOAuth 2.0 + PKCE"| HUB["mcp_worker Server\nAdmin · users · policies · audit"]
+    ADMIN["Administrator / User\nWeb dashboard"] -->|"Login + permissions"| HUB
+    HUB <--> DB[("Persistent SQLite")]
+    W1["Go Worker\nVPS / Linux"] -->|"Outbound authenticated WSS"| HUB
+    W2["Go Worker\nWindows / macOS"] -->|"Outbound authenticated WSS"| HUB
+    W1 --> F1["Files · Git · commands · processes"]
+    W2 --> F2["Files · Git · commands · processes"]
 ```
 
-- **One server, one SQLite volume:** no MySQL, Redis, external database or inbound SSH.
-- **Outbound Workers:** the Worker initiates the authenticated WSS connection; the server does not connect via SSH or store SSH passwords.
-- **15 MCP tools:** runtime info, Worker discovery, workspace commands, files, Git review, checks and managed processes.
-- **Hosted gateway v3:** `terminal_list` returns immutable Worker IDs; MCP tools accept
-  `worker: "<UUID>"` directly. Existing `profile` tool arguments remain supported
-  during migration, including aliases created by the signed standalone Worker v2.0.0.
-  The Admin/User UI no longer requires creating Execution Profiles. Sessions for new
-  Worker-ID calls use stable Worker IDs; historical alias sessions are preserved.
-- **Security boundaries:** OAuth scopes, Worker identity, owner access controls and audit records. A Worker executes with its **operating-system user's permissions**; allowed workspace paths do not sandbox arbitrary shell commands.
+1. You deploy a reachable **HTTPS MCP Server**.
+2. You install and enroll a **Go Worker** on a trusted computer or VPS.
+3. You register an OAuth client with the correct callback URI and scopes, then connect your MCP-capable AI client.
+4. The AI sees the tools made available to its authorized identity. You select a Worker by its ID and approve tool use in your client as applicable.
+5. The server checks authorization, forwards the operation to the connected Worker, and records activity.
 
-## Install standalone Worker v2.0.0
+The Worker runs with the permissions of its **OS account**. It is not a security sandbox: filesystem roots constrain path-based tools but do **not** constrain every possible shell command. Use a dedicated, least-privileged account and don't connect an untrusted machine.
 
-**Worker is not MCP Server.** The Worker runs on a machine that will execute tasks and initiates an outbound authenticated WebSocket connection to an existing MCP Server. A prebuilt Worker needs no Node.js, npm, Python, Go, or Docker on the target. Installers come from the [official signed GitHub Release](https://github.com/mathew15064/mcp_worker/releases/tag/v2.0.0); Linux/macOS require `curl` and `openssl`, Windows requires PowerShell and OpenSSL in PATH.
+## What can you ask your AI to do?
 
-**Linux amd64 (Debian/Ubuntu/VPS):** Open **Workers → Install Worker → Linux** and use **Copy Quick Install**. The Linux command opts into the official release's `systemd` system service, enabling boot start and automatic process restart (root or passwordless sudo required; no silent fallback on hosts without systemd). The service runs with the installing OS account's permissions; use a dedicated non-root account on trusted hosts. It downloads and runs the official signed-release installer from an isolated directory in `/tmp`, removes temporary files, exports `~/.local/bin` into the current Bash shell and adds the PATH line to `~/.bashrc` once. The **Advanced** section provides separate download, review, install and PATH commands if you prefer to inspect the script first.
+- **"Check my VPS."** Inspect an online Worker and run a targeted health command.
+- **"Review this repository."** Inspect the Git state and changes without copying the whole working tree into the conversation.
+- **"Find the configuration issue."** Read permitted files and search source code.
+- **"Run the verification."** Trigger checks and inspect outputs.
+- **"Restart the managed process."** Use process-management tools where configured and authorized.
+- **"Compare my environments."** Discover multiple Workers and select the intended host explicitly.
 
-The installer stores the runtime **persistently** at `~/.local/share/worker_mcp`, the CLI in `~/.local/bin`, and the identity in `~/.worker_mcp`. Only the **download and execution workspace** uses `/tmp`; do not put the identity or live runtime there. The quick command checks `mcp_worker version` automatically. Run it in your existing shell (not as a subprocess with `sh -c`) to retain the current-session PATH change. Use a least-privileged OS account where practical.
+These examples describe *available tool workflows*, not autonomous execution guarantees. Actual behavior depends on the AI client's capabilities, user approval, Worker access rights, and the permissions of the account running it.
 
-Enroll using a **one-time token** created in **My Workers → Install Worker** for your approved account, or **Admin → Workers** for administrator-owned Workers. Personal and Hosted Workers are account-owned and cannot be selected by other users. The CLI prompts for the token without echoing it; do not put tokens in commands, URLs or chats. This enrollment does **not** unlock server-hosted binary distribution (`/worker/install*` remains HTTP 503); use only the reviewed, signed GitHub Release.
+## Features
 
-```sh
-mcp_worker setup --server https://YOUR_TRUSTED_MCP_SERVER
+**One gateway, many machines.** Connect multiple Workers and target immutable Worker UUIDs. The server exposes 15 MCP tools for discovery, execution, file operations, Git, code search, checks, and process management.
+
+**BYO AI client.** The integration boundary is MCP + OAuth rather than a vendor-specific coding-agent protocol. No Codex CLI or Claude Code runtime is required on the managed host. A compatible AI client is still required on the chat side.
+
+**Security you can actually operate.** Use scoped OAuth access (`mcp_worker.read`, `mcp_worker.terminal`), user/Worker ownership, expiring and revocable credentials, one-time Worker enrollment, and audit records. Admin is privileged; user-owned Workers are not automatically available to others.
+
+**No inbound SSH dependency.** The Go Worker initiates its own WSS connection and authenticates with an identity key. The gateway doesn't require SSH passwords or an inbound Worker SSH port.
+
+**A real web control plane.** Manage users, OAuth clients, Workers, server settings and activity from a browser. Optional **Cloudflare Turnstile** protects login/registration forms after successful configuration; it is disabled by default.
+
+**Small infrastructure footprint.** One Docker server, one persistent SQLite volume, separately installed Go Workers. No Redis or MySQL required.
+
+## Get started
+
+There are **two separate installations**: the **MCP Server** (central gateway) and a **Go Worker** (one per machine you want to operate).
+
+### Step 1 — Deploy the MCP Server
+
+**Recommended: Quick Setup on a fresh Debian/Ubuntu VPS.**
+
+Requirements: Docker Engine, internet access, root privileges for automatic HTTPS, and an available public HTTP-01 port **80**. HTTPS **443** (or your selected alternate port) must be reachable by clients. Review scripts before running them.
+
+```bash
+mkdir mcp_worker && cd mcp_worker
+curl -fsSLO https://raw.githubusercontent.com/mathew15064/mcp_worker/main/quick-setup.sh
+# Inspect quick-setup.sh before executing it.
+sh quick-setup.sh --init
+```
+
+Quick Setup uses the published Docker Hub image, creates a private `.env.setup` and persistent SQLite storage, and provisions HTTPS with Nginx and Certbot when supported. No local source checkout or Node.js/Go build tools are needed. If an external HTTPS proxy is already in place, configure it explicitly:
+
+```bash
+MCP_WORKER_PUBLIC_URL=https://mcp.example.com \
+  MCP_WORKER_TLS_MODE=external sh quick-setup.sh --init
+```
+
+An HTTPS URL with a trusted certificate is needed for **remote AI clients and Worker enrollment**. Verify the deployment:
+
+```bash
+curl -fsS https://YOUR_MCP_HOST/readyz
+```
+
+Open `https://YOUR_MCP_HOST/admin`, sign in with your setup credentials (kept in `.env.setup`), and configure users and Workers.
+
+**Already have a deployment?** Keep its original `.env.setup` and SQLite volume. Do **not** rerun `--init` with a new directory, delete the volume, or regenerate credentials to bypass an existing-installation check. See [Quick Setup details](docs/QUICKSTART.md) and [backup/restore](docs/BACKUP_RESTORE.md).
+
+### Step 2 — Install a Worker on a machine
+
+**Worker is not Server.** Install the Worker on each machine you intend to access. The [signed standalone Worker v2.0.0 release](https://github.com/mathew15064/mcp_worker/releases/tag/v2.0.0) is separate from the server's Docker release.
+
+For **Linux amd64 (including Debian/Ubuntu VPS)**, open **Admin → Workers → Install Worker → Linux** (or the account-owned **My Workers** view) and copy the **Quick Install** command shown by your server. The installer verifies the signed release, uses an isolated temporary download directory, and keeps the executable and identity in persistent user directories.
+
+The Linux Quick Install uses the signed installer's `systemd` mode by default: it enables a `worker_mcp.service` to start at boot and restart on process exit. It requires root or passwordless sudo and a systemd host; it does not silently fall back to manual execution. Prefer a dedicated, non-root service account and verify its actual privileges.
+
+Prefer to review the published installer yourself? The release offers `install-linux.sh`, plus [macOS](https://github.com/mathew15064/mcp_worker/releases/download/v2.0.0/install-macos.sh) and [Windows](https://github.com/mathew15064/mcp_worker/releases/download/v2.0.0/install-windows.ps1) scripts. For a **manual Linux install**:
+
+```bash
+curl -fsSLo install-linux.sh \
+  https://github.com/mathew15064/mcp_worker/releases/download/v2.0.0/install-linux.sh
+# Inspect install-linux.sh before running it.
+sh install-linux.sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+The **manual** command above does not enable `systemd`. To install the managed service, use the current Linux Quick Install from your server or follow the [documented signed-service procedure](worker/README.md).
+
+For **macOS** (review before execution):
+
+```bash
+curl -fsSLo install-macos.sh \
+  https://github.com/mathew15064/mcp_worker/releases/download/v2.0.0/install-macos.sh
+sh install-macos.sh
+```
+
+For **Windows PowerShell** (review before execution; OpenSSL must be available):
+
+```powershell
+Invoke-WebRequest https://github.com/mathew15064/mcp_worker/releases/download/v2.0.0/install-windows.ps1 -OutFile install-windows.ps1
+.\install-windows.ps1
+```
+
+Windows/macOS installer lifecycle testing is not yet complete on native hosts. Detailed platform requirements, signature verification, upgrade and service instructions are in [Go Worker lifecycle](worker/README.md).
+
+### Step 3 — Enroll the Worker
+
+1. In **Admin → Workers**, generate a **one-time enrollment token** for an Admin-owned Worker; approved users can use their own **My Workers** flow.
+2. On the target machine, run:
+
+```bash
+mcp_worker setup --server https://YOUR_MCP_HOST
 mcp_worker status
 mcp_worker connection test
 mcp_worker logs
 ```
 
-`connection test` checks HTTPS health/readiness only; use `status` and Admin → Workers to verify authenticated WSS. A Worker executes with its OS user's permissions, so prefer a separate least-privileged account instead of root. For upgrades rerun the reviewed installer under the same account without deleting `~/.worker_mcp`.
+Enter the enrollment token at the interactive prompt; **never paste it into a public command, URL, chat, issue or log**. `connection test` checks server HTTPS readiness, while `status`, the dashboard and Worker presence confirm actual authenticated WSS connectivity.
 
-**macOS:** Download and review [install-macos.sh](https://github.com/mathew15064/mcp_worker/releases/download/v2.0.0/install-macos.sh), then run `sh install-macos.sh`. **Windows:** Download and review [install-windows.ps1](https://github.com/mathew15064/mcp_worker/releases/download/v2.0.0/install-windows.ps1), then run it in PowerShell. Windows/macOS native lifecycle testing is incomplete (28 simulated cases passed). See [Worker documentation](worker/README.md).
+Linux systemd users can also inspect:
 
-## Quick Setup — image first, no source checkout
-
-Requires a Debian/Ubuntu Linux VPS, Docker Engine and root permission for
-**automatic HTTPS**. Quick Setup installs Nginx (if needed), isolated Certbot
-5.4, a trusted IP/hostname certificate and a renewal timer. It never replaces
-an existing Nginx virtual host; use `MCP_WORKER_TLS_MODE=external` if an
-operator already manages TLS or runs another reverse proxy.
-The server image is precompiled on Docker Hub: no host Git, Go, Node.js,
-npm or Compose build is needed. Port **80** must be publicly reachable for
-Let's Encrypt HTTP-01, and HTTPS **443** or the chosen alternative TLS port
-must be open to clients.
-
-```sh
-mkdir mcp_worker && cd mcp_worker
-curl -fsSLO https://raw.githubusercontent.com/mathew15064/mcp_worker/main/quick-setup.sh
-# Review the downloaded script before running it; it controls your local Docker daemon.
-sh quick-setup.sh --init
+```bash
+systemctl is-enabled worker_mcp.service
+systemctl status worker_mcp.service
+journalctl -u worker_mcp.service -f
 ```
 
-**Quick Setup installs the Docker MCP Server, not the standalone Worker.** If it reports `Existing data/container but .env.setup is missing`, Docker already has a server container or persistent SQLite volume but the current directory lacks the original `.env.setup`. Run from the original setup directory or restore the existing credentials. Do not delete Docker volumes or regenerate secrets merely to bypass the guard.
+A verified and enrolled Worker preserves its local identity across compatible upgrades; do not delete `~/.worker_mcp` to troubleshoot a connection problem.
 
-The script pulls `mathew15604/mcp-worker:dev-main` and creates a private
-`.env.setup` (mode 0600) and fresh persistent SQLite volume. With no hostname
-configured, it chooses an HTTPS origin based on the detected public IPv4
-address (port 443 when free; port 3443 if a local listener already owns 443,
-or the port explicitly selected via `MCP_WORKER_HTTPS_PORT`). With a hostname, specify
-`MCP_WORKER_PUBLIC_URL=https://mcp.example.com`. For NAT, explicitly set
-`MCP_WORKER_PUBLIC_IP`. The public origin is saved and **does not change
-automatically** on restart.
+### Step 4 — Connect your preferred AI client
 
-**Automatic HTTPS (default):** After choosing the public IP or configured
-hostname, Quick Setup downloads a second, SHA-256-pinned helper over HTTPS,
-configures an exact Nginx virtual host, proves ACME control via staging,
-obtains a production certificate, and enables a four-hour renewal timer.
-The Docker backend binds only `127.0.0.1:3333`; the completed setup verifies
-`https://YOUR_IP_OR_HOST/readyz` with certificate checking enabled. IP
-certificates are short-lived (~160 hours). If DNS, firewall, certificate or
-Nginx validation fails, the setup refuses to report success or fall back to
-HTTP. Other Nginx sites are not replaced.
+Use an AI chat/agent app with **remote MCP** and compatible **OAuth 2.0 + PKCE** support:
 
-If TLS is already handled elsewhere, choose external mode explicitly:
+1. Create an OAuth client from **Admin → OAuth Clients**, or from the account owner's client workspace.
+2. Use the **exact redirect/callback URI supplied by your AI client**; do not guess it or copy one from another platform.
+3. Set the remote MCP endpoint to:
 
-```sh
-MCP_WORKER_PUBLIC_URL=https://mcp.example.com \
-  MCP_WORKER_TLS_MODE=external sh quick-setup.sh --init
-```
+   ```text
+   https://YOUR_MCP_HOST/mcp
+   ```
 
-In external mode, the operator must independently configure and verify the
-trusted certificate, reverse proxy, and renewals. Do not enroll a Worker
-until external HTTPS is working. See [remote HTTPS guide](docs/REMOTE_MCP.md).
+4. Give the client its ID and one-time secret using the client's **private connector configuration**, never in the chat transcript.
+5. Authorize as the intended owner. Start with `mcp_worker.read` and add `mcp_worker.terminal` only when remote command execution is actually needed.
+6. Refresh the client's tools and try `runtime_info` followed by `terminal_list`. Select the appropriate Worker UUID for a harmless, read-only operation before permitting writes or shell commands.
 
-For an **existing HTTP Quick Setup installation** with a working trusted HTTPS
-reverse proxy, run a deliberate, recoverable cutover from its original setup
-directory:
+**Examples of possible integrations:** ChatGPT or other MCP-capable assistants, desktop clients, IDEs, and agent front ends **when their specific version and account support remote MCP and this OAuth flow**. We do not claim every branded AI chat currently provides that support or has been integration-tested.
 
-```sh
-MCP_WORKER_PUBLIC_URL=https://YOUR_IP:3443 sh quick-setup.sh --https
-```
+See the detailed [Remote MCP & OAuth guide](docs/REMOTE_MCP.md).
 
-This auto-provisions TLS if the target is not yet reachable (or uses
-`MCP_WORKER_TLS_MODE=external` to leave proxy management to the owner),
-then validates public TLS, makes a consistent SQLite backup, updates the
-saved URL and database, and recreates only the container with loopback
-backend, secure cookies and a trusted proxy hop. Do **not** use `--init` on an
-existing SQLite volume; it refuses to reinitialize an orphaned volume.
+## MCP tools (15)
 
-```sh
-sh quick-setup.sh --down    # stop; keep credentials and database
-sh quick-setup.sh --start   # restart same image and volume
-```
+| Category | Tools | What they do |
+| --- | --- | --- |
+| Discovery | `runtime_info`, `terminal_list` | Server identity, registered Workers and connection state |
+| Execution | `workspace_exec`, `artifact_collect` | Authorized commands and collected artifacts |
+| Files | `file_read`, `file_write`, `file_patch` | Read, replace and patch files |
+| Repositories | `repo_snapshot`, `git_diff`, `code_search` | Inspect source, changes and code |
+| Checks | `check_run` | Run configured checks/tests |
+| Processes | `process_start`, `process_status`, `process_logs`, `process_stop` | Start, inspect and stop managed tasks |
 
-Legacy HTTP installations retain their previous binding until an explicit
-HTTPS cutover. `--rebind` is only for legacy HTTP and cannot expose a
-secured backend. You can pin an immutable image with
-`MCP_WORKER_IMAGE=docker.io/mathew15604/mcp-worker@sha256:...` on fresh setup.
-Changing the server URL does not publish Worker binaries. Server-hosted `/worker/install*` and `/worker/dist/*` endpoints still return HTTP 503 by design; the independently signed Worker v2.0.0 is distributed on GitHub Releases.
+Tools accept `worker: "<UUID>"` for explicit Worker selection. Legacy `profile` arguments remain supported for compatible older workflows.
 
-## Source Setup — developer workflow
+## Permissions and security model
 
-```sh
-git clone https://github.com/mathew15064/mcp_worker.git
-cd mcp_worker
-./setup.sh --init
-```
+Remote execution is powerful. mcp_worker provides **authorization and auditing**, **not an unconditional guarantee that an AI-generated command is safe**.
 
-This mode also publishes port 3333 on `0.0.0.0`; the same firewall and HTTPS
-considerations apply.
-
-This mode checks for a **matching local build** using its embedded Git revision
-and source-tree SHA. When both match (including the locally cached Docker Hub image), it skips the build. Otherwise Docker builds
-from the checked-out source. Use `MCP_WORKER_FORCE_BUILD=1 ./setup.sh` to force a
-rebuild. `./setup.sh --down` preserves the source-mode SQLite volume
-(`mcp_worker_app-data`) and `.env.setup`.
-
-Both install modes require a **fresh SQLite volume**. Quick and Source modes use
-**different** volume names to prevent concurrent writers. See the
-[setup guide](docs/QUICKSTART.md) and [backup/restore](docs/BACKUP_RESTORE.md).
-
-## Docker Hub images
-
-Development builds and historical release candidates are listed on [Docker Hub — mathew15604/mcp-worker](https://hub.docker.com/r/mathew15604/mcp-worker/tags). **Check the image tag and its Git revision before use**; a public image is not automatically a production-stable release.
-
-You can pull a chosen tag with:
-
-```sh
-docker pull mathew15604/mcp-worker:<tag>
-```
-
-A pull only downloads an image. Use **Quick Setup** for a no-clone install (Docker runs the image and generates credentials); use **Source Setup** when working on code. The historical `2.0.0-rc.2` tag is not this SQLite-only baseline.
-
-## What can I test today?
-
-| Feature | Local development status |
+| Layer | Control |
 | --- | --- |
-| Docker fresh install + persistent SQLite | Verified |
-| Admin login, Users, OAuth 2.0 / PKCE | Verified |
-| MCP registry (15 tools) | Verified |
-| Go Worker WSS, authorization and execution | Verified in isolated integration tests |
-| Browser/Admin UI | Verified with Chromium |
-| Public signed standalone Worker installers/binaries | **GitHub Release v2.0.0 available** |
-| Native Windows/macOS installer acceptance | Simulated QA passed; native lifecycle not fully tested |
+| AI → MCP Server | OAuth authorization-code flow with PKCE; client permissions and revocable tokens |
+| Users → resources | Admin/user ownership separation; account and Worker access checks |
+| Worker → Server | Outbound WSS, signed Worker identity challenge, short-lived one-time enrollment |
+| Tool invocation | OAuth scope checks and Worker ownership/selection restrictions |
+| Visibility | Tool activity and MCP request audit; Admin monitoring |
+| Host OS | Actual Unix/Windows account permissions, filesystem ACLs and any separate sandbox you configure |
 
-**Important:** The MCP Server-hosted `/worker/install*` and `/worker/dist/*` endpoints deliberately remain HTTP 503. This does **not** mean the separate GitHub Release v2.0.0 is unavailable. Always verify signed installer artifacts; do not bypass signature checks.
+**Recommended baseline:** use HTTPS; keep Admin credentials and encryption keys private; give each Worker a least-privileged OS account; grant terminal scope only where needed; avoid connecting compromised hosts; review audit logs and revoke lost credentials promptly.
 
-## Available MCP tools
+Allowed workspace paths are **not** a complete sandbox for arbitrary shell commands. Workers running as root/Administrator inherit that authority. Do not expose Admin access to untrusted users.
 
-The server exposes exactly **15** authenticated tools:
+Read the complete [Security Model](docs/SECURITY_MODEL.md) and [Security Reporting Policy](SECURITY.md).
 
-| Purpose | Tools |
+## Configuration and operations
+
+- **Admin dashboard:** Users, OAuth Clients, Workers, activity/audit and server settings.
+- **Cloudflare Turnstile:** Optional CAPTCHA protection for Login/Registration via **Settings → Turnstile**. Enter Site Key and encrypted Secret Key, complete **Test configuration**, then enable. Monitoring shows aggregate verification results; it does not store CAPTCHA tokens.
+- **Database:** Persistent SQLite with a private application encryption key. Preserve the original encryption key and credentials with backups.
+- **Server restart:** From the original Quick Setup directory, use `sh quick-setup.sh --down` and `sh quick-setup.sh --start`; these preserve database and credentials.
+- **Source development:** Clone the repository and run `./setup.sh --init` for a **fresh** source-mode instance only. This is separate from Quick Setup and uses different Docker volumes.
+
+> **Signed distribution note:** Go Worker v2.0.0 is available as a separate [signed GitHub Release](https://github.com/mathew15064/mcp_worker/releases/tag/v2.0.0). MCP Server-hosted binary distribution endpoints `/worker/install*` and `/worker/dist/*` remain intentionally disabled (**HTTP 503**). Do not bypass signature verification or treat an arbitrary Docker tag as a signed Worker release.
+
+## Project status
+
+| Component | Status |
 | --- | --- |
-| Runtime and Worker discovery | `runtime_info`, `terminal_list` |
-| Commands and artifacts | `workspace_exec`, `artifact_collect` |
-| Files | `file_read`, `file_write`, `file_patch` |
-| Source inspection | `repo_snapshot`, `git_diff`, `code_search` |
-| Tests | `check_run` |
-| Managed processes | `process_start`, `process_status`, `process_logs`, `process_stop` |
+| Self-hosted Docker MCP Server, SQLite, Admin, OAuth | Available; tested in the project |
+| 15 MCP tools and outbound Go Worker | Available; Linux and integration coverage |
+| Linux signed standalone Worker v2.0.0 | Published |
+| Linux Quick Install systemd mode | Available through the signed installer |
+| macOS / Windows installers | Published; simulated QA, native lifecycle acceptance incomplete |
+| Cloudflare Turnstile Admin configuration | Available; disabled until configured and tested |
+| Third-party AI-client compatibility | Standards-based; validate each client's remote MCP/OAuth capabilities |
 
-Current OAuth scopes are `mcp_worker.read` and `mcp_worker.terminal`; new runtime settings use `MCP_WORKER_*`. The Go executable remains `worker_mcp`; the signed standalone installer also exposes the `mcp_worker` CLI alias. Retired SSH commands are not installed.
+**Contributions welcome:** integrations, documentation, portability tests, security reviews and developer-experience improvements.
 
-## Documentation and contributions
+## Documentation
 
-- [Local setup](docs/QUICKSTART.md) · [Remote HTTPS / OAuth / ChatGPT](docs/REMOTE_MCP.md) · [Admin / development](docs/ADMIN_REFERENCE.md)
-- [Go Worker lifecycle](worker/README.md) · [Security model](docs/SECURITY_MODEL.md) · [Troubleshooting](docs/TROUBLESHOOTING.md)
-- [Release checklist](docs/RELEASE_CHECKLIST.md) · [Release engineering](docs/RELEASE_ENGINEERING.md) · [Dependencies and notices](docs/THIRD_PARTY_DEPENDENCIES.md)
-- [Contributing](CONTRIBUTING.md) · [Security reporting](SECURITY.md) · [Changelog](CHANGELOG.md)
+| Guide | Content |
+| --- | --- |
+| [Quickstart](docs/QUICKSTART.md) | Deploy the gateway, HTTPS and local development |
+| [Remote MCP connection](docs/REMOTE_MCP.md) | HTTPS, OAuth, remote MCP clients |
+| [Go Worker](worker/README.md) | Install, enroll, systemd, upgrades and signed releases |
+| [Admin reference](docs/ADMIN_REFERENCE.md) | Settings, users and hosted behavior |
+| [Security model](docs/SECURITY_MODEL.md) | Trust boundaries, scope and OS permissions |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | Common failures |
+| [Backup & restore](docs/BACKUP_RESTORE.md) | Protect SQLite data and encryption keys |
+| [Release engineering](docs/RELEASE_ENGINEERING.md) | Build/sign/release policy |
+| [Contributing](CONTRIBUTING.md) | Contribute and review changes |
+| [Changelog](CHANGELOG.md) | Changes over time |
 
-**License:** [MIT](LICENSE). Third-party dependencies retain their own licenses.
+**License:** [MIT](LICENSE) · [Third-party dependencies and notices](docs/THIRD_PARTY_DEPENDENCIES.md).
+
+---
+
+**mcp_worker — one gateway to your machines, whichever compatible AI you choose.**
